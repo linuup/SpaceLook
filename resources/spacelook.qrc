@@ -1,0 +1,48 @@
+<RCC>
+    <qresource prefix="/icons">
+    <file>icon.png</file>
+    </qresource>
+    <qresource prefix="/SPACELOOK">
+    <file alias="font/SegoeFluentIcons.ttf">Segoe Fluent Icons.ttf</file>
+    <file alias="icon/chevron-down.svg">chevron-down.svg</file>
+    <file alias="icon/close.svg">close.svg</file>
+    <file alias="icon/pushpin.svg">pushpin.svg</file>
+    <file alias="icon/voice.svg">voice.svg</file>
+    <file alias="icon/mute.svg">mute.svg</file>
+    <file alias="file-icon/apk.svg">file-icon/apk.svg</file>
+    <file alias="file-icon/apk_1.svg">file-icon/apk_1.svg</file>
+    <file alias="file-icon/code.svg">file-icon/code.svg</file>
+    <file alias="file-icon/css.svg">file-icon/css.svg</file>
+    <file alias="file-icon/exe.svg">file-icon/exe.svg</file>
+    <file alias="file-icon/file.svg">file-icon/file.svg</file>
+    <file alias="file-icon/folder.svg">file-icon/folder.svg</file>
+    <file alias="file-icon/image-gif.svg">file-icon/image-gif.svg</file>
+    <file alias="file-icon/image-jpeg.svg">file-icon/image-jpeg.svg</file>
+    <file alias="file-icon/image-pic.svg">file-icon/image-pic.svg</file>
+    <file alias="file-icon/image-PNG.svg">file-icon/image-PNG.svg</file>
+    <file alias="file-icon/image.svg">file-icon/image.svg</file>
+    <file alias="file-icon/ipa.svg">file-icon/ipa.svg</file>
+    <file alias="file-icon/ipa_1.svg">file-icon/ipa_1.svg</file>
+    <file alias="file-icon/js.svg">file-icon/js.svg</file>
+    <file alias="file-icon/mp3.svg">file-icon/mp3.svg</file>
+    <file alias="file-icon/mp4.svg">file-icon/mp4.svg</file>
+    <file alias="file-icon/music.svg">file-icon/music.svg</file>
+    <file alias="file-icon/office-doc.svg">file-icon/office-doc.svg</file>
+    <file alias="file-icon/office-els.svg">file-icon/office-els.svg</file>
+    <file alias="file-icon/office-NUMBERS.svg">file-icon/office-NUMBERS.svg</file>
+    <file alias="file-icon/office-pdf.svg">file-icon/office-pdf.svg</file>
+    <file alias="file-icon/office-ppt.svg">file-icon/office-ppt.svg</file>
+    <file alias="file-icon/office-txt.svg">file-icon/office-txt.svg</file>
+    <file alias="file-icon/pdf.svg">file-icon/pdf.svg</file>
+    <file alias="file-icon/ppt.svg">file-icon/ppt.svg</file>
+    <file alias="file-icon/rar.svg">file-icon/rar.svg</file>
+    <file alias="file-icon/rar_1.svg">file-icon/rar_1.svg</file>
+    <file alias="file-icon/txt.svg">file-icon/txt.svg</file>
+    <file alias="file-icon/UNTITLED.svg">file-icon/UNTITLED.svg</file>
+    <file alias="file-icon/video.svg">file-icon/video.svg</file>
+    <file alias="file-icon/video_1.svg">file-icon/video_1.svg</file>
+    <file alias="file-icon/zip.svg">file-icon/zip.svg</file>
+        <file alias="viewers/SettingsPage.qml">../viewers/SettingsPage.qml</file>
+        <!-- <file alias="viewers/QuickPageViewer.qml">../viewers/QuickPageViewer.qml</file> -->
+    </qresource>
+</RCC>

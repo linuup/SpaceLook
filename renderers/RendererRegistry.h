@@ -1,0 +1,22 @@
+#pragma once
+
+#include <QList>
+#include <memory>
+#include <vector>
+
+#include "renderers/IPreviewRenderer.h"
+
+class PreviewState;
+
+class RendererRegistry
+{
+public:
+    explicit RendererRegistry(PreviewState* previewState);
+    ~RendererRegistry();
+
+    QList<IPreviewRenderer*> renderers() const;
+    IPreviewRenderer* rendererFor(const HoveredItemInfo& info) const;
+
+private:
+    std::vector<std::unique_ptr<IPreviewRenderer>> m_renderers;
+};

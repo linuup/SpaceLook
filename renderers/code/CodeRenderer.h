@@ -1,0 +1,62 @@
+#pragma once
+
+#include <memory>
+
+#include <QtGlobal>
+#include <QWidget>
+
+#include "core/hovered_item_info.h"
+#include "renderers/IPreviewRenderer.h"
+
+namespace KSyntaxHighlighting
+{
+class Repository;
+class SyntaxHighlighter;
+}
+
+class QLabel;
+class OpenWithButton;
+class QPlainTextEdit;
+class QStackedWidget;
+class SelectableTitleLabel;
+class QWidget;
+
+class CodeRenderer : public QWidget, public IPreviewRenderer
+{
+    Q_OBJECT
+
+public:
+    explicit CodeRenderer(QWidget* parent = nullptr);
+    ~CodeRenderer() override;
+
+    QString rendererId() const override;
+    bool canHandle(const HoveredItemInfo& info) const override;
+    QWidget* widget() override;
+    void load(const HoveredItemInfo& info) override;
+    void unload() override;
+
+private:
+    void applyChrome();
+    void showStatusMessage(const QString& message);
+    void ensureRepository();
+    void applyDefinitionForPath(const QString& filePath);
+
+    HoveredItemInfo m_info;
+    quint64 m_loadRequestId = 0;
+    QWidget* m_headerRow = nullptr;
+    QLabel* m_iconLabel = nullptr;
+    SelectableTitleLabel* m_titleLabel = nullptr;
+    QLabel* m_metaLabel = nullptr;
+    QWidget* m_pathRow = nullptr;
+    QLabel* m_pathTitleLabel = nullptr;
+    QLabel* m_pathValueLabel = nullptr;
+    OpenWithButton* m_openWithButton = nullptr;
+    QLabel* m_statusLabel = nullptr;
+    QStackedWidget* m_contentStack = nullptr;
+    QWidget* m_loadingCard = nullptr;
+    QLabel* m_loadingTitleLabel = nullptr;
+    QLabel* m_loadingMessageLabel = nullptr;
+    QPlainTextEdit* m_textEdit = nullptr;
+    std::unique_ptr<KSyntaxHighlighting::Repository> m_repository;
+    KSyntaxHighlighting::SyntaxHighlighter* m_highlighter = nullptr;
+};

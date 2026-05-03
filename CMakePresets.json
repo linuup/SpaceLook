@@ -1,0 +1,41 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 31,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "vs2022-x64",
+      "displayName": "Visual Studio 2022 x64",
+      "description": "Configure SpaceLook for 64-bit Windows builds.",
+      "generator": "Visual Studio 17 2022",
+      "binaryDir": "${sourceDir}/build",
+      "architecture": "x64",
+      "cacheVariables": {
+        "CMAKE_PREFIX_PATH": "F:/Qt/5.15.2/msvc2019_64/lib/cmake"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "vs2022-x64-debug",
+      "displayName": "Build SpaceLook Debug",
+      "configurePreset": "vs2022-x64",
+      "configuration": "Debug",
+      "targets": [
+        "SpaceLook"
+      ]
+    },
+    {
+      "name": "vs2022-x64-release",
+      "displayName": "Build SpaceLook Release",
+      "configurePreset": "vs2022-x64",
+      "configuration": "Release",
+      "targets": [
+        "SpaceLook"
+      ]
+    }
+  ]
+}
