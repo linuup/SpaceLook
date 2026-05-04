@@ -4,13 +4,13 @@
 #include "settings/spacelook_ui_settings.h"
 #include "renderers/OpenWithButton.h"
 #include "renderers/PreviewHost.h"
+#include "widgets/PreviewCapsuleMenu.h"
 
 #include <QClipboard>
 #include <QCursor>
 #include <QDesktopServices>
 #include <QDir>
 #include <QDebug>
-#include <QGraphicsDropShadowEffect>
 #include <QHBoxLayout>
 #include <QGuiApplication>
 #include <QFileInfo>
@@ -316,8 +316,11 @@ LRESULT CALLBACK SPACELOOKKeyboardProc(int code, WPARAM wParam, LPARAM lParam)
 SpaceLookWindow::SpaceLookWindow(PreviewState* previewState, QWidget* parent)
     : QWidget(parent)
     , m_previewState(previewState)
-    , m_surface(new QWidget(this))
-    , m_previewHost(new PreviewHost(previewState, this))
+    , m_container(new QWidget(this))
+    , m_menuRegion(new QWidget(m_container))
+    , m_surface(new QWidget(m_container))
+    , m_previewHost(new PreviewHost(previewState, m_surface))
+    , m_menuBar(new PreviewCapsuleMenu(m_menuRegion))
 {
     setWindowTitle(QStringLiteral("Space Look"));
     setWindowFlags(Qt::Window | Qt::FramelessWindowHint);
@@ -326,23 +329,33 @@ SpaceLookWindow::SpaceLookWindow(PreviewState* previewState, QWidget* parent)
     setMinimumSize(820, 560);
     setMouseTracking(true);
 
-    auto* layout = new QHBoxLayout(this);
+    auto* layout = new QVBoxLayout(this);
     layout->setContentsMargins(20, 20, 20, 20);
-    layout->addWidget(m_surface);
+    layout->setSpacing(0);
+    layout->addWidget(m_container, 1);
 
+    m_container->setObjectName(QStringLiteral("SpaceLookContainer"));
+    m_container->setAttribute(Qt::WA_StyledBackground, true);
+    m_menuRegion->setObjectName(QStringLiteral("SpaceLookMenuRegion"));
+    m_menuRegion->setAttribute(Qt::WA_StyledBackground, true);
+    m_menuRegion->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Minimum);
     m_surface->setObjectName(QStringLiteral("SpaceLookSurface"));
+
+    auto* containerLayout = new QVBoxLayout(m_container);
+    containerLayout->setContentsMargins(0, 0, 0, 0);
+    containerLayout->setSpacing(0);
+    containerLayout->addWidget(m_menuRegion);
+    containerLayout->addWidget(m_surface, 1);
+
+    auto* menuLayout = new QVBoxLayout(m_menuRegion);
+    menuLayout->setContentsMargins(14, 8, 14, 8);
+    menuLayout->setSpacing(0);
+    menuLayout->addWidget(m_menuBar, 0, Qt::AlignHCenter | Qt::AlignTop);
 
     auto* surfaceLayout = new QVBoxLayout(m_surface);
     surfaceLayout->setContentsMargins(1, 1, 1, 1);
     surfaceLayout->setSpacing(0);
     surfaceLayout->addWidget(m_previewHost, 1);
-
-    auto* shadowEffect = new QGraphicsDropShadowEffect(this);
-    shadowEffect->setBlurRadius(36.0);
-    shadowEffect->setOffset(0.0, 18.0);
-    shadowEffect->setColor(QColor(18, 32, 52, 70));
-    m_surface->setGraphicsEffect(shadowEffect);
-
     applyWindowChromeStyle();
     applyTaskbarVisibility();
     applyPerformanceMode();
@@ -370,6 +383,9 @@ void SpaceLookWindow::showPreview(const HoveredItemInfo& info)
 {
     if (m_previewHost) {
         m_previewHost->showPreview(info);
+    }
+    if (m_menuBar) {
+        m_menuBar->syncToWindowState();
     }
     if (m_expandedPreview && supportsExpandedPreview(info)) {
         applyExpandedPreviewSize(info);
@@ -518,6 +534,9 @@ void SpaceLookWindow::toggleExpandedPreview()
     } else {
         applyPreferredSizeForPreview(info);
     }
+    if (m_menuBar) {
+        m_menuBar->syncToWindowState();
+    }
 }
 
 bool SpaceLookWindow::isExpandedPreview() const
@@ -646,11 +665,15 @@ void SpaceLookWindow::mousePressEvent(QMouseEvent* event)
         return;
     }
 
-    if (m_surface->geometry().contains(event->pos())) {
-        m_draggingWindow = true;
-        m_dragOffset = event->globalPos() - frameGeometry().topLeft();
-        event->accept();
-        return;
+    if (m_menuRegion && m_menuRegion->geometry().contains(event->pos())) {
+        const QPoint menuLocalPos = event->pos() - m_menuRegion->geometry().topLeft();
+        const bool hitMenuBlankArea = !m_menuBar || !m_menuBar->geometry().contains(menuLocalPos);
+        if (hitMenuBlankArea) {
+            m_draggingWindow = true;
+            m_dragOffset = event->globalPos() - frameGeometry().topLeft();
+            event->accept();
+            return;
+        }
     }
 
     QWidget::mousePressEvent(event);
@@ -806,13 +829,26 @@ void SpaceLookWindow::applyWindowChromeStyle()
         "SpaceLookWindow {"
         "  background: transparent;"
         "}"
+        "#SpaceLookContainer {"
+        "  background: rgba(252, 253, 255, 250);"
+        "  border: 1px solid rgba(203, 215, 228, 245);"
+        "  border-radius: 22px;"
+        "}"
+        "#SpaceLookMenuRegion {"
+        "  background: rgba(248, 251, 255, 252);"
+        "  border: none;"
+        "  border-top-left-radius: 22px;"
+        "  border-top-right-radius: 22px;"
+        "  border-bottom-left-radius: 0px;"
+        "  border-bottom-right-radius: 0px;"
+        "}"
         "#SpaceLookSurface {"
-        "  background: qlineargradient(x1:0, y1:0, x2:1, y2:1,"
-        "      stop:0 rgba(243, 247, 252, 250),"
-        "      stop:0.55 rgba(235, 241, 248, 248),"
-        "      stop:1 rgba(226, 233, 242, 246));"
-        "  border: 1px solid rgba(155, 171, 190, 170);"
-        "  border-radius: 0px;"
+        "  background: rgba(244, 248, 252, 252);"
+        "  border: none;"
+        "  border-top-left-radius: 0px;"
+        "  border-top-right-radius: 0px;"
+        "  border-bottom-left-radius: 22px;"
+        "  border-bottom-right-radius: 22px;"
         "}"
     ));
 }
@@ -838,18 +874,8 @@ void SpaceLookWindow::applyTaskbarVisibility()
 
 void SpaceLookWindow::applyPerformanceMode()
 {
-    if (QGraphicsDropShadowEffect* shadowEffect = qobject_cast<QGraphicsDropShadowEffect*>(m_surface->graphicsEffect())) {
-        if (SpaceLookUiSettings::instance().performanceMode()) {
-            shadowEffect->setBlurRadius(18.0);
-            shadowEffect->setOffset(0.0, 8.0);
-            shadowEffect->setColor(QColor(18, 32, 52, 36));
-            return;
-        }
-
-        shadowEffect->setBlurRadius(36.0);
-        shadowEffect->setOffset(0.0, 18.0);
-        shadowEffect->setColor(QColor(18, 32, 52, 70));
-    }
+    Q_UNUSED(this);
+    Q_UNUSED(SpaceLookUiSettings::instance());
 }
 
 void SpaceLookWindow::ensureTrayIcon()

@@ -1,0 +1,568 @@
+可以，下面我直接按“可落地实现”的方式写一版。
+
+**目标**
+在现有 [`SpaceLookWindow`](D:/Desktop/SpaceLook/widgets/SpaceLookWindow.h) 和 [`PreviewHost`](D:/Desktop/SpaceLook/renderers/PreviewHost.h) 基础上，同时保留两套预览后端：
+
+1. QWidget 预览后端
+2. QML 预览后端
+
+由 [`SpaceLookUiSettings::performanceMode`](D:/Desktop/SpaceLook/settings/spacelook_ui_settings.h) 决定当前启用哪一套。
+
+---
+
+**一、整体架构**
+
+建议改成四层：
+
+1. 窗口层  
+[`SpaceLookWindow`](D:/Desktop/SpaceLook/widgets/SpaceLookWindow.h)  
+职责是窗口、拖拽、缩放、托盘、置顶、全局快捷键。
+
+2. 预览宿主层  
+[`PreviewHost`](D:/Desktop/SpaceLook/renderers/PreviewHost.h)  
+职责是选择当前使用 QWidget 还是 QML 方案。
+
+3. 预览后端层  
+`WidgetPreviewHost`  
+`QmlPreviewHost`  
+职责是各自管理自己的预览实现。
+
+4. 数据和动作桥接层  
+[`PreviewState`](D:/Desktop/SpaceLook/core/preview_state.h)  
+`PreviewActionBridge`  
+`PreviewContentBridge`  
+职责是给 QWidget 和 QML 提供统一数据与动作。
+
+---
+
+**二、建议新增文件**
+
+建议新增这些文件：
+
+1. [`renderers/WidgetPreviewHost.h`](D:/Desktop/SpaceLook/renderers/WidgetPreviewHost.h)
+2. [`renderers/WidgetPreviewHost.cpp`](D:/Desktop/SpaceLook/renderers/WidgetPreviewHost.cpp)
+3. [`renderers/QmlPreviewHost.h`](D:/Desktop/SpaceLook/renderers/QmlPreviewHost.h)
+4. [`renderers/QmlPreviewHost.cpp`](D:/Desktop/SpaceLook/renderers/QmlPreviewHost.cpp)
+5. [`renderers/QmlPreviewRegistry.h`](D:/Desktop/SpaceLook/renderers/QmlPreviewRegistry.h)
+6. [`renderers/QmlPreviewRegistry.cpp`](D:/Desktop/SpaceLook/renderers/QmlPreviewRegistry.cpp)
+7. [`renderers/PreviewActionBridge.h`](D:/Desktop/SpaceLook/renderers/PreviewActionBridge.h)
+8. [`renderers/PreviewActionBridge.cpp`](D:/Desktop/SpaceLook/renderers/PreviewActionBridge.cpp)
+9. [`renderers/PreviewContentBridge.h`](D:/Desktop/SpaceLook/renderers/PreviewContentBridge.h)
+10. [`renderers/PreviewContentBridge.cpp`](D:/Desktop/SpaceLook/renderers/PreviewContentBridge.cpp)
+
+QML 文件建议新增：
+
+1. [`viewers/preview/PreviewPage.qml`](D:/Desktop/SpaceLook/viewers/preview/PreviewPage.qml)
+2. [`viewers/preview/common/PreviewMenuBar.qml`](D:/Desktop/SpaceLook/viewers/preview/common/PreviewMenuBar.qml)
+3. [`viewers/preview/common/PreviewContentFrame.qml`](D:/Desktop/SpaceLook/viewers/preview/common/PreviewContentFrame.qml)
+4. [`viewers/preview/content/SummaryPreview.qml`](D:/Desktop/SpaceLook/viewers/preview/content/SummaryPreview.qml)
+5. [`viewers/preview/content/TextPreview.qml`](D:/Desktop/SpaceLook/viewers/preview/content/TextPreview.qml)
+6. [`viewers/preview/content/CodePreview.qml`](D:/Desktop/SpaceLook/viewers/preview/content/CodePreview.qml)
+7. [`viewers/preview/content/ImagePreview.qml`](D:/Desktop/SpaceLook/viewers/preview/content/ImagePreview.qml)
+8. [`viewers/preview/content/MediaPreview.qml`](D:/Desktop/SpaceLook/viewers/preview/content/MediaPreview.qml)
+9. [`viewers/preview/content/PdfPreview.qml`](D:/Desktop/SpaceLook/viewers/preview/content/PdfPreview.qml)
+10. [`viewers/preview/content/DocumentPreview.qml`](D:/Desktop/SpaceLook/viewers/preview/content/DocumentPreview.qml)
+
+---
+
+**三、现有文件怎么调整**
+
+1. [`PreviewHost.h`](D:/Desktop/SpaceLook/renderers/PreviewHost.h)  
+从“直接持有 `RendererRegistry` 和 `QStackedWidget`”改成“持有两个宿主”。
+
+建议成员改成：
+
+```cpp
+class WidgetPreviewHost;
+class QmlPreviewHost;
+
+class PreviewHost : public QWidget
+{
+    Q_OBJECT
+public:
+    explicit PreviewHost(PreviewState* previewState, QWidget* parent = nullptr);
+    ~PreviewHost() override;
+
+    void showPreview(const HoveredItemInfo& info);
+    void stopPreview();
+    QWidget* activeRendererWidget() const;
+
+private:
+    void applyBackendVisibility();
+
+    PreviewState* m_previewState = nullptr;
+    WidgetPreviewHost* m_widgetHost = nullptr;
+    QmlPreviewHost* m_qmlHost = nullptr;
+};
+```
+
+2. [`PreviewHost.cpp`](D:/Desktop/SpaceLook/renderers/PreviewHost.cpp)  
+职责变成：
+
+- 创建 `m_widgetHost`
+- 创建 `m_qmlHost`
+- 监听 `SpaceLookUiSettings::performanceModeChanged`
+- 根据设置切换显示哪个宿主
+- `showPreview(info)` 时把同一个 `info` 转发给当前宿主
+
+3. 现在的 QWidget 逻辑从 [`PreviewHost.cpp`](D:/Desktop/SpaceLook/renderers/PreviewHost.cpp) 抽出去，放进 `WidgetPreviewHost`
+
+4. [`SpaceLookWindow`](D:/Desktop/SpaceLook/widgets/SpaceLookWindow.h) 基本不需要大改  
+只要继续把预览请求交给 `PreviewHost`
+
+---
+
+**四、WidgetPreviewHost 设计**
+
+`WidgetPreviewHost` 基本上就是当前 `PreviewHost` 的旧实现。
+
+职责：
+
+1. 持有 `RendererRegistry`
+2. 持有 `QStackedWidget`
+3. 根据 `typeKey` 选中 QWidget renderer
+4. 调用 `load()` 和 `unload()`
+
+接口建议：
+
+```cpp
+class WidgetPreviewHost : public QWidget
+{
+    Q_OBJECT
+public:
+    explicit WidgetPreviewHost(PreviewState* previewState, QWidget* parent = nullptr);
+    ~WidgetPreviewHost() override;
+
+    void showPreview(const HoveredItemInfo& info);
+    void stopPreview();
+    QWidget* activeRendererWidget() const;
+
+private:
+    QStackedWidget* m_stack = nullptr;
+    PreviewState* m_previewState = nullptr;
+    RendererRegistry* m_registry = nullptr;
+    IPreviewRenderer* m_activeRenderer = nullptr;
+};
+```
+
+这样现有 QWidget 预览可以原样保留。
+
+---
+
+**五、QmlPreviewHost 设计**
+
+`QmlPreviewHost` 用 `QQuickWidget` 承载整个 QML 预览页面。
+
+职责：
+
+1. 创建 `QQuickWidget`
+2. 给 QML 注入 `previewState`
+3. 给 QML 注入 `previewActions`
+4. 给 QML 注入 `previewContent`
+5. 根据 `typeKey` 选择内容页
+
+接口建议：
+
+```cpp
+class QQuickWidget;
+class PreviewActionBridge;
+class PreviewContentBridge;
+
+class QmlPreviewHost : public QWidget
+{
+    Q_OBJECT
+public:
+    explicit QmlPreviewHost(PreviewState* previewState, QWidget* parent = nullptr);
+    ~QmlPreviewHost() override;
+
+    void showPreview(const HoveredItemInfo& info);
+    void stopPreview();
+
+private:
+    void ensureRootLoaded();
+    void updateContentSource(const HoveredItemInfo& info);
+
+    PreviewState* m_previewState = nullptr;
+    QQuickWidget* m_quickWidget = nullptr;
+    PreviewActionBridge* m_actionBridge = nullptr;
+    PreviewContentBridge* m_contentBridge = nullptr;
+};
+```
+
+QML root source 固定加载：
+
+- `qrc:/SPACELOOK/viewers/preview/PreviewPage.qml`
+
+内容区再由 `Loader` 切换具体页面。
+
+---
+
+**六、QmlPreviewRegistry 设计**
+
+作用是把 `typeKey` 映射到页面路径。
+
+接口建议：
+
+```cpp
+class QmlPreviewRegistry
+{
+public:
+    static QString sourceForTypeKey(const QString& typeKey);
+};
+```
+
+映射建议：
+
+1. `pdf` -> `qrc:/SPACELOOK/viewers/preview/content/PdfPreview.qml`
+2. `office` -> `.../DocumentPreview.qml`
+3. `code` -> `.../CodePreview.qml`
+4. `text` -> `.../TextPreview.qml`
+5. `image` -> `.../ImagePreview.qml`
+6. `audio` -> `.../MediaPreview.qml`
+7. `video` -> `.../MediaPreview.qml`
+8. 其他 -> `.../SummaryPreview.qml`
+
+---
+
+**七、PreviewActionBridge 设计**
+
+这个类专门给 QML 菜单区用。
+
+它只暴露动作，不做界面。
+
+接口建议：
+
+```cpp
+class SpaceLookWindow;
+class PreviewState;
+
+class PreviewActionBridge : public QObject
+{
+    Q_OBJECT
+    Q_PROPERTY(bool alwaysOnTop READ alwaysOnTop NOTIFY stateChanged)
+    Q_PROPERTY(bool expandedPreview READ expandedPreview NOTIFY stateChanged)
+    Q_PROPERTY(bool supportsExpandedPreview READ supportsExpandedPreview NOTIFY stateChanged)
+
+public:
+    explicit PreviewActionBridge(SpaceLookWindow* window,
+                                 PreviewState* previewState,
+                                 QObject* parent = nullptr);
+
+    bool alwaysOnTop() const;
+    bool expandedPreview() const;
+    bool supportsExpandedPreview() const;
+
+    Q_INVOKABLE void toggleAlwaysOnTop();
+    Q_INVOKABLE void openCurrentWithDefaultApp();
+    Q_INVOKABLE void copyCurrentPath();
+    Q_INVOKABLE void refreshCurrentPreview();
+    Q_INVOKABLE void toggleExpandedPreview();
+    Q_INVOKABLE void closePreview();
+    Q_INVOKABLE void showSettingsWindow();
+    Q_INVOKABLE void showOpenWithMenu(int x, int y);
+
+signals:
+    void stateChanged();
+
+private:
+    SpaceLookWindow* m_window = nullptr;
+    PreviewState* m_previewState = nullptr;
+};
+```
+
+这个桥把现有 [`SpaceLookWindow`](D:/Desktop/SpaceLook/widgets/SpaceLookWindow.h) 的方法直接暴露给 QML。
+
+---
+
+**八、PreviewContentBridge 设计**
+
+这个类专门给 QML 内容区用。
+
+职责是“把各类预览所需数据准备好”。
+
+第一版建议先做轻量版本，只覆盖最容易落地的类型。
+
+接口建议：
+
+```cpp
+class PreviewState;
+
+class PreviewContentBridge : public QObject
+{
+    Q_OBJECT
+    Q_PROPERTY(QString textContent READ textContent NOTIFY contentChanged)
+    Q_PROPERTY(QString htmlContent READ htmlContent NOTIFY contentChanged)
+    Q_PROPERTY(QUrl imageSource READ imageSource NOTIFY contentChanged)
+    Q_PROPERTY(QString statusText READ statusText NOTIFY contentChanged)
+
+public:
+    explicit PreviewContentBridge(PreviewState* previewState, QObject* parent = nullptr);
+
+    QString textContent() const;
+    QString htmlContent() const;
+    QUrl imageSource() const;
+    QString statusText() const;
+
+    void reloadFor(const HoveredItemInfo& info);
+
+signals:
+    void contentChanged();
+
+private:
+    PreviewState* m_previewState = nullptr;
+    QString m_textContent;
+    QString m_htmlContent;
+    QUrl m_imageSource;
+    QString m_statusText;
+};
+```
+
+### 第一阶段支持内容
+
+1. `summary`
+   直接用 `PreviewState`
+2. `text`
+   读取文本内容
+3. `code`
+   先按纯文本展示
+4. `image`
+   提供本地文件 URL
+
+### 第二阶段再扩展
+
+1. `pdf`
+2. `document`
+3. `media`
+
+---
+
+**九、QML 页面组合方式**
+
+### 1. `PreviewPage.qml`
+
+统一外壳，只做布局：
+
+- 上面是菜单区
+- 下面是内容区
+- 内容区用 `Loader`
+
+建议结构：
+
+```qml
+Item {
+    id: root
+    property var previewState
+    property var previewActions
+    property var previewContent
+    property url contentSource
+
+    Column {
+        anchors.fill: parent
+        spacing: 12
+
+        PreviewMenuBar {
+            previewState: root.previewState
+            previewActions: root.previewActions
+        }
+
+        PreviewContentFrame {
+            width: parent.width
+            height: parent.height - childrenRect.y
+
+            Loader {
+                anchors.fill: parent
+                source: root.contentSource
+            }
+        }
+    }
+}
+```
+
+### 2. `PreviewMenuBar.qml`
+
+统一菜单区，展示：
+
+1. 图标
+2. 标题
+3. 路径
+4. pin
+5. open
+6. copy
+7. refresh
+8. expand
+9. close
+10. more
+
+这个就是 QML 版的 [`PreviewHeaderBar`](D:/Desktop/SpaceLook/renderers/PreviewHeaderBar.cpp)。
+
+### 3. `PreviewContentFrame.qml`
+
+统一内容容器，负责背景、边框、滚动边距这些壳子效果。
+
+### 4. 各预览内容页面
+
+- `SummaryPreview.qml`
+- `TextPreview.qml`
+- `CodePreview.qml`
+- `ImagePreview.qml`
+- `MediaPreview.qml`
+- `PdfPreview.qml`
+- `DocumentPreview.qml`
+
+每个页面只负责内容，不重复写菜单。
+
+---
+
+**十、每个内容页第一版实现建议**
+
+### 1. `SummaryPreview.qml`
+直接读取 `previewState` 字段，做信息卡片。
+
+### 2. `TextPreview.qml`
+使用 `ScrollView + TextArea`
+内容来自 `previewContent.textContent`
+
+### 3. `CodePreview.qml`
+第一版也先走 `TextArea`
+配合等宽字体和浅色背景
+高亮可以后补
+
+### 4. `ImagePreview.qml`
+使用 `Image`
+后面再加缩放和拖动
+
+### 5. `PdfPreview.qml`
+第一版先不要做复杂多页交互
+建议先通过 C++ 把第一页或页面图像提供给 QML
+QML 只显示
+
+### 6. `DocumentPreview.qml`
+如果当前 C++ 已经能生成 HTML，QML 可以直接显示 HTML 结果
+
+### 7. `MediaPreview.qml`
+第一版建议先做状态页和基本控制壳子
+真正播放桥接放第二阶段
+
+---
+
+**十一、PreviewHost 具体改法**
+
+建议 `PreviewHost::showPreview(info)` 变成：
+
+1. 根据 `performanceMode` 选后端
+2. 如果当前后端变了，隐藏另一套宿主
+3. 把 `info` 传给当前宿主
+4. 当前宿主负责真正显示
+
+伪代码：
+
+```cpp
+void PreviewHost::showPreview(const HoveredItemInfo& info)
+{
+    const bool useQml = SpaceLookUiSettings::instance().performanceMode();
+    applyBackendVisibility(useQml);
+
+    if (useQml) {
+        m_qmlHost->showPreview(info);
+    } else {
+        m_widgetHost->showPreview(info);
+    }
+}
+```
+
+`stopPreview()` 同理。
+
+---
+
+**十二、配置和设置层**
+
+当前 `performanceMode` 已经存在，短期直接复用。
+
+也就是：
+
+- `false` -> QWidget backend
+- `true` -> QML backend
+
+这样改动最少。
+
+以后如果需要更清晰的语义，可以再拆成：
+
+- `performanceMode`
+- `previewBackend`
+
+当前阶段不建议先拆。
+
+---
+
+**十三、第一阶段落地顺序**
+
+建议严格按这个顺序做。
+
+### 第一步
+把现在的 [`PreviewHost`](D:/Desktop/SpaceLook/renderers/PreviewHost.cpp) 重构成门面层。
+
+### 第二步
+把旧逻辑搬到 `WidgetPreviewHost`。
+
+### 第三步
+新增 `QmlPreviewHost`，先只加载固定的 `PreviewPage.qml`。
+
+### 第四步
+新增 `PreviewActionBridge`，把菜单动作接通。
+
+### 第五步
+新增 `QmlPreviewRegistry`。
+
+### 第六步
+新增 `PreviewContentBridge` 第一版，只支持：
+1. `summary`
+2. `text`
+
+### 第七步
+完成这些 QML 页面：
+1. `PreviewPage.qml`
+2. `PreviewMenuBar.qml`
+3. `PreviewContentFrame.qml`
+4. `SummaryPreview.qml`
+5. `TextPreview.qml`
+
+### 第八步
+性能开关切换时动态切后端。
+
+---
+
+**十四、第二阶段顺序**
+
+1. `CodePreview.qml`
+2. `ImagePreview.qml`
+3. 为 `PreviewContentBridge` 增加对应数据支持
+
+---
+
+**十五、第三阶段顺序**
+
+1. `PdfPreview.qml`
+2. `DocumentPreview.qml`
+3. `MediaPreview.qml`
+
+这一阶段复杂度最高，建议最后做。
+
+---
+
+**十六、这套方案的优点**
+
+1. 现有 QWidget 预览不需要推倒重来
+2. QML 方案可以逐步接入
+3. 菜单区和内容区天然分层
+4. 两套预览共用同一个 `PreviewState`
+5. 切换逻辑集中在 `PreviewHost`
+6. 后续维护比较清晰
+
+---
+
+如果你要，我下一步可以继续直接写“第一阶段的详细接口草图”，包括：
+
+1. `PreviewHost.h/.cpp` 怎么改
+2. `WidgetPreviewHost.h/.cpp` 的完整类定义
+3. `QmlPreviewHost.h/.cpp` 的完整类定义
+4. `PreviewPage.qml` 和 `PreviewMenuBar.qml` 的初版结构稿

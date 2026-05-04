@@ -128,7 +128,7 @@ SummaryRenderer::SummaryRenderer(PreviewState* previewState, QWidget* parent)
     headerLayout->setContentsMargins(0, 0, 0, 0);
     headerLayout->setSpacing(12);
     auto* titleBlock = new PreviewHeaderBar(m_iconLabel, m_titleLabel, m_pathRow, m_openWithButton, m_headerRow);
-    headerLayout->addWidget(titleBlock, 1);
+    headerLayout->addWidget(titleBlock->contentWidget(), 1);
 
     auto* pathLayout = new QHBoxLayout(m_pathRow);
     pathLayout->setContentsMargins(0, 0, 0, 0);
@@ -136,7 +136,7 @@ SummaryRenderer::SummaryRenderer(PreviewState* previewState, QWidget* parent)
     pathLayout->addWidget(m_pathValueLabel, 1);
 
     auto* detailsPanelLayout = new QVBoxLayout(m_detailsPanel);
-    detailsPanelLayout->setContentsMargins(18, 16, 12, 16);
+    detailsPanelLayout->setContentsMargins(18, 12, 12, 12);
     detailsPanelLayout->setSpacing(0);
     detailsPanelLayout->addWidget(m_detailsScrollArea);
 
@@ -146,8 +146,8 @@ SummaryRenderer::SummaryRenderer(PreviewState* previewState, QWidget* parent)
     m_detailsScrollArea->setWidget(m_detailsContent);
 
     auto* detailsContentLayout = new QVBoxLayout(m_detailsContent);
-    detailsContentLayout->setContentsMargins(8, 8, 14, 8);
-    detailsContentLayout->setSpacing(18);
+    detailsContentLayout->setContentsMargins(8, 6, 14, 6);
+    detailsContentLayout->setSpacing(14);
 
     auto* topGrid = new QGridLayout();
     topGrid->setContentsMargins(0, 0, 0, 0);
@@ -272,7 +272,7 @@ QWidget* SummaryRenderer::createDetailBlock(const QString& title, QLabel** value
 
     auto* layout = new QVBoxLayout(block);
     layout->setContentsMargins(0, 0, 0, 0);
-    layout->setSpacing(10);
+    layout->setSpacing(6);
 
     auto* titleLabel = new QLabel(title, block);
     titleLabel->setObjectName(QStringLiteral("SummaryDetailTitle"));
@@ -497,7 +497,7 @@ void SummaryRenderer::applyChrome()
         "  background: transparent;"
         "  font-family: 'Segoe UI';"
         "  font-size: 15px;"
-        "  line-height: 1.35;"
+        "  line-height: 1.15;"
         "  selection-background-color: #cfe3ff;"
         "  selection-color: #1e2c3b;"
         "}"

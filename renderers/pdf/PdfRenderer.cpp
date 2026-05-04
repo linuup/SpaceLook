@@ -51,7 +51,7 @@ PdfRenderer::PdfRenderer(QWidget* parent)
     headerLayout->setContentsMargins(0, 0, 0, 0);
     headerLayout->setSpacing(12);
     auto* titleBlock = new PreviewHeaderBar(m_iconLabel, m_titleLabel, m_pathRow, m_openWithButton, m_headerRow);
-    headerLayout->addWidget(titleBlock, 1);
+    headerLayout->addWidget(titleBlock->contentWidget(), 1);
 
     auto* pathLayout = new QHBoxLayout(m_pathRow);
     pathLayout->setContentsMargins(0, 0, 0, 0);

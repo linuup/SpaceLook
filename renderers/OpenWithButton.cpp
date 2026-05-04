@@ -168,7 +168,6 @@ void OpenWithButton::refreshHandlers()
         entry.kind = EntryKind::DirectCommand;
         entry.executablePath = app.executablePath;
         entry.arguments = QStringList() << QDir::toNativeSeparators(fileInfo.absoluteFilePath());
-        logEntry(QStringLiteral("[SpaceLookOpenWith] discovered catalog entry"), entry);
         if (containsHandlerName(entry.displayName)) {
             continue;
         }

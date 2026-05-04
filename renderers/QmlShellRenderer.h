@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QObject>
 #include <QWidget>
 
 #include "renderers/IPreviewRenderer.h"

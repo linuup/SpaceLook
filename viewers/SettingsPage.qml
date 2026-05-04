@@ -41,6 +41,8 @@ Rectangle {
     QtObject {
         id: fallbackUiSettings
         property int menuButtonSize: 38
+        property bool showMenuBorder: true
+        property int menuPlacement: 0
         property bool showSystemTray: false
         property bool showTaskbar: true
         property bool performanceMode: false
@@ -131,14 +133,6 @@ Rectangle {
             horizontalAlignment: Text.AlignHCenter
             verticalAlignment: Text.AlignVCenter
             renderType: Text.NativeRendering
-            scale: parent.hovered ? 1.16 : 1.0
-
-            Behavior on scale {
-                NumberAnimation {
-                    duration: 140
-                    easing.type: Easing.OutCubic
-                }
-            }
         }
     }
 
@@ -163,14 +157,6 @@ Rectangle {
             horizontalAlignment: Text.AlignHCenter
             verticalAlignment: Text.AlignVCenter
             renderType: Text.NativeRendering
-            scale: parent.hovered ? 1.05 : 1.0
-
-            Behavior on scale {
-                NumberAnimation {
-                    duration: 140
-                    easing.type: Easing.OutCubic
-                }
-            }
 
             Behavior on color {
                 ColorAnimation { duration: 140 }
@@ -455,6 +441,38 @@ Rectangle {
         }
     }
 
+    component PlacementOptionButton: Button {
+        property int placementValue: 0
+        property string labelText: ""
+
+        implicitHeight: 42
+        hoverEnabled: true
+
+        background: Rectangle {
+            radius: 12
+            color: resolvedUiSettings.menuPlacement === parent.placementValue
+                   ? root.accentSoftColor
+                   : (parent.down ? "#eaf1f8" : (parent.hovered ? "#f5f9fd" : "#ffffff"))
+            border.width: 1
+            border.color: resolvedUiSettings.menuPlacement === parent.placementValue
+                          ? root.accentColor
+                          : root.outlineColor
+        }
+
+        contentItem: Text {
+            text: parent.labelText
+            color: resolvedUiSettings.menuPlacement === parent.placementValue ? root.accentColor : root.textColor
+            font.family: root.textFontFamily
+            font.pixelSize: 13
+            font.weight: resolvedUiSettings.menuPlacement === parent.placementValue ? Font.DemiBold : Font.Medium
+            horizontalAlignment: Text.AlignHCenter
+            verticalAlignment: Text.AlignVCenter
+            renderType: Text.NativeRendering
+        }
+
+        onClicked: resolvedUiSettings.menuPlacement = placementValue
+    }
+
     gradient: Gradient {
         GradientStop { position: 0.0; color: root.pageBackgroundTop }
         GradientStop { position: 1.0; color: root.pageBackgroundBottom }
@@ -522,24 +540,6 @@ Rectangle {
 
                 Row {
                     spacing: 4
-
-                    WindowActionButton {
-                        glyph: "\uE921"
-                        onClicked: {
-                            if (typeof settingsWindow !== "undefined" && settingsWindow) {
-                                settingsWindow.requestSettingsWindowMinimize()
-                            }
-                        }
-                    }
-
-                    WindowActionButton {
-                        glyph: "\uE922"
-                        onClicked: {
-                            if (typeof settingsWindow !== "undefined" && settingsWindow) {
-                                settingsWindow.requestSettingsWindowToggleMaximize()
-                            }
-                        }
-                    }
 
                     WindowActionButton {
                         glyph: "\uE8BB"
@@ -850,9 +850,10 @@ Rectangle {
                 CardShell {
                     id: toolbarSection
                     width: parent.width
-                    implicitHeight: 392
+                    implicitHeight: toolbarSectionContent.implicitHeight + 44
 
                     Column {
+                        id: toolbarSectionContent
                         anchors.fill: parent
                         anchors.margins: 22
                         spacing: 20
@@ -862,6 +863,73 @@ Rectangle {
                             title: "Toolbar"
                             subtitle: "Choose which preview actions appear in the title toolbar."
                         }
+
+                        SettingSwitchRow {
+                            width: parent.width
+                            labelText: "Show menu border"
+                            descriptionText: "Display a border around the floating preview menu capsule."
+                            checkedValue: resolvedUiSettings.showMenuBorder
+                            onToggledValue: resolvedUiSettings.showMenuBorder = checked
+                        }
+
+                        DividerLine { }
+
+                        Column {
+                            width: parent.width
+                            spacing: 10
+
+                            Text {
+                                text: "Menu placement"
+                                color: root.textColor
+                                font.family: root.textFontFamily
+                                font.pixelSize: 15
+                                font.weight: Font.DemiBold
+                                renderType: Text.NativeRendering
+                            }
+
+                            Text {
+                                width: parent.width
+                                text: "Choose whether the preview menu appears above, below, to the left, or to the right of the preview header content."
+                                color: root.secondaryTextColor
+                                font.family: root.bodyFontFamily
+                                font.pixelSize: 12
+                                renderType: Text.NativeRendering
+                                wrapMode: Text.Wrap
+                            }
+
+                            GridLayout {
+                                width: parent.width
+                                columns: width >= 520 ? 4 : 2
+                                columnSpacing: 10
+                                rowSpacing: 10
+
+                                PlacementOptionButton {
+                                    Layout.fillWidth: true
+                                    placementValue: 0
+                                    labelText: "Top"
+                                }
+
+                                PlacementOptionButton {
+                                    Layout.fillWidth: true
+                                    placementValue: 1
+                                    labelText: "Bottom"
+                                }
+
+                                PlacementOptionButton {
+                                    Layout.fillWidth: true
+                                    placementValue: 2
+                                    labelText: "Left"
+                                }
+
+                                PlacementOptionButton {
+                                    Layout.fillWidth: true
+                                    placementValue: 3
+                                    labelText: "Right"
+                                }
+                            }
+                        }
+
+                        DividerLine { }
 
                         GridLayout {
                             width: parent.width
@@ -916,6 +984,7 @@ Rectangle {
                                 glyph: "\uE712"
                                 checkedValue: resolvedUiSettings.showMenuMore
                                 onToggledValue: resolvedUiSettings.showMenuMore = checked
+                            }
                         }
                     }
                 }
@@ -998,5 +1067,4 @@ Rectangle {
             }
         }
     }
-}
 }

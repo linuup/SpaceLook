@@ -11,6 +11,7 @@ int main(int argc, char* argv[])
     app.setApplicationName(QStringLiteral("SpaceLook"));
     app.setOrganizationName(QStringLiteral("LinDesk"));
     app.setWindowIcon(QIcon(QStringLiteral(":/icons/app.png")));
+    app.setQuitOnLastWindowClosed(false);
 
     const HRESULT oleInitHr = OleInitialize(nullptr);
     PreviewManager previewManager;
@@ -19,6 +20,7 @@ int main(int argc, char* argv[])
                      &previewManager, &PreviewManager::openPreviewForPath);
     ipcServer.startListening();
     previewManager.showInitialPreview();
+    previewManager.showSettingsWindow();
 
     const int exitCode = app.exec();
     if (SUCCEEDED(oleInitHr)) {

@@ -34,6 +34,8 @@ SpaceLookUiSettings::SpaceLookUiSettings()
 {
     QSettings settings(settingsFilePath(), QSettings::IniFormat);
     m_menuButtonSize = qBound(30, settings.value(QStringLiteral("ui/menu_button_size"), 38).toInt(), 72);
+    m_showMenuBorder = settings.value(QStringLiteral("ui/menu/show_border"), false).toBool();
+    m_menuPlacement = qBound(0, settings.value(QStringLiteral("ui/menu/placement"), 0).toInt(), 3);
     m_showSystemTray = settings.value(QStringLiteral("ui/show_system_tray"), false).toBool();
     m_showTaskbar = settings.value(QStringLiteral("ui/show_taskbar"), true).toBool();
     m_performanceMode = settings.value(QStringLiteral("ui/performance_mode"), false).toBool();
@@ -64,6 +66,39 @@ void SpaceLookUiSettings::setMenuButtonSize(int size)
     settings.setValue(QStringLiteral("ui/menu_button_size"), m_menuButtonSize);
     settings.sync();
     emit menuButtonSizeChanged();
+}
+
+bool SpaceLookUiSettings::showMenuBorder() const
+{
+    return m_showMenuBorder;
+}
+
+void SpaceLookUiSettings::setShowMenuBorder(bool show)
+{
+    if (!updateBoolSetting(m_showMenuBorder, show, QStringLiteral("ui/menu/show_border"))) {
+        return;
+    }
+
+    emit menuAppearanceChanged();
+}
+
+int SpaceLookUiSettings::menuPlacement() const
+{
+    return m_menuPlacement;
+}
+
+void SpaceLookUiSettings::setMenuPlacement(int placement)
+{
+    const int boundedPlacement = qBound(0, placement, 3);
+    if (m_menuPlacement == boundedPlacement) {
+        return;
+    }
+
+    m_menuPlacement = boundedPlacement;
+    QSettings settings(settingsFilePath(), QSettings::IniFormat);
+    settings.setValue(QStringLiteral("ui/menu/placement"), m_menuPlacement);
+    settings.sync();
+    emit menuAppearanceChanged();
 }
 
 bool SpaceLookUiSettings::showSystemTray() const

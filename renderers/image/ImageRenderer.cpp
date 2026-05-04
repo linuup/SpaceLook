@@ -240,7 +240,6 @@ ImageRenderer::ImageRenderer(QWidget* parent)
     auto* layout = new QVBoxLayout(this);
     layout->setContentsMargins(12, 0, 12, 12);
     layout->setSpacing(14);
-
     layout->addWidget(m_headerRow);
     layout->addWidget(m_statusLabel);
     layout->addWidget(m_scrollArea, 1);
@@ -249,7 +248,7 @@ ImageRenderer::ImageRenderer(QWidget* parent)
     headerLayout->setContentsMargins(0, 0, 0, 0);
     headerLayout->setSpacing(12);
     auto* titleBlock = new PreviewHeaderBar(m_iconLabel, m_titleLabel, m_pathRow, m_openWithButton, m_headerRow);
-    headerLayout->addWidget(titleBlock, 1);
+    headerLayout->addWidget(titleBlock->contentWidget(), 1);
 
     auto* pathLayout = new QHBoxLayout(m_pathRow);
     pathLayout->setContentsMargins(0, 0, 0, 0);

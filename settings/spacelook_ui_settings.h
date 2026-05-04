@@ -6,6 +6,8 @@ class SpaceLookUiSettings : public QObject
 {
     Q_OBJECT
     Q_PROPERTY(int menuButtonSize READ menuButtonSize WRITE setMenuButtonSize NOTIFY menuButtonSizeChanged)
+    Q_PROPERTY(bool showMenuBorder READ showMenuBorder WRITE setShowMenuBorder NOTIFY menuAppearanceChanged)
+    Q_PROPERTY(int menuPlacement READ menuPlacement WRITE setMenuPlacement NOTIFY menuAppearanceChanged)
     Q_PROPERTY(bool showSystemTray READ showSystemTray WRITE setShowSystemTray NOTIFY showSystemTrayChanged)
     Q_PROPERTY(bool showTaskbar READ showTaskbar WRITE setShowTaskbar NOTIFY showTaskbarChanged)
     Q_PROPERTY(bool performanceMode READ performanceMode WRITE setPerformanceMode NOTIFY performanceModeChanged)
@@ -23,6 +25,10 @@ public:
 
     int menuButtonSize() const;
     void setMenuButtonSize(int size);
+    bool showMenuBorder() const;
+    void setShowMenuBorder(bool show);
+    int menuPlacement() const;
+    void setMenuPlacement(int placement);
     bool showSystemTray() const;
     void setShowSystemTray(bool show);
     bool showTaskbar() const;
@@ -48,6 +54,7 @@ public:
 
 signals:
     void menuButtonSizeChanged();
+    void menuAppearanceChanged();
     void showSystemTrayChanged();
     void showTaskbarChanged();
     void performanceModeChanged();
@@ -62,6 +69,8 @@ private:
     void applyAutoStart(bool enabled);
 
     int m_menuButtonSize = 38;
+    bool m_showMenuBorder = true;
+    int m_menuPlacement = 0;
     bool m_showSystemTray = false;
     bool m_showTaskbar = true;
     bool m_performanceMode = false;

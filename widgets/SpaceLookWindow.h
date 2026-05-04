@@ -6,6 +6,7 @@
 struct HoveredItemInfo;
 class PreviewState;
 class PreviewHost;
+class PreviewCapsuleMenu;
 class QSystemTrayIcon;
 class QMenu;
 
@@ -66,8 +67,11 @@ private:
     void updateCursorForPosition(const QPoint& localPos);
     QString currentPreviewPath() const;
 
+    QWidget* m_container = nullptr;
+    QWidget* m_menuRegion = nullptr;
     QWidget* m_surface = nullptr;
     PreviewHost* m_previewHost = nullptr;
+    PreviewCapsuleMenu* m_menuBar = nullptr;
     PreviewState* m_previewState = nullptr;
     bool m_alwaysOnTop = false;
     bool m_expandedPreview = false;

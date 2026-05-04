@@ -15,11 +15,11 @@ namespace {
 
 QString previewIdentityFor(const HoveredItemInfo& info)
 {
-    if (!info.resolvedPath.trimmed().isEmpty()) {
-        return info.resolvedPath.trimmed().toLower();
-    }
     if (!info.filePath.trimmed().isEmpty()) {
         return info.filePath.trimmed().toLower();
+    }
+    if (!info.resolvedPath.trimmed().isEmpty()) {
+        return info.resolvedPath.trimmed().toLower();
     }
     return QStringLiteral("%1|%2|%3|%4")
         .arg(info.sourceKind.trimmed().toLower(),
@@ -82,6 +82,16 @@ void PreviewManager::openPreviewForPath(const QString& filePath)
     }
 
     showHoveredItem(previewInfo);
+}
+
+void PreviewManager::showSettingsWindow()
+{
+    SpaceLookWindow* window = ensureWindow();
+    if (!window) {
+        return;
+    }
+
+    window->showSettingsWindow();
 }
 
 SpaceLookWindow* PreviewManager::ensureWindow()

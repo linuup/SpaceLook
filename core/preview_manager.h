@@ -18,6 +18,7 @@ public:
 
     void showInitialPreview();
     void openPreviewForPath(const QString& filePath);
+    void showSettingsWindow();
 
 private slots:
     void handleSpaceHotkey();

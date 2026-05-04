@@ -470,7 +470,7 @@ MediaRenderer::MediaRenderer(QWidget* parent)
     headerLayout->setContentsMargins(0, 0, 0, 0);
     headerLayout->setSpacing(12);
     auto* titleBlock = new PreviewHeaderBar(m_iconLabel, m_titleLabel, m_pathRow, m_openWithButton, m_headerRow);
-    headerLayout->addWidget(titleBlock, 1);
+    headerLayout->addWidget(titleBlock->contentWidget(), 1);
 
     auto* pathLayout = new QHBoxLayout(m_pathRow);
     pathLayout->setContentsMargins(0, 0, 0, 0);
@@ -728,6 +728,10 @@ void MediaRenderer::load(const HoveredItemInfo& info)
     m_info = info;
     m_mpvPaused = true;
     m_videoPreviewReady = false;
+    m_videoHost->hide();
+    m_videoPlaceholder->hide();
+    m_audioPlaceholder->hide();
+    m_centerOverlayLabel->hide();
     qDebug().noquote() << QStringLiteral("[SpaceLookRender] MediaRenderer load path=\"%1\" typeKey=%2")
         .arg(info.filePath, info.typeKey);
 
@@ -844,6 +848,7 @@ void MediaRenderer::unload()
 {
     destroyAudioBackend();
     destroyVideoBackend();
+    m_info = HoveredItemInfo();
     m_mpvPaused = true;
     m_videoPreviewReady = false;
     m_videoMuted = true;
@@ -854,6 +859,12 @@ void MediaRenderer::unload()
     m_statusLabel->clear();
     m_pathValueLabel->clear();
     m_openWithButton->setTargetContext(QString(), QString());
+    m_audioPlaceholder->clear();
+    m_audioPlaceholder->hide();
+    m_videoPlaceholder->clear();
+    m_videoPlaceholder->hide();
+    m_videoHost->hide();
+    m_centerOverlayLabel->hide();
     updateVolumeButton();
     updateVolumePopup();
     updateCenterOverlay();
@@ -1130,6 +1141,7 @@ void MediaRenderer::destroyAudioBackend()
         m_player->deleteLater();
         m_player = nullptr;
     }
+    m_audioPlaceholder->hide();
 }
 
 void MediaRenderer::ensureVideoBackend()
@@ -1160,6 +1172,9 @@ void MediaRenderer::destroyVideoBackend()
     if (m_mpvBackend) {
         m_mpvBackend->shutdown();
     }
+    m_videoHost->hide();
+    m_videoPlaceholder->hide();
+    m_centerOverlayLabel->hide();
 }
 
 void MediaRenderer::seekToSliderValue(int value)
