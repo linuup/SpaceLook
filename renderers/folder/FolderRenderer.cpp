@@ -2,15 +2,19 @@
 
 #include <QDebug>
 #include <QDir>
+#include <QEvent>
 #include <QFileInfo>
 #include <QFutureWatcher>
 #include <QHash>
 #include <QHeaderView>
 #include <QHBoxLayout>
 #include <QIcon>
+#include <QKeyEvent>
 #include <QLabel>
+#include <QLineEdit>
 #include <QMenu>
 #include <QProcess>
+#include <QPushButton>
 #include <QRegularExpression>
 #include <QSignalBlocker>
 #include <QTimer>
@@ -25,6 +29,7 @@
 #include "renderers/FileTypeIconResolver.h"
 #include "renderers/OpenWithButton.h"
 #include "renderers/PreviewHeaderBar.h"
+#include "renderers/PreviewStateVisuals.h"
 #include "renderers/SelectableTitleLabel.h"
 #include "widgets/SpaceLookWindow.h"
 
@@ -116,9 +121,55 @@ QTreeWidgetItem* findTreeItemByPath(QTreeWidget* treeWidget, const QString& fold
     return nullptr;
 }
 
-FolderRenderer::FolderLoadResult loadFolderEntries(const QString& filePath, const QString& folderPath)
+bool folderItemHasLoadedChildren(const QTreeWidgetItem* item)
 {
+    return item && item->data(0, kLoadedRole).toBool();
+}
+
+bool folderItemIsLoadingChildren(const QTreeWidgetItem* item)
+{
+    return item && item->data(0, kLoadingRole).toBool();
+}
+
+bool treeItemHasOnlyPlaceholderChild(const QTreeWidgetItem* item)
+{
+    return item && item->childCount() == 1 && item->child(0)->data(0, kPlaceholderRole).toBool();
+}
+
+void ensureFolderLoadingPlaceholder(QTreeWidgetItem* item)
+{
+    if (!item || folderItemHasLoadedChildren(item) || folderItemIsLoadingChildren(item)) {
+        return;
+    }
+
+    item->setChildIndicatorPolicy(QTreeWidgetItem::ShowIndicator);
+    if (item->childCount() > 0 && !treeItemHasOnlyPlaceholderChild(item)) {
+        return;
+    }
+
+    if (treeItemHasOnlyPlaceholderChild(item)) {
+        return;
+    }
+
+    auto* placeholder = new QTreeWidgetItem();
+    placeholder->setText(0, QStringLiteral("Loading..."));
+    placeholder->setData(0, Qt::UserRole, false);
+    placeholder->setData(0, kItemPathRole, QString());
+    placeholder->setData(0, kPlaceholderRole, true);
+    item->addChild(placeholder);
+}
+
+FolderRenderer::FolderLoadResult loadFolderEntries(const QString& filePath,
+                                                   const QString& folderPath,
+                                                   const PreviewCancellationToken& cancelToken)
+{
+    Q_UNUSED(folderPath)
+
     FolderRenderer::FolderLoadResult result;
+    if (previewCancellationRequested(cancelToken)) {
+        result.statusMessage = QStringLiteral("Folder preview was canceled.");
+        return result;
+    }
 
     const QString trimmedPath = QDir::cleanPath(filePath.trimmed());
     if (trimmedPath.isEmpty()) {
@@ -128,19 +179,29 @@ FolderRenderer::FolderLoadResult loadFolderEntries(const QString& filePath, cons
 
     QFileInfo rootInfo(trimmedPath);
     if (!rootInfo.exists() || !rootInfo.isDir()) {
+        qDebug().noquote() << QStringLiteral("[SpaceLookRender] FolderRenderer cannot open folder path=\"%1\" exists=%2 dir=%3")
+            .arg(trimmedPath)
+            .arg(rootInfo.exists())
+            .arg(rootInfo.isDir());
         result.statusMessage = QStringLiteral("The folder could not be opened.");
         return result;
     }
 
-    const QDir rootDir(trimmedPath);
+    const QDir rootDir(rootInfo.absoluteFilePath());
     const QFileInfoList entries = rootDir.entryInfoList(
         QDir::AllEntries | QDir::NoDotAndDotDot | QDir::Hidden | QDir::System,
         QDir::Name | QDir::IgnoreCase);
 
     for (const QFileInfo& entryInfo : entries) {
+        if (previewCancellationRequested(cancelToken)) {
+            result.entries.clear();
+            result.statusMessage = QStringLiteral("Folder preview was canceled.");
+            return result;
+        }
+
         FolderRenderer::FolderEntry entry;
         entry.name = entryInfo.fileName();
-        entry.path = normalizedFolderPath(folderPath + QLatin1Char('/') + entryInfo.fileName());
+        entry.path = normalizedFolderPath(entryInfo.absoluteFilePath());
         entry.isDirectory = entryInfo.isDir();
         result.entries.append(entry);
     }
@@ -196,17 +257,19 @@ FolderRenderer::FolderRenderer(QWidget* parent)
     pathLayout->addWidget(m_pathValueLabel, 1);
 
     m_iconLabel->setFixedSize(72, 72);
-    m_iconLabel->setScaledContents(true);
+    m_iconLabel->setScaledContents(false);
+    m_iconLabel->setAlignment(Qt::AlignCenter);
     m_titleLabel->setWordWrap(true);
     m_pathTitleLabel->hide();
     m_pathValueLabel->setTextInteractionFlags(Qt::TextSelectableByMouse);
     m_pathValueLabel->setWordWrap(true);
     m_pathValueLabel->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
     m_pathRow->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+    PreviewStateVisuals::prepareStatusLabel(m_statusLabel);
     m_statusLabel->hide();
 
     m_treeWidget->setColumnCount(1);
-    m_treeWidget->setHeaderLabel(QStringLiteral("Folder contents"));
+    m_treeWidget->setHeaderHidden(true);
     m_treeWidget->header()->setStretchLastSection(true);
     m_treeWidget->header()->setSectionResizeMode(0, QHeaderView::Stretch);
     m_treeWidget->setRootIsDecorated(true);
@@ -216,6 +279,8 @@ FolderRenderer::FolderRenderer(QWidget* parent)
     m_treeWidget->setIndentation(20);
     m_treeWidget->setEditTriggers(QAbstractItemView::NoEditTriggers);
     m_treeWidget->setContextMenuPolicy(Qt::CustomContextMenu);
+    m_treeWidget->installEventFilter(this);
+    m_treeWidget->viewport()->installEventFilter(this);
     connect(m_treeWidget, &QTreeWidget::itemExpanded, this, [this](QTreeWidgetItem* item) {
         if (!item || !item->data(0, Qt::UserRole).toBool()) {
             return;
@@ -299,6 +364,9 @@ void FolderRenderer::setLoadingStateCallback(std::function<void(bool)> callback)
 
 void FolderRenderer::load(const HoveredItemInfo& info)
 {
+    cancelPreviewTask(m_cancelToken);
+    const PreviewCancellationToken cancelToken = makePreviewCancellationToken();
+    m_cancelToken = cancelToken;
     m_info = info;
     const PreviewLoadGuard::Token loadToken = m_loadGuard.begin(info.filePath);
     notifyLoadingState(true);
@@ -308,40 +376,37 @@ void FolderRenderer::load(const HoveredItemInfo& info)
 
     m_titleLabel->setText(info.title.isEmpty() ? QStringLiteral("Folder Preview") : info.title);
     m_titleLabel->setCopyText(m_titleLabel->text());
-    const QIcon typeIcon(FileTypeIconResolver::iconForInfo(info));
-    m_iconLabel->setPixmap(typeIcon.pixmap(128, 128));
+    m_iconLabel->setPixmap(FileTypeIconResolver::pixmapForInfo(info, m_iconLabel->contentsRect().size()));
     m_pathValueLabel->setText(info.filePath.trimmed().isEmpty() ? QStringLiteral("(Unavailable)") : info.filePath);
     m_openWithButton->setTargetContext(info.filePath, info.typeKey);
+    cancelInlineRename();
     m_treeWidget->clear();
-    m_statusLabel->setText(QStringLiteral("Loading folder contents..."));
-    m_statusLabel->show();
+    m_rootEntryCount = -1;
+    m_folderCountStatus.clear();
+    ++m_statusMessageSerial;
+    PreviewStateVisuals::showStatus(m_statusLabel, QStringLiteral("Loading folder contents..."), PreviewStateVisuals::Kind::Loading);
 
     auto* watcher = new QFutureWatcher<FolderLoadResult>(this);
-    connect(watcher, &QFutureWatcher<FolderLoadResult>::finished, this, [this, watcher, loadToken]() {
-        const FolderLoadResult result = watcher->result();
+    connect(watcher, &QFutureWatcher<FolderLoadResult>::finished, this, [this, watcher, loadToken, cancelToken]() {
         watcher->deleteLater();
 
-        if (!m_loadGuard.isCurrent(loadToken, m_info.filePath) || !isVisible()) {
+        if (previewCancellationRequested(cancelToken) ||
+            !m_loadGuard.isCurrent(loadToken, m_info.filePath) ||
+            !isVisible()) {
             qDebug().noquote() << QStringLiteral("[SpaceLookRender] FolderRenderer discarded stale result path=\"%1\"")
                 .arg(loadToken.path);
             return;
         }
 
+        const FolderLoadResult result = watcher->result();
         if (!result.success) {
-            m_statusLabel->setText(result.statusMessage);
-            m_statusLabel->show();
+            PreviewStateVisuals::showStatus(m_statusLabel, result.statusMessage, PreviewStateVisuals::Kind::Error);
             notifyLoadingState(false);
             return;
         }
 
         populateTree(nullptr, result.entries);
-        if (result.entries.isEmpty()) {
-            m_statusLabel->setText(QStringLiteral("The folder is empty."));
-        } else {
-            m_statusLabel->setText(QStringLiteral("Loaded %1 entries. Expand folders to load children.")
-                .arg(result.entries.size()));
-        }
-        m_statusLabel->show();
+        updateFolderCountStatus(result.entries.size());
 
         qDebug().noquote() << QStringLiteral("[SpaceLookRender] FolderRenderer entries=%1 path=\"%2\"")
             .arg(result.entries.size())
@@ -349,21 +414,48 @@ void FolderRenderer::load(const HoveredItemInfo& info)
         notifyLoadingState(false);
     });
 
-    watcher->setFuture(QtConcurrent::run([filePath = info.filePath]() {
-        return loadFolderEntries(filePath, filePath);
+    watcher->setFuture(QtConcurrent::run([filePath = info.filePath, cancelToken]() {
+        return loadFolderEntries(filePath, filePath, cancelToken);
     }));
 }
 
 void FolderRenderer::unload()
 {
+    cancelPreviewTask(m_cancelToken);
     m_loadGuard.cancel();
     notifyLoadingState(false);
+    cancelInlineRename();
     m_treeWidget->clear();
     m_pathValueLabel->clear();
     m_openWithButton->setTargetContext(QString(), QString());
-    m_statusLabel->clear();
-    m_statusLabel->hide();
+    PreviewStateVisuals::clearStatus(m_statusLabel);
+    m_rootEntryCount = -1;
+    m_folderCountStatus.clear();
+    ++m_statusMessageSerial;
     m_info = HoveredItemInfo();
+}
+
+bool FolderRenderer::eventFilter(QObject* watched, QEvent* event)
+{
+    if (event && event->type() == QEvent::KeyPress) {
+        auto* keyEvent = static_cast<QKeyEvent*>(event);
+        if ((watched == m_treeWidget || watched == m_treeWidget->viewport()) && keyEvent->key() == Qt::Key_F2) {
+            renameTreeItem(m_treeWidget ? m_treeWidget->currentItem() : nullptr);
+            return true;
+        }
+        if (watched == m_renameEditor) {
+            if (keyEvent->key() == Qt::Key_Return || keyEvent->key() == Qt::Key_Enter) {
+                confirmInlineRename();
+                return true;
+            }
+            if (keyEvent->key() == Qt::Key_Escape) {
+                cancelInlineRename();
+                return true;
+            }
+        }
+    }
+
+    return QWidget::eventFilter(watched, event);
 }
 
 void FolderRenderer::notifyLoadingState(bool loading)
@@ -448,13 +540,36 @@ void FolderRenderer::applyChrome()
         "  background: rgba(126, 188, 255, 0.28);"
         "  color: #08233b;"
         "}"
+        "#FolderRenameWidget {"
+        "  background: rgba(255, 255, 255, 0.92);"
+        "  border: 1px solid rgba(132, 188, 255, 0.95);"
+        "  border-radius: 12px;"
+        "}"
+        "#FolderRenameEdit {"
+        "  background: transparent;"
+        "  border: none;"
+        "  color: #102a42;"
+        "  selection-background-color: #cfe3ff;"
+        "  selection-color: #102a42;"
+        "  padding: 2px 4px;"
+        "}"
+        "#FolderRenameButton {"
+        "  background: rgba(231, 241, 255, 0.96);"
+        "  border: 1px solid rgba(184, 207, 235, 0.95);"
+        "  border-radius: 9px;"
+        "  color: #18324a;"
+        "  padding: 2px 8px;"
+        "}"
+        "#FolderRenameButton:hover {"
+        "  background: rgba(213, 231, 255, 1.0);"
+        "}"
         "#FolderTree QHeaderView::section {"
         "  background: rgba(232, 239, 247, 0.96);"
         "  color: #35506b;"
         "  border: none;"
         "  border-bottom: 1px solid rgba(204, 214, 226, 0.95);"
         "  padding: 8px 10px;"
-        "  font-family: 'Segoe UI Semibold';"
+        "  font-family: 'Segoe UI Rounded';"
         "}"
         "#FolderTree QScrollBar:vertical {"
         "  background: rgba(232, 238, 245, 0.8);"
@@ -504,13 +619,13 @@ void FolderRenderer::applyChrome()
     );
 
     QFont titleFont;
-    titleFont.setFamily(QStringLiteral("Microsoft YaHei UI"));
+    titleFont.setFamily(QStringLiteral("Segoe UI Rounded"));
     titleFont.setPixelSize(20);
     titleFont.setWeight(QFont::Bold);
     m_titleLabel->setFont(titleFont);
 
     QFont metaFont;
-    metaFont.setFamily(QStringLiteral("Segoe UI"));
+    metaFont.setFamily(QStringLiteral("Segoe UI Rounded"));
     metaFont.setPixelSize(13);
     m_metaLabel->setFont(metaFont);
     m_pathTitleLabel->setFont(metaFont);
@@ -518,7 +633,7 @@ void FolderRenderer::applyChrome()
     m_statusLabel->setFont(metaFont);
 
     QFont treeFont;
-    treeFont.setFamily(QStringLiteral("Segoe UI"));
+    treeFont.setFamily(QStringLiteral("Segoe UI Rounded"));
     treeFont.setPixelSize(13);
     m_treeWidget->setFont(treeFont);
 }
@@ -526,19 +641,41 @@ void FolderRenderer::applyChrome()
 void FolderRenderer::showStatusMessage(const QString& message)
 {
     if (message.trimmed().isEmpty()) {
-        m_statusLabel->clear();
-        m_statusLabel->hide();
+        updateFolderCountStatus(m_rootEntryCount);
         return;
     }
 
-    m_statusLabel->setText(message);
-    m_statusLabel->show();
-    QTimer::singleShot(1400, m_statusLabel, [label = m_statusLabel]() {
-        if (label) {
-            label->clear();
-            label->hide();
+    const int statusSerial = ++m_statusMessageSerial;
+    PreviewStateVisuals::showStatus(m_statusLabel, message);
+    QTimer::singleShot(1400, this, [this, statusSerial]() {
+        if (statusSerial != m_statusMessageSerial) {
+            return;
         }
+        if (!m_folderCountStatus.trimmed().isEmpty()) {
+            PreviewStateVisuals::showStatus(m_statusLabel, m_folderCountStatus);
+            return;
+        }
+        PreviewStateVisuals::clearStatus(m_statusLabel);
     });
+}
+
+void FolderRenderer::updateFolderCountStatus(int entryCount)
+{
+    ++m_statusMessageSerial;
+    m_rootEntryCount = entryCount;
+    if (entryCount < 0) {
+        m_folderCountStatus.clear();
+        PreviewStateVisuals::clearStatus(m_statusLabel);
+        return;
+    }
+
+    m_folderCountStatus = entryCount == 0
+        ? QStringLiteral("The folder is empty.")
+        : QStringLiteral("Loaded %1 entries. Expand folders to load children.").arg(entryCount);
+    PreviewStateVisuals::showStatus(
+        m_statusLabel,
+        m_folderCountStatus,
+        entryCount == 0 ? PreviewStateVisuals::Kind::Empty : PreviewStateVisuals::Kind::Success);
 }
 
 void FolderRenderer::populateTree(QTreeWidgetItem* parentItem, const QVector<FolderEntry>& entries)
@@ -551,14 +688,7 @@ void FolderRenderer::populateTree(QTreeWidgetItem* parentItem, const QVector<Fol
         if (entry.isDirectory) {
             QTreeWidgetItem* folderItem = ensureFolderItem(entry.path, parentItem, entry.name);
             if (folderItem) {
-                folderItem->setChildIndicatorPolicy(QTreeWidgetItem::ShowIndicator);
-                if (folderItem->childCount() == 0) {
-                    auto* placeholder = new QTreeWidgetItem();
-                    placeholder->setText(0, QStringLiteral("Loading..."));
-                    placeholder->setData(0, Qt::UserRole, false);
-                    placeholder->setData(0, kPlaceholderRole, true);
-                    folderItem->addChild(placeholder);
-                }
+                ensureFolderLoadingPlaceholder(folderItem);
             }
             continue;
         }
@@ -591,6 +721,17 @@ QTreeWidgetItem* FolderRenderer::ensureFolderItem(const QString& folderPath,
                                                   const QString& folderName)
 {
     if (QTreeWidgetItem* existingItem = findTreeItemByPath(m_treeWidget, folderPath)) {
+        existingItem->setText(0, folderName);
+        existingItem->setIcon(0, iconForFolderEntry(folderPath, true));
+        existingItem->setData(0, Qt::UserRole, true);
+        existingItem->setData(0, kItemPathRole, folderPath);
+        if (!existingItem->data(0, kLoadingRole).isValid()) {
+            existingItem->setData(0, kLoadingRole, false);
+        }
+        if (!existingItem->data(0, kLoadedRole).isValid()) {
+            existingItem->setData(0, kLoadedRole, false);
+        }
+        ensureFolderLoadingPlaceholder(existingItem);
         return existingItem;
     }
 
@@ -606,6 +747,7 @@ QTreeWidgetItem* FolderRenderer::ensureFolderItem(const QString& folderPath,
     } else {
         m_treeWidget->addTopLevelItem(item);
     }
+    ensureFolderLoadingPlaceholder(item);
     return item;
 }
 
@@ -647,6 +789,7 @@ void FolderRenderer::loadFolderChildren(const QString& folderPath, QTreeWidgetIt
 
     setFolderItemLoadState(parentItem, true, false);
     clearTreeItemChildren(parentItem);
+    parentItem->setChildIndicatorPolicy(QTreeWidgetItem::ShowIndicator);
     auto* placeholder = new QTreeWidgetItem();
     placeholder->setText(0, QStringLiteral("Loading..."));
     placeholder->setData(0, Qt::UserRole, false);
@@ -655,15 +798,22 @@ void FolderRenderer::loadFolderChildren(const QString& folderPath, QTreeWidgetIt
     parentItem->addChild(placeholder);
 
     const PreviewLoadGuard::Token loadToken = m_loadGuard.observe(folderPath);
+    PreviewCancellationToken cancelToken = m_cancelToken;
+    if (!cancelToken) {
+        cancelToken = makePreviewCancellationToken();
+        m_cancelToken = cancelToken;
+    }
     auto* watcher = new QFutureWatcher<FolderLoadResult>(this);
-    connect(watcher, &QFutureWatcher<FolderLoadResult>::finished, this, [this, watcher, loadToken, folderPath]() {
-        const FolderLoadResult result = watcher->result();
+    connect(watcher, &QFutureWatcher<FolderLoadResult>::finished, this, [this, watcher, loadToken, folderPath, cancelToken]() {
         watcher->deleteLater();
 
-        if (!m_loadGuard.isCurrentGeneration(loadToken) || !isVisible()) {
+        if (previewCancellationRequested(cancelToken) ||
+            !m_loadGuard.isCurrentGeneration(loadToken) ||
+            !isVisible()) {
             return;
         }
 
+        const FolderLoadResult result = watcher->result();
         QTreeWidgetItem* currentParentItem = folderItemForPath(folderPath);
         if (!currentParentItem) {
             return;
@@ -680,16 +830,20 @@ void FolderRenderer::loadFolderChildren(const QString& folderPath, QTreeWidgetIt
             errorItem->setData(0, kItemPathRole, QString());
             currentParentItem->addChild(errorItem);
             setFolderItemLoadState(currentParentItem, false, false);
-            currentParentItem->setExpanded(false);
+            currentParentItem->setChildIndicatorPolicy(QTreeWidgetItem::ShowIndicator);
+            currentParentItem->setExpanded(true);
             return;
         }
 
         populateTree(currentParentItem, result.entries);
         setFolderItemLoadState(currentParentItem, false, true);
+        currentParentItem->setChildIndicatorPolicy(
+            result.entries.isEmpty() ? QTreeWidgetItem::DontShowIndicatorWhenChildless : QTreeWidgetItem::ShowIndicator);
+        currentParentItem->setExpanded(true);
     });
 
-    watcher->setFuture(QtConcurrent::run([folderPath]() {
-        return loadFolderEntries(folderPath, folderPath);
+    watcher->setFuture(QtConcurrent::run([folderPath, cancelToken]() {
+        return loadFolderEntries(folderPath, folderPath, cancelToken);
     }));
 }
 
@@ -703,6 +857,7 @@ void FolderRenderer::showItemContextMenu(const QPoint& position)
     if (!item) {
         return;
     }
+    m_treeWidget->setCurrentItem(item);
 
     const QString targetPath = item->data(0, kItemPathRole).toString().trimmed();
     if (targetPath.isEmpty()) {
@@ -771,9 +926,20 @@ void FolderRenderer::renameTreeItem(QTreeWidgetItem* item)
     if (!item) {
         return;
     }
+    if (item->data(0, kPlaceholderRole).toBool()) {
+        return;
+    }
 
     if (isFolderItemLoading(item)) {
         showStatusMessage(QStringLiteral("Please wait until the folder finishes loading."));
+        return;
+    }
+    if (m_renamingItem && m_renamingItem != item) {
+        cancelInlineRename();
+    }
+    if (m_renamingItem == item && m_renameEditor) {
+        m_renameEditor->setFocus(Qt::OtherFocusReason);
+        m_renameEditor->selectAll();
         return;
     }
 
@@ -796,7 +962,88 @@ void FolderRenderer::renameTreeItem(QTreeWidgetItem* item)
         item->setFlags(item->flags() | Qt::ItemIsEditable);
     }
     m_treeWidget->setCurrentItem(item);
-    m_treeWidget->editItem(item, 0);
+
+    auto* editorWidget = new QWidget(m_treeWidget);
+    editorWidget->setObjectName(QStringLiteral("FolderRenameWidget"));
+    auto* editorLayout = new QHBoxLayout(editorWidget);
+    editorLayout->setContentsMargins(8, 2, 4, 2);
+    editorLayout->setSpacing(6);
+
+    auto* nameEdit = new QLineEdit(currentName, editorWidget);
+    nameEdit->setObjectName(QStringLiteral("FolderRenameEdit"));
+    nameEdit->installEventFilter(this);
+    editorLayout->addWidget(nameEdit, 1);
+
+    auto* okButton = new QPushButton(QStringLiteral("OK"), editorWidget);
+    okButton->setObjectName(QStringLiteral("FolderRenameButton"));
+    okButton->setCursor(Qt::PointingHandCursor);
+    editorLayout->addWidget(okButton, 0);
+
+    auto* cancelButton = new QPushButton(QStringLiteral("Cancel"), editorWidget);
+    cancelButton->setObjectName(QStringLiteral("FolderRenameButton"));
+    cancelButton->setCursor(Qt::PointingHandCursor);
+    editorLayout->addWidget(cancelButton, 0);
+
+    m_renamingItem = item;
+    m_renameEditor = nameEdit;
+    m_treeWidget->setItemWidget(item, 0, editorWidget);
+
+    connect(nameEdit, &QLineEdit::returnPressed, this, &FolderRenderer::confirmInlineRename);
+    connect(okButton, &QPushButton::clicked, this, &FolderRenderer::confirmInlineRename);
+    connect(cancelButton, &QPushButton::clicked, this, &FolderRenderer::cancelInlineRename);
+
+    QTimer::singleShot(0, nameEdit, [nameEdit]() {
+        nameEdit->setFocus(Qt::OtherFocusReason);
+        nameEdit->selectAll();
+    });
+}
+
+void FolderRenderer::confirmInlineRename()
+{
+    if (!m_treeWidget || !m_renamingItem || !m_renameEditor) {
+        return;
+    }
+
+    QTreeWidgetItem* item = m_renamingItem;
+    const QString newName = m_renameEditor->text().trimmed();
+    QWidget* editorWidget = m_treeWidget->itemWidget(item, 0);
+    m_treeWidget->removeItemWidget(item, 0);
+    if (editorWidget) {
+        editorWidget->deleteLater();
+    }
+    m_renamingItem = nullptr;
+    m_renameEditor = nullptr;
+
+    {
+        const QSignalBlocker blocker(m_treeWidget);
+        item->setText(0, newName);
+    }
+    handleInlineRename(item, 0);
+}
+
+void FolderRenderer::cancelInlineRename()
+{
+    if (!m_treeWidget || !m_renamingItem) {
+        return;
+    }
+
+    QTreeWidgetItem* item = m_renamingItem;
+    const QString currentName = item->data(0, kRenameOldNameRole).toString();
+    QWidget* editorWidget = m_treeWidget->itemWidget(item, 0);
+    m_treeWidget->removeItemWidget(item, 0);
+    if (editorWidget) {
+        editorWidget->deleteLater();
+    }
+    {
+        const QSignalBlocker blocker(m_treeWidget);
+        item->setText(0, currentName);
+        item->setData(0, kRenameOldPathRole, QString());
+        item->setData(0, kRenameOldNameRole, QString());
+        item->setFlags(item->flags() & ~Qt::ItemIsEditable);
+    }
+    m_renamingItem = nullptr;
+    m_renameEditor = nullptr;
+    updateFolderCountStatus(m_rootEntryCount);
 }
 
 void FolderRenderer::handleInlineRename(QTreeWidgetItem* item, int column)
@@ -880,7 +1127,13 @@ void FolderRenderer::updateTreeItemPathPrefix(QTreeWidgetItem* item, const QStri
     } else if (itemPath.startsWith(oldChildPrefix, Qt::CaseInsensitive)) {
         itemPath = normalizedNewPath + QLatin1Char('/') + itemPath.mid(oldChildPrefix.size());
     }
-    item->setData(0, kItemPathRole, itemPath);
+    {
+        const QSignalBlocker blocker(m_treeWidget);
+        item->setData(0, kItemPathRole, itemPath);
+        if (!itemPath.trimmed().isEmpty() && !item->data(0, kPlaceholderRole).toBool()) {
+            item->setText(0, QFileInfo(itemPath).fileName());
+        }
+    }
 
     for (int index = 0; index < item->childCount(); ++index) {
         updateTreeItemPathPrefix(item->child(index), normalizedOldPath, normalizedNewPath);

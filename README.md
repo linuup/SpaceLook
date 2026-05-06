@@ -15,14 +15,49 @@ The current implementation is optimized for fast local preview with native Qt wi
 The registry currently loads renderers in this order:
 
 1. `pdf`
-2. `document`
-3. `code`
-4. `text`
-5. `image`
-6. `media`
-7. `summary`
+2. `welcome`
+3. `document`
+4. `archive`
+5. `certificate`
+6. `folder`
+7. `rendered_page`
+8. `code`
+9. `text`
+10. `image`
+11. `media`
+12. `summary`
 
-The first renderer whose `canHandle()` returns `true` is used.
+If `core/RenderType.json` provides a renderer name, the registry resolves that renderer first. Otherwise, the first renderer whose `canHandle()` returns `true` is used.
+
+## Renderer Directory
+
+The current renderer modules under `renderers/` are:
+
+| Path | Main renderer or helper | Responsibility |
+| --- | --- | --- |
+| `renderers/certificate/` | `CertificateRenderer` | Previews certificate and key metadata, including password unlock flow for PKCS#12 containers. |
+| `renderers/code/` | `CodeRenderer` | Shows syntax highlighted source code and structured code files with line numbers. |
+| `renderers/document/` | `DocumentRenderer`, `PreviewHandlerHost` | Previews Office documents and hosts Windows Preview Handler based document views. |
+| `renderers/folder/` | `FolderRenderer` | Shows folder contents, shell folder entries, item actions, and inline rename UI. |
+| `renderers/image/` | `ImageRenderer` | Previews raster and vector images with zoom, pan, animated image handling, and special decoders. |
+| `renderers/markup/` | `RenderedPageRenderer`, `WebView2HtmlView`, `LiteHtmlView` | Previews Markdown and HTML through rendered page views, with WebView2 preferred for HTML. |
+| `renderers/media/` | `MediaRenderer` | Previews audio and video with modern playback controls, mpv first, Qt media fallback. |
+| `renderers/pdf/` | `PdfRenderer`, `PdfDocument`, `PdfViewWidget` | Previews PDF through PDFium and routes XPS or OXPS through Windows Preview Handler fallback. |
+| `renderers/summary/` | `SummaryRenderer`, `ArchiveRenderer` | Shows fallback metadata and archive contents. |
+| `renderers/text/` | `TextRenderer` | Shows plain text and structured text formats with formatting, wrapping, and line numbers. |
+| `renderers/welcome/` | `WelcomeRenderer` | Shows the welcome screen and supported preview entry points. |
+| `renderers/RendererRegistry.*` | `RendererRegistry` | Registers renderers, resolves configured renderer names, and selects a fallback renderer. |
+| `renderers/PreviewHost.*` | `PreviewHost` | Hosts renderer widgets, switches active renderer, and applies summary fallback requests. |
+| `renderers/FileTypeIconResolver.*` | `FileTypeIconResolver` | Resolves file type, shell, shortcut, and welcome icon assets. |
+| `renderers/OpenWithButton.*` | `OpenWithButton` | Provides the shared Open with control and handler menu. |
+| `renderers/PreviewHeaderBar.*` | `PreviewHeaderBar` | Provides shared title, path, action, and close chrome used by renderers. |
+| `renderers/SelectableTitleLabel.*` | `SelectableTitleLabel` | Provides title copy interactions used in renderer headers. |
+| `renderers/ModeSwitchButton.*` | `ModeSwitchButton` | Provides shared mode selection UI for text and code views. |
+| `renderers/FluentIconFont.*` | `FluentIconFont` | Loads the embedded Segoe Fluent Icons font and exposes glyph helpers. |
+| `renderers/CodeThemeManager.*` | `CodeThemeManager` | Provides syntax highlighting theme selection for code preview. |
+| `renderers/QmlShellRenderer.*` | `QmlShellRenderer` | Hosts QML based renderer surfaces where needed. |
+| `renderers/IPreviewRenderer.h` | `IPreviewRenderer` | Defines the common renderer interface. |
+| `renderers/PreviewLoadGuard.h` | `PreviewLoadGuard` | Helps guard async renderer loads from stale preview state. |
 
 ## Preview Type Coverage Matrix
 
@@ -30,8 +65,8 @@ The first renderer whose `canHandle()` returns `true` is used.
 
 | Category | Renderer | Supported formats or target behavior |
 | --- | --- | --- |
-| PDF and Page Documents | `PdfRenderer` | ✅ `pdf`, `xps`, `oxps` |
-| Office Documents | `DocumentRenderer` | ✅ `doc`, ✅ `docx`, `docm`, `dot`, `dotx`, `rtf`, ✅ `xls`, ✅ `xlsx`, `xlsm`, `xlsb`, `xlt`, `xltx`, ✅ `ppt`, ✅ `pptx`, `pptm`, `pps`, `ppsx`, `vsd`, `vsdx` |
+| PDF and Page Documents | `PdfRenderer` | ✅ `pdf`, ✅ `xps`, ✅ `oxps` |
+| Office Documents | `DocumentRenderer` | ✅ `doc`, ✅ `docx`, `docm`, `dot`, `dotx`, ✅ `rtf`, ✅ `xls`, ✅ `xlsx`, `xlsm`, `xlsb`, `xlt`, `xltx`, ✅ `ppt`, ✅ `pptx`, `pptm`, `pps`, `ppsx`, `vsd`, `vsdx` |
 | OpenDocument Files | `DocumentRenderer` | `odt`, `ott`, `ods`, `ots`, `odp`, `otp`, `odg`, `otg`, `odf` |
 | Markup Documents | `RenderedPageRenderer` | ✅ `md`, ✅ `markdown`, ✅ `mdown`, ✅ `mkd`, ✅ `html`, ✅ `htm`, ✅ `xhtml`, ✅ `mhtml` |
 | Code Files, C Family | `CodeRenderer` | ✅ `c`, ✅ `cc`, ✅ `cpp`, ✅ `cxx`, ✅ `h`, ✅ `hpp`, ✅ `hh`, ✅ `hxx`, ✅ `m`, ✅ `mm`, ✅ `cs`, ✅ `java`, ✅ `kt`, ✅ `kts`, ✅ `swift` |
@@ -42,13 +77,13 @@ The first renderer whose `canHandle()` returns `true` is used.
 | Code Files, Systems and Shaders | `CodeRenderer` | ✅ `go`, ✅ `rs`, ✅ `zig`, ✅ `nim`, ✅ `v`, ✅ `asm`, ✅ `s`, ✅ `glsl`, ✅ `vert`, ✅ `frag`, ✅ `hlsl`, ✅ `fx`, ✅ `wgsl`, ✅ `metal` |
 | Code Files, Build and Project | `CodeRenderer` | ✅ `dockerfile`, ✅ `containerfile`, ✅ `makefile`, ✅ `mk`, ✅ `ninja`, ✅ `bazel`, ✅ `bzl`, ✅ `BUILD`, ✅ `sln`, ✅ `vcxproj`, ✅ `csproj`, ✅ `fsproj` |
 | Text and Structured Data | `TextRenderer` | ✅ `txt`, ✅ `log`, ✅ `json`, ✅ `jsonc`, ✅ `xml`, ✅ `yaml`, ✅ `yml`, ✅ `toml`, ✅ `ini`, ✅ `conf`, ✅ `config`, ✅ `cfg`, ✅ `env`, ✅ `csv`, ✅ `tsv`, ✅ `properties`, ✅ `editorconfig`, ✅ `gitignore`, ✅ `gitattributes`, ✅ `reg`, ✅ `props`, ✅ `targets`, ✅ `cmake`, ✅ `qrc`, ✅ `qss`, ✅ `ui`, ✅ `pri`, ✅ `pro`, ✅ `tsbuildinfo` |
-| Images, Raster and Vector | `ImageRenderer` | ✅ `png`, ✅ `jpg`, ✅ `jpeg`, `jpe`, ✅ `bmp`, `dib`, ✅ `gif`, ✅ `webp`, ✅ `heic`, ✅ `heif`, `avif`, `tif`, `tiff`, ✅ `svg`, ✅ `ico`, `icns`, `dds`, `tga`, ✅ `psd` |
+| Images, Raster and Vector | `ImageRenderer` | ✅ `png`, ✅ `jpg`, ✅ `jpeg`, ✅ `jpe`, ✅ `bmp`, ✅ `dib`, ✅ `gif`, ✅ `webp`, ✅ `heic`, ✅ `heif`, ✅ `avif`, ✅ `tif`, ✅ `tiff`, ✅ `svg`, ✅ `ico`, ✅ `dds`, ✅ `tga` |
 | Camera RAW Images | `ImageRenderer` | `raw`, `dng`, `cr2`, `cr3`, `nef`, `arw`, `orf`, `rw2`, `raf`, `pef`, `srw`  |
 | Audio | `MediaRenderer` | ✅ `mp3`, ✅ `wav`, ✅ `flac`, ✅ `aac`, ✅ `m4a`, ✅ `ogg`, ✅ `oga`, ✅ `wma`, ✅ `opus`, ✅ `aiff`, ✅ `aif`, ✅ `alac`, ✅ `ape`, ✅ `mid`, ✅ `midi` |
 | Video | `MediaRenderer` | ✅ `mp4`, ✅ `mkv`, ✅ `avi`, ✅ `mov`, ✅ `wmv`, ✅ `webm`, ✅ `m4v`, ✅ `mpg`, ✅ `mpeg`, ✅ `mts`, ✅ `m2ts`, `3gp`, `flv`, `ogv`, `ts` |
 | Subtitles and Captions | `TextRenderer` | `srt`, `vtt`, `ass`, `ssa`, `sub`, `idx` |
 | Archives and Packages | `ArchiveRenderer` | ✅ `zip`, ✅ `7z`, ✅ `rar`, ✅ `tar`, ✅ `gz`, ✅ `tgz`, ✅ `bz2`, ✅ `tbz`, ✅ `tbz2`, ✅ `xz`, ✅ `txz`, ✅ `cab`, `iso`, `jar`, `war`, `ear`, `apk`, `ipa`, `nupkg`, `vsix`, `crx`, `appx`, `msix` |
-| Design Files | `SummaryRenderer` | `psd`, `ai`, `eps`, `sketch`, `fig`, `xd`, `indd`, `idml`, `cdr`, `afdesign`, `afphoto`, `aseprite`  |
+| Design Files | `SummaryRenderer` | ✅ `psd`, `ai`, `eps`, `sketch`, `fig`, `xd`, `indd`, `idml`, `cdr`, `afdesign`, `afphoto`, `aseprite`  |
 | CAD and Engineering | `SummaryRenderer` | `dwg`, `dxf`, `step`, `stp`, `iges`, `igs`, `stl`, `sat`, `sldprt`, `sldasm`, `ipt`, `iam`, `f3d`, `fcstd`  |
 | 3D Models | `SummaryRenderer` | `obj`, `fbx`, `glb`, `gltf`, `dae`, `3ds`, `ply`, `usd`, `usdz`, `blend`, `abc`, `ifc`  |
 | GIS Files | `SummaryRenderer` | `shp`, `shx`, `dbf`, `prj`, `geojson`, `kml`, `kmz`, `tif`, `tiff`, `geotiff`, `gpkg`, `gdb`, `mbtiles`, `osm`, `pbf`  |
@@ -58,8 +93,8 @@ The first renderer whose `canHandle()` returns `true` is used.
 | Finance, Calendar, and Contacts | `SummaryRenderer` | `ofx`, `qif`, `qfx`, `xbrl`, `ixbrl`, `ics`, `ical`, `vcf`, `vcard`  |
 | Database Files | `SummaryRenderer` | `sqlite`, `sqlite3`, `db`, `db3`, `mdb`, `accdb`, `frm`, `ibd`, `bak`, `dump`, `sqlitedb`  |
 | Fonts | `SummaryRenderer` | `ttf`, `otf`, `woff`, `woff2`, `eot`, `ttc`, `fon`  |
-| Certificates and Keys | `SummaryRenderer` | `cer`, `crt`, `pem`, `der`, `pfx`, `p12`, `key`, `pub`, `asc`, `gpg`  |
-| Executables and Installers | `SummaryRenderer` | `exe`, `dll`, `msi`, `msix`, `appx`, `com`, `scr`, `sys` |
+| Certificates and Keys | `CertificateRenderer` | ✅ `cer`, ✅ `crt`, ✅ `pem`, ✅ `der`, ✅ `pfx`, ✅ `p12`, ✅ `key`, ✅ `pub`, ✅ `asc`, ✅ `gpg`  |
+| Executables and Installers | `SummaryRenderer` | ✅ `exe`, ✅ `dll`, ✅ `msi`, `msix`, `appx`, ✅ `com`, ✅ `scr`, ✅ `sys` |
 | Shortcuts and Shell Items | `SummaryRenderer` | ✅ `lnk`, ✅ `url`, ✅ `appref-ms` |
 | Folders and Generic Files | `FolderRenderer`, `SummaryRenderer` | ✅ File system folders, ✅ shell folders, ✅ desktop items, ✅ unknown file types, ✅ generic fallback preview |
 

@@ -2,6 +2,7 @@
 
 #include <QHBoxLayout>
 #include <QLabel>
+#include <QFont>
 #include <QSizePolicy>
 #include <QToolButton>
 #include <QVBoxLayout>
@@ -62,6 +63,9 @@ PreviewHeaderBar::PreviewHeaderBar(QWidget* leadingWidget,
     textColumnLayout->addSpacing(topSpacerHeight);
 
     if (m_titleLabel) {
+        QFont titleFont = m_titleLabel->font();
+        titleFont.setWeight(QFont::Bold);
+        m_titleLabel->setFont(titleFont);
         m_titleLabel->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
         m_titleLabel->setMinimumHeight(titleAreaHeight);
         m_titleLabel->setMaximumHeight(titleAreaHeight);

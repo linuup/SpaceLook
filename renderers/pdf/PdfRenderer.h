@@ -1,5 +1,7 @@
 #pragma once
 
+#include <functional>
+
 #include <QPixmap>
 #include <QSet>
 #include <QVector>
@@ -12,6 +14,7 @@
 class QLabel;
 class QListWidget;
 class OpenWithButton;
+class PreviewHandlerHost;
 class PdfViewWidget;
 class SelectableTitleLabel;
 class QSpinBox;
@@ -30,6 +33,7 @@ public:
     QWidget* widget() override;
     void load(const HoveredItemInfo& info) override;
     void unload() override;
+    void setSummaryFallbackCallback(std::function<void(const HoveredItemInfo&, const QString&)> callback) override;
 
 private:
     void applyChrome();
@@ -44,6 +48,7 @@ private:
 
     HoveredItemInfo m_info;
     PdfDocument m_document;
+    std::function<void(const HoveredItemInfo&, const QString&)> m_summaryFallbackCallback;
     QWidget* m_headerRow = nullptr;
     QLabel* m_iconLabel = nullptr;
     SelectableTitleLabel* m_titleLabel = nullptr;
@@ -61,6 +66,7 @@ private:
     QLabel* m_pageTotalLabel = nullptr;
     QListWidget* m_thumbnailList = nullptr;
     PdfViewWidget* m_pdfView = nullptr;
+    PreviewHandlerHost* m_previewHandlerHost = nullptr;
     QTimer* m_thumbnailRenderTimer = nullptr;
     QVector<int> m_pendingThumbnailPages;
     QSet<int> m_renderedThumbnailPages;

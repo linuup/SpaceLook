@@ -1,6 +1,9 @@
 #include "renderers/image/ImageRenderer.h"
 
 #include <QDebug>
+#include <QCoreApplication>
+#include <QDir>
+#include <QElapsedTimer>
 #include <QEvent>
 #include <QFrame>
 #include <QFile>
@@ -14,9 +17,11 @@
 #include <QMouseEvent>
 #include <QMovie>
 #include <QPixmap>
+#include <QProcess>
 #include <QResizeEvent>
 #include <QScrollArea>
 #include <QScrollBar>
+#include <QTemporaryDir>
 #include <QTimer>
 #include <QToolButton>
 #include <QVBoxLayout>
@@ -38,6 +43,7 @@
 #include "renderers/FileTypeIconResolver.h"
 #include "renderers/OpenWithButton.h"
 #include "renderers/PreviewHeaderBar.h"
+#include "renderers/PreviewStateVisuals.h"
 #include "renderers/SelectableTitleLabel.h"
 #include "widgets/SpaceLookWindow.h"
 
@@ -49,6 +55,26 @@ constexpr double kZoomStepIn = 1.2;
 constexpr double kZoomStepOut = 1.0 / 1.2;
 constexpr int kShellThumbnailEdgeLength = 2048;
 constexpr int kPreviewThumbnailEdgeLength = 768;
+constexpr quint32 kDdsPixelFormatFourCc = 0x00000004;
+constexpr quint32 kDdsPixelFormatRgb = 0x00000040;
+constexpr quint32 kDdsPixelFormatAlphaPixels = 0x00000001;
+
+QString avifDecoderPath()
+{
+    const QString appDecoder = QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("avifdec.exe"));
+    if (QFileInfo::exists(appDecoder)) {
+        return appDecoder;
+    }
+
+#ifdef SPACELOOK_PROJECT_DIR
+    const QString projectDecoder = QDir(QStringLiteral(SPACELOOK_PROJECT_DIR)).filePath(QStringLiteral("third_party/libavif/bin/avifdec.exe"));
+    if (QFileInfo::exists(projectDecoder)) {
+        return projectDecoder;
+    }
+#endif
+
+    return QString();
+}
 
 bool isAnimatedImageFile(const QString& filePath)
 {
@@ -86,6 +112,172 @@ bool isAnimatedImageFile(const QString& filePath)
     return reader.jumpToNextImage();
 }
 
+quint16 readLe16(const QByteArray& data, int offset)
+{
+    if (offset < 0 || offset + 2 > data.size()) {
+        return 0;
+    }
+
+    const auto* bytes = reinterpret_cast<const uchar*>(data.constData() + offset);
+    return static_cast<quint16>(bytes[0] | (bytes[1] << 8));
+}
+
+quint32 readLe32(const QByteArray& data, int offset)
+{
+    if (offset < 0 || offset + 4 > data.size()) {
+        return 0;
+    }
+
+    const auto* bytes = reinterpret_cast<const uchar*>(data.constData() + offset);
+    return static_cast<quint32>(bytes[0] |
+        (bytes[1] << 8) |
+        (bytes[2] << 16) |
+        (bytes[3] << 24));
+}
+
+int expandedMaskValue(quint32 pixel, quint32 mask)
+{
+    if (mask == 0) {
+        return 0;
+    }
+
+    int shift = 0;
+    while (((mask >> shift) & 1u) == 0u && shift < 32) {
+        ++shift;
+    }
+
+    int bits = 0;
+    while (((mask >> (shift + bits)) & 1u) != 0u && shift + bits < 32) {
+        ++bits;
+    }
+
+    const quint32 value = (pixel & mask) >> shift;
+    const quint32 maxValue = (1u << bits) - 1u;
+    if (maxValue == 0u) {
+        return 0;
+    }
+
+    return static_cast<int>((value * 255u + maxValue / 2u) / maxValue);
+}
+
+QRgb colorFromRgb565(quint16 color)
+{
+    const int red = ((color >> 11) & 0x1f) * 255 / 31;
+    const int green = ((color >> 5) & 0x3f) * 255 / 63;
+    const int blue = (color & 0x1f) * 255 / 31;
+    return qRgb(red, green, blue);
+}
+
+QImage decodeDxt1Dds(const QByteArray& data, int width, int height, int dataOffset)
+{
+    if (width <= 0 || height <= 0 || dataOffset < 0 || dataOffset >= data.size()) {
+        return QImage();
+    }
+
+    QImage image(width, height, QImage::Format_ARGB32);
+    if (image.isNull()) {
+        return QImage();
+    }
+    image.fill(Qt::transparent);
+
+    const int blockCountX = (width + 3) / 4;
+    const int blockCountY = (height + 3) / 4;
+    const int requiredBytes = dataOffset + blockCountX * blockCountY * 8;
+    if (requiredBytes > data.size()) {
+        return QImage();
+    }
+
+    int blockOffset = dataOffset;
+    for (int blockY = 0; blockY < blockCountY; ++blockY) {
+        for (int blockX = 0; blockX < blockCountX; ++blockX) {
+            const quint16 c0 = readLe16(data, blockOffset);
+            const quint16 c1 = readLe16(data, blockOffset + 2);
+            const quint32 indices = readLe32(data, blockOffset + 4);
+            blockOffset += 8;
+
+            QRgb colors[4] = {
+                colorFromRgb565(c0),
+                colorFromRgb565(c1),
+                qRgb(0, 0, 0),
+                qRgb(0, 0, 0)
+            };
+
+            if (c0 > c1) {
+                colors[2] = qRgb(
+                    (2 * qRed(colors[0]) + qRed(colors[1])) / 3,
+                    (2 * qGreen(colors[0]) + qGreen(colors[1])) / 3,
+                    (2 * qBlue(colors[0]) + qBlue(colors[1])) / 3);
+                colors[3] = qRgb(
+                    (qRed(colors[0]) + 2 * qRed(colors[1])) / 3,
+                    (qGreen(colors[0]) + 2 * qGreen(colors[1])) / 3,
+                    (qBlue(colors[0]) + 2 * qBlue(colors[1])) / 3);
+            } else {
+                colors[2] = qRgb(
+                    (qRed(colors[0]) + qRed(colors[1])) / 2,
+                    (qGreen(colors[0]) + qGreen(colors[1])) / 2,
+                    (qBlue(colors[0]) + qBlue(colors[1])) / 2);
+                colors[3] = qRgba(0, 0, 0, 0);
+            }
+
+            for (int y = 0; y < 4; ++y) {
+                const int imageY = blockY * 4 + y;
+                if (imageY >= height) {
+                    continue;
+                }
+
+                auto* scanLine = reinterpret_cast<QRgb*>(image.scanLine(imageY));
+                for (int x = 0; x < 4; ++x) {
+                    const int imageX = blockX * 4 + x;
+                    if (imageX >= width) {
+                        continue;
+                    }
+
+                    const int indexShift = 2 * (4 * y + x);
+                    const int colorIndex = static_cast<int>((indices >> indexShift) & 0x3u);
+                    scanLine[imageX] = colors[colorIndex];
+                }
+            }
+        }
+    }
+
+    return image;
+}
+
+QImage decodeRgbDds(const QByteArray& data, int width, int height, int bitsPerPixel, quint32 redMask, quint32 greenMask, quint32 blueMask, quint32 alphaMask, int dataOffset)
+{
+    if (width <= 0 || height <= 0 || (bitsPerPixel != 24 && bitsPerPixel != 32) || dataOffset < 0 || dataOffset >= data.size()) {
+        return QImage();
+    }
+
+    const int bytesPerPixel = bitsPerPixel / 8;
+    const int sourceStride = ((width * bitsPerPixel + 31) / 32) * 4;
+    if (dataOffset + sourceStride * height > data.size()) {
+        return QImage();
+    }
+
+    QImage image(width, height, QImage::Format_ARGB32);
+    if (image.isNull()) {
+        return QImage();
+    }
+
+    for (int y = 0; y < height; ++y) {
+        const uchar* sourceLine = reinterpret_cast<const uchar*>(data.constData() + dataOffset + y * sourceStride);
+        auto* targetLine = reinterpret_cast<QRgb*>(image.scanLine(y));
+        for (int x = 0; x < width; ++x) {
+            quint32 pixel = 0;
+            memcpy(&pixel, sourceLine + x * bytesPerPixel, static_cast<size_t>(bytesPerPixel));
+            const int alpha = alphaMask ? expandedMaskValue(pixel, alphaMask) : 255;
+            targetLine[x] = qRgba(
+                expandedMaskValue(pixel, redMask),
+                expandedMaskValue(pixel, greenMask),
+                expandedMaskValue(pixel, blueMask),
+                alpha);
+        }
+    }
+
+    return image;
+}
+
 struct ImageLoadResult
 {
     QImage image;
@@ -120,9 +312,10 @@ void ensureLibheifInitialized()
             return false;
         }
 
-        qDebug().noquote() << QStringLiteral("[SpaceLookRender] libheif initialized version=\"%1\" hevcDecoder=%2")
+        qDebug().noquote() << QStringLiteral("[SpaceLookRender] libheif initialized version=\"%1\" hevcDecoder=%2 av1Decoder=%3")
             .arg(QString::fromUtf8(heif_get_version()))
-            .arg(heif_have_decoder_for_format(heif_compression_HEVC));
+            .arg(heif_have_decoder_for_format(heif_compression_HEVC))
+            .arg(heif_have_decoder_for_format(heif_compression_AV1));
         return true;
     }();
 
@@ -130,10 +323,23 @@ void ensureLibheifInitialized()
 }
 #endif
 
-ImageLoadResult loadImagePreviewContent(const QString& filePath, const std::function<QImage(const QString&)>& loader)
+ImageLoadResult loadImagePreviewContent(const QString& filePath,
+                                        const PreviewCancellationToken& cancelToken,
+                                        const std::function<QImage(const QString&)>& loader)
 {
     ImageLoadResult result;
+    if (previewCancellationRequested(cancelToken)) {
+        result.statusMessage = QStringLiteral("Image preview was canceled.");
+        return result;
+    }
+
     result.image = loader(filePath);
+    if (previewCancellationRequested(cancelToken)) {
+        result.image = QImage();
+        result.statusMessage = QStringLiteral("Image preview was canceled.");
+        return result;
+    }
+
     result.success = !result.image.isNull();
     if (!result.success) {
         result.statusMessage = QStringLiteral("Failed to load the image.");
@@ -141,10 +347,23 @@ ImageLoadResult loadImagePreviewContent(const QString& filePath, const std::func
     return result;
 }
 
-ImageLoadResult loadThumbnailPreviewContent(const QString& filePath, const std::function<QImage(const QString&)>& loader)
+ImageLoadResult loadThumbnailPreviewContent(const QString& filePath,
+                                            const PreviewCancellationToken& cancelToken,
+                                            const std::function<QImage(const QString&)>& loader)
 {
     ImageLoadResult result;
+    if (previewCancellationRequested(cancelToken)) {
+        result.statusMessage = QStringLiteral("Thumbnail preview was canceled.");
+        return result;
+    }
+
     result.image = loader(filePath);
+    if (previewCancellationRequested(cancelToken)) {
+        result.image = QImage();
+        result.statusMessage = QStringLiteral("Thumbnail preview was canceled.");
+        return result;
+    }
+
     result.success = !result.image.isNull();
     result.finalImage = false;
     if (!result.success) {
@@ -264,7 +483,8 @@ ImageRenderer::ImageRenderer(QWidget* parent)
     m_scrollArea->viewport()->installEventFilter(this);
     m_imageLabel->installEventFilter(this);
     m_iconLabel->setFixedSize(72, 72);
-    m_iconLabel->setScaledContents(true);
+    m_iconLabel->setScaledContents(false);
+    m_iconLabel->setAlignment(Qt::AlignCenter);
     m_titleLabel->setWordWrap(true);
     m_pathTitleLabel->hide();
     m_pathValueLabel->setTextInteractionFlags(Qt::TextSelectableByMouse);
@@ -284,6 +504,7 @@ ImageRenderer::ImageRenderer(QWidget* parent)
             previewWindow->hidePreview();
         }
     });
+    PreviewStateVisuals::prepareStatusLabel(m_statusLabel);
     m_statusLabel->hide();
     updateDragCursor();
 
@@ -321,14 +542,16 @@ void ImageRenderer::setLoadingStateCallback(std::function<void(bool)> callback)
 
 void ImageRenderer::load(const HoveredItemInfo& info)
 {
+    cancelPreviewTask(m_cancelToken);
+    const PreviewCancellationToken cancelToken = makePreviewCancellationToken();
+    m_cancelToken = cancelToken;
     m_info = info;
     const PreviewLoadGuard::Token loadToken = m_loadGuard.begin(info.filePath);
     notifyLoadingState(true);
     qDebug().noquote() << QStringLiteral("[SpaceLookRender] ImageRenderer load path=\"%1\"").arg(info.filePath);
     m_titleLabel->setText(info.title.isEmpty() ? QStringLiteral("Image Preview") : info.title);
     m_titleLabel->setCopyText(m_titleLabel->text());
-    const QIcon typeIcon(FileTypeIconResolver::iconForInfo(info));
-    m_iconLabel->setPixmap(typeIcon.pixmap(128, 128));
+    m_iconLabel->setPixmap(FileTypeIconResolver::pixmapForInfo(info, m_iconLabel->contentsRect().size()));
     m_pathValueLabel->setText(info.filePath.trimmed().isEmpty() ? QStringLiteral("(Unavailable)") : info.filePath);
     m_openWithButton->setTargetContext(info.filePath, info.typeKey);
     clearAnimatedImage();
@@ -338,8 +561,7 @@ void ImageRenderer::load(const HoveredItemInfo& info)
     m_isDragging = false;
     m_movieFrameSize = QSize();
     m_imageLabel->setText(QStringLiteral("Loading image preview..."));
-    m_statusLabel->setText(QStringLiteral("Loading image preview..."));
-    m_statusLabel->show();
+    PreviewStateVisuals::showStatus(m_statusLabel, QStringLiteral("Loading image preview..."), PreviewStateVisuals::Kind::Loading);
     updateDragCursor();
 
     if (isAnimatedImageFile(info.filePath) && tryLoadAnimatedImage(info.filePath)) {
@@ -348,16 +570,16 @@ void ImageRenderer::load(const HoveredItemInfo& info)
     }
 
     auto* thumbnailWatcher = new QFutureWatcher<ImageLoadResult>(this);
-    connect(thumbnailWatcher, &QFutureWatcher<ImageLoadResult>::finished, this, [this, thumbnailWatcher, loadToken]() {
-        const ImageLoadResult result = thumbnailWatcher->result();
+    connect(thumbnailWatcher, &QFutureWatcher<ImageLoadResult>::finished, this, [this, thumbnailWatcher, loadToken, cancelToken]() {
         thumbnailWatcher->deleteLater();
 
-        if (!m_loadGuard.isCurrent(loadToken, m_info.filePath)) {
+        if (previewCancellationRequested(cancelToken) || !m_loadGuard.isCurrent(loadToken, m_info.filePath)) {
             qDebug().noquote() << QStringLiteral("[SpaceLookRender] ImageRenderer discarded stale thumbnail result path=\"%1\"")
                 .arg(loadToken.path);
             return;
         }
 
+        const ImageLoadResult result = thumbnailWatcher->result();
         if (!result.success || result.image.isNull() || m_hasHighResolutionImage) {
             return;
         }
@@ -367,40 +589,37 @@ void ImageRenderer::load(const HoveredItemInfo& info)
             return;
         }
 
-        m_statusLabel->setText(QStringLiteral("Thumbnail ready. Loading full image..."));
-        m_statusLabel->show();
+        PreviewStateVisuals::showStatus(m_statusLabel, QStringLiteral("Thumbnail ready. Loading full image..."), PreviewStateVisuals::Kind::Loading);
         updatePixmapView();
         qDebug().noquote() << QStringLiteral("[SpaceLookRender] ImageRenderer thumbnail loaded size=%1x%2 path=\"%3\"")
             .arg(m_originalPixmap.width())
             .arg(m_originalPixmap.height())
             .arg(loadToken.path);
     });
-    thumbnailWatcher->setFuture(QtConcurrent::run([this, filePath = info.filePath]() {
-        return loadThumbnailPreviewContent(filePath, [this](const QString& path) {
-            return loadThumbnailImageForPath(path);
+    thumbnailWatcher->setFuture(QtConcurrent::run([this, filePath = info.filePath, cancelToken]() {
+        return loadThumbnailPreviewContent(filePath, cancelToken, [this, cancelToken](const QString& path) {
+            return loadThumbnailImageForPath(path, cancelToken);
         });
     }));
 
     auto* watcher = new QFutureWatcher<ImageLoadResult>(this);
-    connect(watcher, &QFutureWatcher<ImageLoadResult>::finished, this, [this, watcher, loadToken]() {
-        const ImageLoadResult result = watcher->result();
+    connect(watcher, &QFutureWatcher<ImageLoadResult>::finished, this, [this, watcher, loadToken, cancelToken]() {
         watcher->deleteLater();
 
-        if (!m_loadGuard.isCurrent(loadToken, m_info.filePath)) {
+        if (previewCancellationRequested(cancelToken) || !m_loadGuard.isCurrent(loadToken, m_info.filePath)) {
             qDebug().noquote() << QStringLiteral("[SpaceLookRender] ImageRenderer discarded stale async result path=\"%1\"")
                 .arg(loadToken.path);
             return;
         }
 
+        const ImageLoadResult result = watcher->result();
         if (!result.success) {
             qDebug().noquote() << QStringLiteral("[SpaceLookRender] ImageRenderer failed to load: %1").arg(loadToken.path);
             if (m_originalPixmap.isNull()) {
-                m_statusLabel->setText(result.statusMessage);
-                m_statusLabel->show();
+                PreviewStateVisuals::showStatus(m_statusLabel, result.statusMessage, PreviewStateVisuals::Kind::Error);
                 m_imageLabel->setText(QStringLiteral("Image preview is unavailable."));
             } else {
-                m_statusLabel->setText(result.statusMessage);
-                m_statusLabel->show();
+                PreviewStateVisuals::showStatus(m_statusLabel, result.statusMessage, PreviewStateVisuals::Kind::Error);
             }
             notifyLoadingState(false);
             return;
@@ -409,8 +628,7 @@ void ImageRenderer::load(const HoveredItemInfo& info)
         m_originalPixmap = QPixmap::fromImage(result.image);
         if (m_originalPixmap.isNull()) {
             if (m_originalPixmap.isNull()) {
-                m_statusLabel->setText(QStringLiteral("Failed to load the image."));
-                m_statusLabel->show();
+                PreviewStateVisuals::showStatus(m_statusLabel, QStringLiteral("Failed to load the image."), PreviewStateVisuals::Kind::Error);
                 m_imageLabel->setText(QStringLiteral("Image preview is unavailable."));
             }
             notifyLoadingState(false);
@@ -418,8 +636,7 @@ void ImageRenderer::load(const HoveredItemInfo& info)
         }
 
         m_hasHighResolutionImage = true;
-        m_statusLabel->clear();
-        m_statusLabel->hide();
+        PreviewStateVisuals::clearStatus(m_statusLabel);
         updatePixmapView();
         qDebug().noquote() << QStringLiteral("[SpaceLookRender] ImageRenderer full image loaded size=%1x%2 path=\"%3\"")
             .arg(m_originalPixmap.width())
@@ -427,18 +644,33 @@ void ImageRenderer::load(const HoveredItemInfo& info)
             .arg(loadToken.path);
         notifyLoadingState(false);
     });
-    watcher->setFuture(QtConcurrent::run([this, filePath = info.filePath]() {
-        ImageLoadResult result = loadImagePreviewContent(filePath, [this](const QString& path) {
-            return loadImageForPath(path);
+    watcher->setFuture(QtConcurrent::run([this, filePath = info.filePath, cancelToken]() {
+        ImageLoadResult result = loadImagePreviewContent(filePath, cancelToken, [this, cancelToken](const QString& path) {
+            return loadImageForPath(path, cancelToken);
         });
         result.finalImage = true;
         return result;
     }));
 }
 
-QImage ImageRenderer::loadImageForPath(const QString& filePath) const
+QImage ImageRenderer::loadImageForPath(const QString& filePath, const PreviewCancellationToken& cancelToken) const
 {
+    if (previewCancellationRequested(cancelToken)) {
+        return QImage();
+    }
+
     const QString suffix = QFileInfo(filePath).suffix().trimmed().toLower();
+    if (suffix == QStringLiteral("avif")) {
+        const QImage avifImage = loadAvifImageForPath(filePath, cancelToken);
+        if (!avifImage.isNull()) {
+            return avifImage;
+        }
+    }
+
+    if (previewCancellationRequested(cancelToken)) {
+        return QImage();
+    }
+
     if (suffix == QStringLiteral("heic") || suffix == QStringLiteral("heif")) {
         const QImage heifImage = loadHeifImageForPath(filePath);
         if (!heifImage.isNull()) {
@@ -446,9 +678,34 @@ QImage ImageRenderer::loadImageForPath(const QString& filePath) const
         }
     }
 
+    if (suffix == QStringLiteral("dds")) {
+        const QImage ddsImage = loadDdsImageForPath(filePath);
+        if (!ddsImage.isNull()) {
+            return ddsImage;
+        }
+    }
+
+    if (previewCancellationRequested(cancelToken)) {
+        return QImage();
+    }
+
     const QImage directImage(filePath);
     if (!directImage.isNull()) {
         return directImage;
+    }
+
+    if (suffix == QStringLiteral("dib")) {
+        QFile dibFile(filePath);
+        if (dibFile.open(QIODevice::ReadOnly)) {
+            QImage dibImage;
+            if (dibImage.loadFromData(dibFile.readAll(), "BMP")) {
+                return dibImage;
+            }
+        }
+    }
+
+    if (previewCancellationRequested(cancelToken)) {
+        return QImage();
     }
 
     qDebug().noquote() << QStringLiteral("[SpaceLookRender] Direct image decode failed, trying shell thumbnail: %1")
@@ -456,9 +713,154 @@ QImage ImageRenderer::loadImageForPath(const QString& filePath) const
     return loadShellThumbnailForPath(filePath, kShellThumbnailEdgeLength);
 }
 
-QImage ImageRenderer::loadThumbnailImageForPath(const QString& filePath) const
+QImage ImageRenderer::loadThumbnailImageForPath(const QString& filePath, const PreviewCancellationToken& cancelToken) const
 {
+    if (previewCancellationRequested(cancelToken)) {
+        return QImage();
+    }
+
     return loadShellThumbnailForPath(filePath, kPreviewThumbnailEdgeLength);
+}
+
+QImage ImageRenderer::loadAvifImageForPath(const QString& filePath, const PreviewCancellationToken& cancelToken) const
+{
+    if (previewCancellationRequested(cancelToken)) {
+        return QImage();
+    }
+
+    const QString decoderPath = avifDecoderPath();
+    if (decoderPath.isEmpty()) {
+        qDebug().noquote() << QStringLiteral("[SpaceLookRender] AVIF decoder executable is missing.");
+        return QImage();
+    }
+
+    QTemporaryDir decodeDir;
+    if (!decodeDir.isValid()) {
+        qDebug().noquote() << QStringLiteral("[SpaceLookRender] AVIF temporary decode directory is unavailable.");
+        return QImage();
+    }
+
+    const QString outputPath = QDir(decodeDir.path()).filePath(QStringLiteral("decoded.png"));
+    QProcess decoderProcess;
+    decoderProcess.setProgram(decoderPath);
+    decoderProcess.setArguments({ filePath, outputPath });
+    decoderProcess.setProcessChannelMode(QProcess::MergedChannels);
+    decoderProcess.start();
+    if (!decoderProcess.waitForStarted(3000)) {
+        qDebug().noquote() << QStringLiteral("[SpaceLookRender] AVIF decoder failed to start path=\"%1\" decoder=\"%2\" error=\"%3\"")
+            .arg(filePath, decoderPath, decoderProcess.errorString());
+        return QImage();
+    }
+
+    QElapsedTimer timeout;
+    timeout.start();
+    while (!decoderProcess.waitForFinished(100)) {
+        if (previewCancellationRequested(cancelToken)) {
+            decoderProcess.kill();
+            decoderProcess.waitForFinished(1000);
+            qDebug().noquote() << QStringLiteral("[SpaceLookRender] AVIF decoder canceled path=\"%1\" decoder=\"%2\"")
+                .arg(filePath, decoderPath);
+            return QImage();
+        }
+
+        if (timeout.elapsed() < 30000) {
+            continue;
+        }
+
+        decoderProcess.kill();
+        decoderProcess.waitForFinished(1000);
+        qDebug().noquote() << QStringLiteral("[SpaceLookRender] AVIF decoder timed out path=\"%1\" decoder=\"%2\"")
+            .arg(filePath, decoderPath);
+        return QImage();
+    }
+
+    if (previewCancellationRequested(cancelToken)) {
+        return QImage();
+    }
+
+    const QByteArray decoderOutput = decoderProcess.readAll();
+    if (decoderProcess.exitStatus() != QProcess::NormalExit || decoderProcess.exitCode() != 0) {
+        qDebug().noquote() << QStringLiteral("[SpaceLookRender] AVIF decoder failed path=\"%1\" decoder=\"%2\" exit=%3 output=\"%4\"")
+            .arg(filePath, decoderPath)
+            .arg(decoderProcess.exitCode())
+            .arg(QString::fromLocal8Bit(decoderOutput).trimmed());
+        return QImage();
+    }
+
+    QImage decodedImage(outputPath);
+    if (decodedImage.isNull()) {
+        qDebug().noquote() << QStringLiteral("[SpaceLookRender] AVIF decoder did not produce a readable PNG path=\"%1\" output=\"%2\"")
+            .arg(filePath, outputPath);
+        return QImage();
+    }
+
+    qDebug().noquote() << QStringLiteral("[SpaceLookRender] AVIF decoded through libavif avifdec size=%1x%2 path=\"%3\"")
+        .arg(decodedImage.width())
+        .arg(decodedImage.height())
+        .arg(filePath);
+    return decodedImage;
+}
+
+QImage ImageRenderer::loadDdsImageForPath(const QString& filePath) const
+{
+    QFile sourceFile(filePath);
+    if (!sourceFile.open(QIODevice::ReadOnly)) {
+        qDebug().noquote() << QStringLiteral("[SpaceLookRender] DDS source open failed for: %1 error=\"%2\"")
+            .arg(filePath, sourceFile.errorString());
+        return QImage();
+    }
+
+    const QByteArray data = sourceFile.readAll();
+    if (data.size() < 128 || data.left(4) != QByteArrayLiteral("DDS ")) {
+        qDebug().noquote() << QStringLiteral("[SpaceLookRender] DDS header is invalid: %1").arg(filePath);
+        return QImage();
+    }
+
+    const quint32 headerSize = readLe32(data, 4);
+    const quint32 pixelFormatSize = readLe32(data, 76);
+    if (headerSize != 124 || pixelFormatSize != 32) {
+        qDebug().noquote() << QStringLiteral("[SpaceLookRender] DDS unsupported header size path=\"%1\" header=%2 pixelFormat=%3")
+            .arg(filePath)
+            .arg(headerSize)
+            .arg(pixelFormatSize);
+        return QImage();
+    }
+
+    const int height = static_cast<int>(readLe32(data, 12));
+    const int width = static_cast<int>(readLe32(data, 16));
+    const quint32 pixelFormatFlags = readLe32(data, 80);
+    const QByteArray fourCc = data.mid(84, 4);
+    int dataOffset = 128;
+
+    if (fourCc == QByteArrayLiteral("DX10")) {
+        dataOffset += 20;
+    }
+
+    if ((pixelFormatFlags & kDdsPixelFormatFourCc) != 0 && fourCc == QByteArrayLiteral("DXT1")) {
+        const QImage image = decodeDxt1Dds(data, width, height, dataOffset);
+        if (!image.isNull()) {
+            return image;
+        }
+    }
+
+    if ((pixelFormatFlags & kDdsPixelFormatRgb) != 0) {
+        const int bitsPerPixel = static_cast<int>(readLe32(data, 88));
+        const quint32 redMask = readLe32(data, 92);
+        const quint32 greenMask = readLe32(data, 96);
+        const quint32 blueMask = readLe32(data, 100);
+        const quint32 alphaMask = (pixelFormatFlags & kDdsPixelFormatAlphaPixels) != 0 ? readLe32(data, 104) : 0;
+        const QImage image = decodeRgbDds(data, width, height, bitsPerPixel, redMask, greenMask, blueMask, alphaMask, dataOffset);
+        if (!image.isNull()) {
+            return image;
+        }
+    }
+
+    qDebug().noquote() << QStringLiteral("[SpaceLookRender] DDS format unsupported path=\"%1\" fourCC=\"%2\" flags=0x%3 size=%4x%5")
+        .arg(filePath, QString::fromLatin1(fourCc))
+        .arg(QString::number(pixelFormatFlags, 16))
+        .arg(width)
+        .arg(height);
+    return QImage();
 }
 
 QImage ImageRenderer::loadHeifImageForPath(const QString& filePath) const
@@ -702,8 +1104,7 @@ bool ImageRenderer::tryLoadAnimatedImage(const QString& filePath)
     });
     connect(movie.get(), &QMovie::stateChanged, this, [this](QMovie::MovieState state) {
         if (state == QMovie::Running) {
-            m_statusLabel->clear();
-            m_statusLabel->hide();
+            PreviewStateVisuals::clearStatus(m_statusLabel);
         }
     });
 
@@ -712,8 +1113,7 @@ bool ImageRenderer::tryLoadAnimatedImage(const QString& filePath)
     m_imageLabel->clear();
     m_imageLabel->setMovie(m_movie);
     m_hasHighResolutionImage = true;
-    m_statusLabel->setText(QStringLiteral("Animated image ready"));
-    m_statusLabel->show();
+    PreviewStateVisuals::showStatus(m_statusLabel, QStringLiteral("Animated image ready"), PreviewStateVisuals::Kind::Success);
     m_movie->start();
     updateMovieView();
 
@@ -737,6 +1137,7 @@ void ImageRenderer::clearAnimatedImage()
 
 void ImageRenderer::unload()
 {
+    cancelPreviewTask(m_cancelToken);
     m_loadGuard.cancel();
     notifyLoadingState(false);
     clearAnimatedImage();
@@ -748,8 +1149,7 @@ void ImageRenderer::unload()
     m_pathValueLabel->clear();
     m_openWithButton->setTargetContext(QString(), QString());
     m_imageLabel->clear();
-    m_statusLabel->clear();
-    m_statusLabel->hide();
+    PreviewStateVisuals::clearStatus(m_statusLabel);
     m_info = HoveredItemInfo();
     updateDragCursor();
 }
@@ -764,17 +1164,14 @@ void ImageRenderer::notifyLoadingState(bool loading)
 void ImageRenderer::showStatusMessage(const QString& message)
 {
     if (message.trimmed().isEmpty()) {
-        m_statusLabel->clear();
-        m_statusLabel->hide();
+        PreviewStateVisuals::clearStatus(m_statusLabel);
         return;
     }
 
-    m_statusLabel->setText(message);
-    m_statusLabel->show();
+    PreviewStateVisuals::showStatus(m_statusLabel, message);
     QTimer::singleShot(1400, m_statusLabel, [label = m_statusLabel]() {
         if (label) {
-            label->clear();
-            label->hide();
+            PreviewStateVisuals::clearStatus(label);
         }
     });
 }
@@ -876,7 +1273,7 @@ void ImageRenderer::applyChrome()
         "}"
         "#ImagePathTitle {"
         "  color: #16324a;"
-        "  font-family: 'Segoe UI Semibold';"
+        "  font-family: 'Segoe UI Rounded';"
         "}"
         "#ImagePathValue {"
         "  color: #445d76;"
@@ -979,14 +1376,14 @@ void ImageRenderer::applyChrome()
     );
 
     QFont titleFont;
-    titleFont.setFamily(QStringLiteral("Microsoft YaHei UI"));
+    titleFont.setFamily(QStringLiteral("Segoe UI Rounded"));
     titleFont.setPixelSize(20);
     titleFont.setWeight(QFont::Bold);
     m_titleLabel->setFont(titleFont);
     m_titleLabel->setWordWrap(true);
 
     QFont metaFont;
-    metaFont.setFamily(QStringLiteral("Segoe UI"));
+    metaFont.setFamily(QStringLiteral("Segoe UI Rounded"));
     metaFont.setPixelSize(13);
     m_metaLabel->setFont(metaFont);
     m_pathTitleLabel->setFont(metaFont);

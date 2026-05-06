@@ -34,6 +34,7 @@ private:
     void showLoadingOverlay(const HoveredItemInfo& info, const QString& rendererId);
     void hideLoadingOverlay();
     void updateLoadingOverlayGeometry();
+    void showSummaryFallback(const HoveredItemInfo& info, const QString& reason);
 
     QStackedWidget* m_stack = nullptr;
     QWidget* m_loadingOverlay = nullptr;

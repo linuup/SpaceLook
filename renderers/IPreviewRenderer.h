@@ -20,4 +20,5 @@ public:
     virtual void unload() = 0;
     virtual bool reportsLoadingState() const { return false; }
     virtual void setLoadingStateCallback(std::function<void(bool)> callback) { (void)callback; }
+    virtual void setSummaryFallbackCallback(std::function<void(const HoveredItemInfo&, const QString&)> callback) { (void)callback; }
 };

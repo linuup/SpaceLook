@@ -147,7 +147,7 @@ bool PreviewHandlerHost::openFile(const QString& filePath, QString* errorMessage
     const QString handlerGuid = previewHandlerGuidForExtension(QStringLiteral(".") + fileInfo.suffix());
     if (handlerGuid.isEmpty()) {
         if (errorMessage) {
-            *errorMessage = QStringLiteral("No Windows Preview Handler is registered for this Office format.");
+            *errorMessage = QStringLiteral("No Windows Preview Handler is registered for this file format.");
         }
         return false;
     }

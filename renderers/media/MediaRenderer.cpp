@@ -29,6 +29,7 @@
 #include "renderers/FluentIconFont.h"
 #include "renderers/OpenWithButton.h"
 #include "renderers/PreviewHeaderBar.h"
+#include "renderers/PreviewStateVisuals.h"
 #include "renderers/SelectableTitleLabel.h"
 #include "widgets/SpaceLookWindow.h"
 
@@ -525,7 +526,8 @@ MediaRenderer::MediaRenderer(QWidget* parent)
     m_centerOverlayLabel->setCursor(Qt::PointingHandCursor);
     m_centerOverlayLabel->hide();
     m_iconLabel->setFixedSize(72, 72);
-    m_iconLabel->setScaledContents(true);
+    m_iconLabel->setScaledContents(false);
+    m_iconLabel->setAlignment(Qt::AlignCenter);
     m_titleLabel->setWordWrap(true);
     m_pathTitleLabel->hide();
     m_pathValueLabel->setTextInteractionFlags(Qt::TextSelectableByMouse);
@@ -569,6 +571,8 @@ MediaRenderer::MediaRenderer(QWidget* parent)
     m_volumeSlider->setCursor(Qt::PointingHandCursor);
     m_playPauseButton->setToolTip(QStringLiteral("Play or pause"));
     m_volumeButton->setToolTip(QStringLiteral("Mute or restore volume"));
+    PreviewStateVisuals::prepareStatusLabel(m_statusLabel);
+    m_statusLabel->hide();
     m_playPauseButton->setText(playGlyph());
     m_volumeButton->setText(volumeGlyph());
     m_volumeValueLabel->setText(QString::number(m_audioVolume));
@@ -753,8 +757,7 @@ void MediaRenderer::load(const HoveredItemInfo& info)
 
     m_titleLabel->setText(displayTitleForMedia(info));
     m_titleLabel->setCopyText(m_titleLabel->text());
-    const QIcon typeIcon(FileTypeIconResolver::iconForInfo(info));
-    m_iconLabel->setPixmap(typeIcon.pixmap(128, 128));
+    m_iconLabel->setPixmap(FileTypeIconResolver::pixmapForInfo(info, m_iconLabel->contentsRect().size()));
     m_pathValueLabel->setText(info.filePath.trimmed().isEmpty() ? QStringLiteral("(Unavailable)") : info.filePath);
     m_openWithButton->setTargetContext(info.filePath, info.typeKey);
 
@@ -872,7 +875,7 @@ void MediaRenderer::unload()
     m_positionSlider->setRange(0, 0);
     m_positionLabel->setText(QStringLiteral("00:00"));
     m_durationLabel->setText(QStringLiteral("00:00"));
-    m_statusLabel->clear();
+    PreviewStateVisuals::clearStatus(m_statusLabel);
     m_pathValueLabel->clear();
     m_openWithButton->setTargetContext(QString(), QString());
     m_audioPlaceholder->clear();
@@ -909,7 +912,7 @@ void MediaRenderer::applyChrome()
         "}"
         "#MediaPathTitle {"
         "  color: #16324a;"
-        "  font-family: 'Segoe UI Semibold';"
+        "  font-family: 'Segoe UI Rounded';"
         "}"
         "#MediaPathValue {"
         "  color: #5f5f5f;"
@@ -1011,7 +1014,7 @@ void MediaRenderer::applyChrome()
         "}"
         "#MediaVolumeValue {"
         "  color: #4c4c4c;"
-        "  font-family: 'Segoe UI';"
+        "  font-family: 'Segoe UI Rounded';"
         "  font-size: 12px;"
         "  min-width: 28px;"
         "}"
@@ -1065,14 +1068,14 @@ void MediaRenderer::applyChrome()
     );
 
     QFont titleFont;
-    titleFont.setFamily(QStringLiteral("Microsoft YaHei UI"));
+    titleFont.setFamily(QStringLiteral("Segoe UI Rounded"));
     titleFont.setPixelSize(20);
     titleFont.setWeight(QFont::Bold);
     m_titleLabel->setFont(titleFont);
     m_titleLabel->setWordWrap(true);
 
     QFont metaFont;
-    metaFont.setFamily(QStringLiteral("Segoe UI"));
+    metaFont.setFamily(QStringLiteral("Segoe UI Rounded"));
     metaFont.setPixelSize(11);
     m_metaLabel->setFont(metaFont);
     m_pathTitleLabel->setFont(metaFont);
@@ -1082,7 +1085,7 @@ void MediaRenderer::applyChrome()
     m_pathValueLabel->setWordWrap(true);
 
     QFont placeholderFont;
-    placeholderFont.setFamily(QStringLiteral("Segoe UI Semibold"));
+    placeholderFont.setFamily(QStringLiteral("Segoe UI Rounded"));
     placeholderFont.setPixelSize(18);
     m_audioPlaceholder->setFont(placeholderFont);
 
@@ -1398,13 +1401,11 @@ void MediaRenderer::syncVideoViewportGeometry()
 void MediaRenderer::updateStatusLabel(const QString& message)
 {
     if (message.trimmed().isEmpty()) {
-        m_statusLabel->clear();
-        m_statusLabel->hide();
+        PreviewStateVisuals::clearStatus(m_statusLabel);
         return;
     }
 
-    m_statusLabel->setText(QStringLiteral("%1\n%2").arg(message, m_info.filePath));
-    m_statusLabel->show();
+    PreviewStateVisuals::showStatus(m_statusLabel, QStringLiteral("%1\n%2").arg(message, m_info.filePath));
 }
 
 QString MediaRenderer::formatTime(qint64 milliseconds) const

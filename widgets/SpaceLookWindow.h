@@ -35,6 +35,7 @@ public:
     void showOpenWithMenuAt(const QPoint& globalPos);
     void showSettingsWindow();
     void toggleExpandedPreview();
+    void applySummaryPreviewSize(const HoveredItemInfo& info);
     bool isExpandedPreview() const;
     bool supportsExpandedPreview() const;
     Q_INVOKABLE void requestSettingsWindowMinimize();

@@ -5,6 +5,7 @@
 
 #include "core/preview_state.h"
 #include "renderers/summary/ArchiveRenderer.h"
+#include "renderers/certificate/CertificateRenderer.h"
 #include "renderers/code/CodeRenderer.h"
 #include "renderers/document/DocumentRenderer.h"
 #include "renderers/image/ImageRenderer.h"
@@ -35,6 +36,7 @@ RendererRegistry::RendererRegistry(PreviewState* previewState)
     registerRenderer(std::make_unique<WelcomeRenderer>());
     registerRenderer(std::make_unique<DocumentRenderer>());
     registerRenderer(std::make_unique<ArchiveRenderer>());
+    registerRenderer(std::make_unique<CertificateRenderer>());
     registerRenderer(std::make_unique<FolderRenderer>());
     registerRenderer(std::make_unique<RenderedPageRenderer>());
     registerRenderer(std::make_unique<CodeRenderer>(previewState));
@@ -66,6 +68,7 @@ QString normalizeRendererLookupKey(const QString& rendererId)
         { QStringLiteral("text"), QStringLiteral("text") },
         { QStringLiteral("code"), QStringLiteral("code") },
         { QStringLiteral("document"), QStringLiteral("document") },
+        { QStringLiteral("certificate"), QStringLiteral("certificate") },
         { QStringLiteral("archive"), QStringLiteral("archive") },
         { QStringLiteral("folder"), QStringLiteral("folder") }
     };

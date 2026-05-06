@@ -7,6 +7,7 @@
 #include <QDebug>
 #include <QDateTime>
 #include <QDir>
+#include <QElapsedTimer>
 #include <QFileInfo>
 #include <QFutureWatcher>
 #include <QHBoxLayout>
@@ -30,6 +31,7 @@
 #include "renderers/FileTypeIconResolver.h"
 #include "renderers/OpenWithButton.h"
 #include "renderers/PreviewHeaderBar.h"
+#include "renderers/PreviewStateVisuals.h"
 #include "renderers/SelectableTitleLabel.h"
 #include "renderers/document/PreviewHandlerHost.h"
 #include "widgets/SpaceLookWindow.h"
@@ -93,7 +95,7 @@ QString htmlPage(const QString& body)
         "  padding: 28px;"
         "  background: linear-gradient(135deg, #f8fbff 0%%, #eef5fb 100%%);"
         "  color: #16324a;"
-        "  font-family: 'Segoe UI', sans-serif;"
+        "  font-family: 'Segoe UI Rounded', sans-serif;"
         "}"
         ".sheet {"
         "  max-width: 1100px;"
@@ -148,9 +150,7 @@ QString htmlPage(const QString& body)
 
 QString loadingHtmlPage(const QString& title, const QString& message)
 {
-    return htmlPage(QStringLiteral(
-        "<div class=\"card\"><h2>%1</h2><p class=\"muted\">%2</p></div>")
-        .arg(title.toHtmlEscaped(), message.toHtmlEscaped()));
+    return PreviewStateVisuals::htmlStatePage(title, message, PreviewStateVisuals::Kind::Loading);
 }
 
 QString fileTitleForPreview(const HoveredItemInfo& info)
@@ -200,8 +200,17 @@ QString cacheKeyForFile(const QFileInfo& fileInfo)
     return QString::fromLatin1(QCryptographicHash::hash(payload.toUtf8(), QCryptographicHash::Sha1).toHex());
 }
 
-bool runPowerShellScript(const QString& script, QString* errorMessage)
+bool runPowerShellScript(const QString& script,
+                         const PreviewCancellationToken& cancelToken,
+                         QString* errorMessage)
 {
+    if (previewCancellationRequested(cancelToken)) {
+        if (errorMessage) {
+            *errorMessage = QStringLiteral("Legacy Office conversion was canceled.");
+        }
+        return false;
+    }
+
     QProcess process;
     process.setProgram(QStringLiteral("powershell.exe"));
     process.setArguments({
@@ -220,7 +229,22 @@ bool runPowerShellScript(const QString& script, QString* errorMessage)
         return false;
     }
 
-    if (!process.waitForFinished(60000)) {
+    QElapsedTimer timeout;
+    timeout.start();
+    while (!process.waitForFinished(100)) {
+        if (previewCancellationRequested(cancelToken)) {
+            process.kill();
+            process.waitForFinished(3000);
+            if (errorMessage) {
+                *errorMessage = QStringLiteral("Legacy Office conversion was canceled.");
+            }
+            return false;
+        }
+
+        if (timeout.elapsed() < 60000) {
+            continue;
+        }
+
         process.kill();
         process.waitForFinished(3000);
         if (errorMessage) {
@@ -329,7 +353,7 @@ QString legacyOfficeConversionScript(const QString& inputPath,
     return QString();
 }
 
-OfficePreviewResult buildLegacyOfficePreview(const QString& filePath);
+OfficePreviewResult buildLegacyOfficePreview(const QString& filePath, const PreviewCancellationToken& cancelToken);
 
 QString readTextNodeBlock(QXmlStreamReader& xml, const QString& paragraphTag)
 {
@@ -701,16 +725,21 @@ OfficePreviewResult buildPptxPreview(QZipReader& zip)
     return result;
 }
 
-OfficePreviewResult buildOfficePreview(const QString& filePath)
+OfficePreviewResult buildOfficePreview(const QString& filePath, const PreviewCancellationToken& cancelToken)
 {
     OfficePreviewResult result;
+    if (previewCancellationRequested(cancelToken)) {
+        result.statusMessage = QStringLiteral("Office preview was canceled.");
+        return result;
+    }
+
     const QFileInfo fileInfo(filePath);
     const QString suffix = fileInfo.suffix().toLower();
 
     if (suffix == QStringLiteral("doc") ||
         suffix == QStringLiteral("xls") ||
         suffix == QStringLiteral("ppt")) {
-        return buildLegacyOfficePreview(filePath);
+        return buildLegacyOfficePreview(filePath, cancelToken);
     }
 
     QZipReader zip(filePath);
@@ -720,12 +749,24 @@ OfficePreviewResult buildOfficePreview(const QString& filePath)
     }
 
     if (suffix == QStringLiteral("docx")) {
+        if (previewCancellationRequested(cancelToken)) {
+            result.statusMessage = QStringLiteral("Office preview was canceled.");
+            return result;
+        }
         return buildDocxPreview(zip);
     }
     if (suffix == QStringLiteral("xlsx")) {
+        if (previewCancellationRequested(cancelToken)) {
+            result.statusMessage = QStringLiteral("Office preview was canceled.");
+            return result;
+        }
         return buildXlsxPreview(zip);
     }
     if (suffix == QStringLiteral("pptx")) {
+        if (previewCancellationRequested(cancelToken)) {
+            result.statusMessage = QStringLiteral("Office preview was canceled.");
+            return result;
+        }
         return buildPptxPreview(zip);
     }
 
@@ -733,9 +774,14 @@ OfficePreviewResult buildOfficePreview(const QString& filePath)
     return result;
 }
 
-OfficePreviewResult buildLegacyOfficePreview(const QString& filePath)
+OfficePreviewResult buildLegacyOfficePreview(const QString& filePath, const PreviewCancellationToken& cancelToken)
 {
     OfficePreviewResult result;
+    if (previewCancellationRequested(cancelToken)) {
+        result.statusMessage = QStringLiteral("Legacy Office preview was canceled.");
+        return result;
+    }
+
     const QFileInfo sourceInfo(filePath);
     const QString suffix = sourceInfo.suffix().toLower();
     const QString convertedSuffix = legacyOfficeConvertedSuffix(suffix);
@@ -760,20 +806,25 @@ OfficePreviewResult buildLegacyOfficePreview(const QString& filePath)
         }
 
         QString conversionError;
-        if (!runPowerShellScript(script, &conversionError) || !QFileInfo::exists(convertedPath)) {
+        if (!runPowerShellScript(script, cancelToken, &conversionError) || !QFileInfo::exists(convertedPath)) {
             result.statusMessage = conversionError.trimmed().isEmpty()
                 ? QStringLiteral("Legacy Office conversion failed. Microsoft Office may be unavailable on this system.")
                 : QStringLiteral("Legacy Office conversion failed: %1").arg(conversionError.trimmed());
-            result.html = htmlPage(QStringLiteral(
-                "<div class=\"card\"><h2>Legacy Office Preview Unavailable</h2>"
-                "<p>The selected file uses an older Office binary format.</p>"
-                "<p class=\"muted\">SpaceLook tried to convert it through local Microsoft Office automation, and that conversion did not complete.</p></div>"));
+            result.html = PreviewStateVisuals::htmlStatePage(
+                QStringLiteral("Legacy Office Preview Unavailable"),
+                QStringLiteral("The selected file uses an older Office binary format.\nSpaceLook tried to convert it through local Microsoft Office automation, and that conversion did not complete."),
+                PreviewStateVisuals::Kind::Error);
             result.success = true;
             return result;
         }
     }
 
-    result = buildOfficePreview(convertedPath);
+    if (previewCancellationRequested(cancelToken)) {
+        result.statusMessage = QStringLiteral("Legacy Office preview was canceled.");
+        return result;
+    }
+
+    result = buildOfficePreview(convertedPath, cancelToken);
     if (result.success) {
         result.statusMessage = QStringLiteral("Converted legacy %1 to %2 for preview.")
             .arg(suffix.toUpper(), convertedSuffix.toUpper());
@@ -832,7 +883,8 @@ DocumentRenderer::DocumentRenderer(QWidget* parent)
 
     m_pathTitleLabel->hide();
     m_iconLabel->setFixedSize(72, 72);
-    m_iconLabel->setScaledContents(true);
+    m_iconLabel->setScaledContents(false);
+    m_iconLabel->setAlignment(Qt::AlignCenter);
     m_titleLabel->setWordWrap(true);
     m_pathValueLabel->setTextInteractionFlags(Qt::TextSelectableByMouse);
     m_pathValueLabel->setWordWrap(true);
@@ -852,6 +904,7 @@ DocumentRenderer::DocumentRenderer(QWidget* parent)
         }
     });
     m_textBrowser->setOpenExternalLinks(false);
+    PreviewStateVisuals::prepareStatusLabel(m_statusLabel);
     m_statusLabel->hide();
     m_contentStack->addWidget(m_previewHandlerHost);
     m_contentStack->addWidget(m_textBrowser);
@@ -891,6 +944,9 @@ void DocumentRenderer::setLoadingStateCallback(std::function<void(bool)> callbac
 
 void DocumentRenderer::load(const HoveredItemInfo& info)
 {
+    cancelPreviewTask(m_cancelToken);
+    const PreviewCancellationToken cancelToken = makePreviewCancellationToken();
+    m_cancelToken = cancelToken;
     m_info = info;
     const PreviewLoadGuard::Token loadToken = m_loadGuard.begin(info.filePath);
     notifyLoadingState(true);
@@ -899,8 +955,7 @@ void DocumentRenderer::load(const HoveredItemInfo& info)
 
     m_titleLabel->setText(fileTitleForPreview(info));
     m_titleLabel->setCopyText(m_titleLabel->text());
-    const QIcon typeIcon(FileTypeIconResolver::iconForInfo(info));
-    m_iconLabel->setPixmap(typeIcon.pixmap(128, 128));
+    m_iconLabel->setPixmap(FileTypeIconResolver::pixmapForInfo(info, m_iconLabel->contentsRect().size()));
     m_pathValueLabel->setText(info.filePath.trimmed().isEmpty() ? QStringLiteral("(Unavailable)") : info.filePath);
     m_openWithButton->setTargetContext(info.filePath, info.typeKey);
     m_textBrowser->clear();
@@ -909,8 +964,7 @@ void DocumentRenderer::load(const HoveredItemInfo& info)
     m_contentStack->setCurrentWidget(m_previewHandlerHost);
     QString handlerError;
     if (m_previewHandlerHost->openFile(info.filePath, &handlerError)) {
-        m_statusLabel->clear();
-        m_statusLabel->hide();
+        PreviewStateVisuals::clearStatus(m_statusLabel);
         notifyLoadingState(false);
         return;
     }
@@ -926,53 +980,57 @@ void DocumentRenderer::loadWithQtParser(const HoveredItemInfo& info, const Previ
     const QString loadingMessage = handlerError.trimmed().isEmpty()
         ? QStringLiteral("Parsing Office document...")
         : QStringLiteral("Windows Preview Handler unavailable. Falling back to built in parser...");
-    m_statusLabel->setText(loadingMessage);
-    m_statusLabel->show();
+    PreviewStateVisuals::showStatus(m_statusLabel, loadingMessage, PreviewStateVisuals::Kind::Loading);
     m_textBrowser->setHtml(loadingHtmlPage(fileTitleForPreview(info), loadingMessage));
 
+    PreviewCancellationToken cancelToken = m_cancelToken;
+    if (!cancelToken) {
+        cancelToken = makePreviewCancellationToken();
+        m_cancelToken = cancelToken;
+    }
+
     auto* watcher = new QFutureWatcher<OfficePreviewResult>(this);
-    connect(watcher, &QFutureWatcher<OfficePreviewResult>::finished, this, [this, watcher, loadToken, handlerError]() {
-        const OfficePreviewResult preview = watcher->result();
+    connect(watcher, &QFutureWatcher<OfficePreviewResult>::finished, this, [this, watcher, loadToken, handlerError, cancelToken]() {
         watcher->deleteLater();
 
-        if (!m_loadGuard.isCurrent(loadToken, m_info.filePath)) {
+        if (previewCancellationRequested(cancelToken) || !m_loadGuard.isCurrent(loadToken, m_info.filePath)) {
             qDebug().noquote() << QStringLiteral("[SpaceLookRender] DocumentRenderer discarded stale async result path=\"%1\"")
                 .arg(loadToken.path);
             return;
         }
 
+        const OfficePreviewResult preview = watcher->result();
         if (!preview.statusMessage.trimmed().isEmpty()) {
             const QString statusText = handlerError.trimmed().isEmpty()
                 ? preview.statusMessage
                 : QStringLiteral("%1 %2").arg(handlerError.trimmed(), preview.statusMessage);
-            m_statusLabel->setText(statusText.trimmed());
-            m_statusLabel->show();
+            PreviewStateVisuals::showStatus(m_statusLabel, statusText.trimmed());
         } else {
             if (handlerError.trimmed().isEmpty()) {
-                m_statusLabel->clear();
-                m_statusLabel->hide();
+                PreviewStateVisuals::clearStatus(m_statusLabel);
             } else {
-                m_statusLabel->setText(handlerError.trimmed());
-                m_statusLabel->show();
+                PreviewStateVisuals::showStatus(m_statusLabel, handlerError.trimmed());
             }
         }
 
         if (preview.success) {
             m_textBrowser->setHtml(preview.html);
         } else {
-            m_textBrowser->setHtml(htmlPage(QStringLiteral(
-                "<div class=\"card\"><h2>Preview Unavailable</h2>"
-                "<p>The Office document could not be parsed by the current Qt based preview pipeline.</p></div>")));
+            m_textBrowser->setHtml(PreviewStateVisuals::htmlStatePage(
+                QStringLiteral("Preview Unavailable"),
+                QStringLiteral("The Office document could not be parsed by the current Qt based preview pipeline."),
+                PreviewStateVisuals::Kind::Error));
         }
         notifyLoadingState(false);
     });
-    watcher->setFuture(QtConcurrent::run([filePath = info.filePath]() {
-        return buildOfficePreview(filePath);
+    watcher->setFuture(QtConcurrent::run([filePath = info.filePath, cancelToken]() {
+        return buildOfficePreview(filePath, cancelToken);
     }));
 }
 
 void DocumentRenderer::unload()
 {
+    cancelPreviewTask(m_cancelToken);
     m_loadGuard.cancel();
     notifyLoadingState(false);
     m_previewHandlerHost->unload();
@@ -1015,7 +1073,7 @@ void DocumentRenderer::applyChrome()
         "}"
         "#DocumentPathTitle {"
         "  color: #16324a;"
-        "  font-family: 'Segoe UI Semibold';"
+        "  font-family: 'Segoe UI Rounded';"
         "}"
         "#DocumentPathValue {"
         "  color: #445d76;"
@@ -1115,14 +1173,14 @@ void DocumentRenderer::applyChrome()
     );
 
     QFont titleFont;
-    titleFont.setFamily(QStringLiteral("Microsoft YaHei UI"));
+    titleFont.setFamily(QStringLiteral("Segoe UI Rounded"));
     titleFont.setPixelSize(20);
     titleFont.setWeight(QFont::Bold);
     m_titleLabel->setFont(titleFont);
     m_titleLabel->setWordWrap(true);
 
     QFont metaFont;
-    metaFont.setFamily(QStringLiteral("Segoe UI"));
+    metaFont.setFamily(QStringLiteral("Segoe UI Rounded"));
     metaFont.setPixelSize(13);
     m_metaLabel->setFont(metaFont);
     m_pathTitleLabel->setFont(metaFont);
@@ -1135,17 +1193,14 @@ void DocumentRenderer::applyChrome()
 void DocumentRenderer::showStatusMessage(const QString& message)
 {
     if (message.trimmed().isEmpty()) {
-        m_statusLabel->clear();
-        m_statusLabel->hide();
+        PreviewStateVisuals::clearStatus(m_statusLabel);
         return;
     }
 
-    m_statusLabel->setText(message);
-    m_statusLabel->show();
+    PreviewStateVisuals::showStatus(m_statusLabel, message);
     QTimer::singleShot(1400, m_statusLabel, [label = m_statusLabel]() {
         if (label) {
-            label->clear();
-            label->hide();
+            PreviewStateVisuals::clearStatus(label);
         }
     });
 }

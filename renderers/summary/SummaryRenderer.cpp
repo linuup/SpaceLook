@@ -18,10 +18,14 @@
 #include "renderers/FileTypeIconResolver.h"
 #include "renderers/OpenWithButton.h"
 #include "renderers/PreviewHeaderBar.h"
+#include "renderers/PreviewStateVisuals.h"
 #include "renderers/SelectableTitleLabel.h"
 #include "widgets/SpaceLookWindow.h"
 
 namespace {
+
+constexpr int kSummaryDetailsContentHeight = 255;
+constexpr int kSummaryDetailsPanelHeight = 285;
 
 bool shouldShowSummaryStatus(const HoveredItemInfo& info)
 {
@@ -123,7 +127,8 @@ SummaryRenderer::SummaryRenderer(PreviewState* previewState, QWidget* parent)
     rootLayout->setSpacing(14);
     rootLayout->addWidget(m_headerRow);
     rootLayout->addWidget(m_statusLabel);
-    rootLayout->addWidget(m_detailsPanel, 1);
+    rootLayout->addWidget(m_detailsPanel, 0);
+    rootLayout->addStretch(1);
 
     auto* headerLayout = new QHBoxLayout(m_headerRow);
     headerLayout->setContentsMargins(0, 0, 0, 0);
@@ -179,13 +184,18 @@ SummaryRenderer::SummaryRenderer(PreviewState* previewState, QWidget* parent)
     detailsContentLayout->addStretch(1);
 
     m_iconLabel->setFixedSize(72, 72);
-    m_iconLabel->setScaledContents(true);
+    m_iconLabel->setScaledContents(false);
+    m_iconLabel->setAlignment(Qt::AlignCenter);
     m_titleLabel->setWordWrap(true);
     m_pathTitleLabel->hide();
     m_pathValueLabel->setTextInteractionFlags(Qt::TextSelectableByMouse);
     m_pathValueLabel->setWordWrap(true);
     m_pathValueLabel->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
     m_pathRow->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+    m_statusLabel->setWordWrap(true);
+    m_statusLabel->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    m_statusLabel->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+    PreviewStateVisuals::prepareStatusLabel(m_statusLabel);
     m_statusLabel->hide();
 
     m_openWithButton->setStatusCallback([this](const QString& message) {
@@ -239,8 +249,7 @@ void SummaryRenderer::unload()
     m_currentInfo = HoveredItemInfo();
     m_pathValueLabel->clear();
     m_openWithButton->setTargetContext(QString(), QString());
-    m_statusLabel->clear();
-    m_statusLabel->hide();
+    PreviewStateVisuals::clearStatus(m_statusLabel);
     setDetailValues(HoveredItemInfo());
 }
 
@@ -289,17 +298,14 @@ QFrame* SummaryRenderer::createDetailLine(const QString& objectName, QWidget* pa
 void SummaryRenderer::showStatusMessage(const QString& message)
 {
     if (message.trimmed().isEmpty()) {
-        m_statusLabel->clear();
-        m_statusLabel->hide();
+        PreviewStateVisuals::clearStatus(m_statusLabel);
         return;
     }
 
-    m_statusLabel->setText(message);
-    m_statusLabel->show();
+    PreviewStateVisuals::showStatus(m_statusLabel, message);
     QTimer::singleShot(1400, m_statusLabel, [label = m_statusLabel]() {
         if (label) {
-            label->clear();
-            label->hide();
+            PreviewStateVisuals::clearStatus(label);
         }
     });
 }
@@ -360,8 +366,7 @@ void SummaryRenderer::applyInfo(const HoveredItemInfo& info)
     m_titleLabel->setText(info.title.isEmpty() ? QStringLiteral("Summary Preview") : info.title);
     m_titleLabel->setCopyText(m_titleLabel->text());
 
-    const QIcon typeIcon(FileTypeIconResolver::iconForInfo(info));
-    m_iconLabel->setPixmap(typeIcon.pixmap(128, 128));
+    m_iconLabel->setPixmap(FileTypeIconResolver::pixmapForInfo(info, m_iconLabel->contentsRect().size()));
 
     const QString displayPath = info.filePath.trimmed().isEmpty()
         ? info.resolvedPath.trimmed()
@@ -370,16 +375,22 @@ void SummaryRenderer::applyInfo(const HoveredItemInfo& info)
     m_openWithButton->setTargetContext(info.filePath, info.typeKey);
 
     if (shouldShowSummaryStatus(info)) {
-        m_statusLabel->setText(info.statusMessage.isEmpty()
-            ? QStringLiteral("No object information is available.")
-            : info.statusMessage);
-        m_statusLabel->show();
+        PreviewStateVisuals::showStatus(
+            m_statusLabel,
+            info.statusMessage.isEmpty()
+                ? QStringLiteral("No object information is available.")
+                : info.statusMessage,
+            info.statusMessage.isEmpty() ? PreviewStateVisuals::Kind::Empty : PreviewStateVisuals::Kind::Automatic);
     } else {
-        m_statusLabel->clear();
-        m_statusLabel->hide();
+        PreviewStateVisuals::clearStatus(m_statusLabel);
     }
 
     setDetailValues(info);
+    m_detailsContent->adjustSize();
+    m_detailsScrollArea->setMinimumHeight(kSummaryDetailsContentHeight);
+    m_detailsScrollArea->setMaximumHeight(kSummaryDetailsContentHeight);
+    m_detailsPanel->setMinimumHeight(kSummaryDetailsPanelHeight);
+    m_detailsPanel->setMaximumHeight(kSummaryDetailsPanelHeight);
     updateGeometry();
     update();
 }
@@ -403,13 +414,14 @@ void SummaryRenderer::applyChrome()
         "}"
         "#SummaryTitle {"
         "  color: #0f2740;"
+        "  font-weight: 700;"
         "}"
         "#SummaryMeta {"
         "  color: #5c738b;"
         "}"
         "#SummaryPathTitle {"
         "  color: #16324a;"
-        "  font-family: 'Segoe UI Semibold';"
+        "  font-family: 'Segoe UI Rounded';"
         "}"
         "#SummaryPathValue {"
         "  color: #445d76;"
@@ -469,14 +481,14 @@ void SummaryRenderer::applyChrome()
         "#SummaryDetailTitle {"
         "  color: #577199;"
         "  background: transparent;"
-        "  font-family: 'Segoe UI';"
+        "  font-family: 'Segoe UI Rounded';"
         "  font-size: 13px;"
         "  font-weight: 700;"
         "}"
         "#SummaryDetailValue {"
         "  color: #1e2c3b;"
         "  background: transparent;"
-        "  font-family: 'Segoe UI';"
+        "  font-family: 'Segoe UI Rounded';"
         "  font-size: 15px;"
         "  line-height: 1.15;"
         "  selection-background-color: #cfe3ff;"
@@ -515,14 +527,14 @@ void SummaryRenderer::applyChrome()
     );
 
     QFont titleFont;
-    titleFont.setFamily(QStringLiteral("Microsoft YaHei UI"));
+    titleFont.setFamily(QStringLiteral("Segoe UI Rounded"));
     titleFont.setPixelSize(20);
     titleFont.setWeight(QFont::Bold);
     m_titleLabel->setFont(titleFont);
     m_titleLabel->setWordWrap(true);
 
     QFont metaFont;
-    metaFont.setFamily(QStringLiteral("Segoe UI"));
+    metaFont.setFamily(QStringLiteral("Segoe UI Rounded"));
     metaFont.setPixelSize(13);
     m_metaLabel->setFont(metaFont);
     m_pathTitleLabel->setFont(metaFont);

@@ -6,6 +6,7 @@
 
 #include "core/hovered_item_info.h"
 #include "renderers/IPreviewRenderer.h"
+#include "renderers/PreviewCancellationToken.h"
 #include "renderers/PreviewLoadGuard.h"
 
 class QLabel;
@@ -36,8 +37,10 @@ protected:
 
 private:
     void applyChrome();
-    QImage loadImageForPath(const QString& filePath) const;
-    QImage loadThumbnailImageForPath(const QString& filePath) const;
+    QImage loadImageForPath(const QString& filePath, const PreviewCancellationToken& cancelToken) const;
+    QImage loadThumbnailImageForPath(const QString& filePath, const PreviewCancellationToken& cancelToken) const;
+    QImage loadAvifImageForPath(const QString& filePath, const PreviewCancellationToken& cancelToken) const;
+    QImage loadDdsImageForPath(const QString& filePath) const;
     QImage loadHeifImageForPath(const QString& filePath) const;
     QImage imageFromHeifImage(struct heif_image* image) const;
     QImage loadShellThumbnailForPath(const QString& filePath, int edgeLength) const;
@@ -57,6 +60,7 @@ private:
     HoveredItemInfo m_info;
     QPixmap m_originalPixmap;
     PreviewLoadGuard m_loadGuard;
+    PreviewCancellationToken m_cancelToken;
     std::function<void(bool)> m_loadingStateCallback;
     bool m_hasHighResolutionImage = false;
     double m_zoomFactor = 1.0;

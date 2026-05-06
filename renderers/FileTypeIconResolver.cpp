@@ -85,6 +85,9 @@ QString bySuffix(const QString& suffix)
     if (lower == QStringLiteral("exe")) {
         return QStringLiteral(":/SPACELOOK/file-icon/exe.svg");
     }
+    if (lower == QStringLiteral("appref-ms")) {
+        return QStringLiteral(":/SPACELOOK/file-icon/exe.svg");
+    }
     if (lower == QStringLiteral("apk")) {
         return QStringLiteral(":/SPACELOOK/file-icon/apk.svg");
     }
@@ -98,6 +101,18 @@ bool isShortcutLikeType(const HoveredItemInfo& info)
 {
     return info.typeKey == QStringLiteral("shortcut") ||
         info.typeKey == QStringLiteral("shell_item");
+}
+
+bool isAppRefMsFile(const HoveredItemInfo& info)
+{
+    const QStringList suffixCandidates = FileSuffixUtils::suffixCandidates(info.filePath);
+    for (const QString& suffix : suffixCandidates) {
+        if (suffix.compare(QStringLiteral("appref-ms"), Qt::CaseInsensitive) == 0) {
+            return true;
+        }
+    }
+
+    return info.filePath.endsWith(QStringLiteral(".appref-ms"), Qt::CaseInsensitive);
 }
 
 bool isShellNamespaceItem(const HoveredItemInfo& info)
@@ -251,6 +266,136 @@ QIcon extractHighResolutionIconFromLocation(const QString& iconLocation, int ico
     return icon;
 }
 
+QIcon shellItemImageIconForPath(const QString& filePath)
+{
+    const QString trimmedPath = filePath.trimmed();
+    if (trimmedPath.isEmpty()) {
+        return QIcon();
+    }
+
+    IShellItemImageFactory* imageFactory = nullptr;
+    const QString nativePath = QDir::toNativeSeparators(trimmedPath);
+    const HRESULT itemHr = SHCreateItemFromParsingName(
+        reinterpret_cast<LPCWSTR>(nativePath.utf16()),
+        nullptr,
+        IID_PPV_ARGS(&imageFactory));
+    if (FAILED(itemHr) || !imageFactory) {
+        return QIcon();
+    }
+
+    HBITMAP bitmapHandle = nullptr;
+    const SIZE requestedSize = { 256, 256 };
+    const HRESULT imageHr = imageFactory->GetImage(
+        requestedSize,
+        SIIGBF_BIGGERSIZEOK | SIIGBF_ICONONLY,
+        &bitmapHandle);
+    imageFactory->Release();
+    if (FAILED(imageHr) || !bitmapHandle) {
+        return QIcon();
+    }
+
+    const QImage image = qImageFromHBitmap(bitmapHandle);
+    DeleteObject(bitmapHandle);
+    if (image.isNull()) {
+        return QIcon();
+    }
+
+    return QIcon(QPixmap::fromImage(image));
+}
+
+QIcon shellFileInfoIconForPath(const QString& filePath)
+{
+    const QString trimmedPath = filePath.trimmed();
+    if (trimmedPath.isEmpty()) {
+        return QIcon();
+    }
+
+    SHFILEINFOW shellInfo = {};
+    const QString nativePath = QDir::toNativeSeparators(trimmedPath);
+    const DWORD_PTR result = SHGetFileInfoW(
+        reinterpret_cast<LPCWSTR>(nativePath.utf16()),
+        FILE_ATTRIBUTE_NORMAL,
+        &shellInfo,
+        sizeof(shellInfo),
+        SHGFI_ICON | SHGFI_LARGEICON);
+    if (result == 0 || !shellInfo.hIcon) {
+        return QIcon();
+    }
+
+    const QIcon icon = QtWin::fromHICON(shellInfo.hIcon);
+    DestroyIcon(shellInfo.hIcon);
+    return icon;
+}
+
+QIcon shellAssociationIconForExtension(const QString& extension)
+{
+    QString normalizedExtension = extension.trimmed();
+    if (normalizedExtension.isEmpty()) {
+        return QIcon();
+    }
+    if (!normalizedExtension.startsWith(QLatin1Char('.'))) {
+        normalizedExtension.prepend(QLatin1Char('.'));
+    }
+
+    SHFILEINFOW locationInfo = {};
+    const DWORD_PTR locationResult = SHGetFileInfoW(
+        reinterpret_cast<LPCWSTR>(normalizedExtension.utf16()),
+        FILE_ATTRIBUTE_NORMAL,
+        &locationInfo,
+        sizeof(locationInfo),
+        SHGFI_USEFILEATTRIBUTES | SHGFI_ICONLOCATION);
+    if (locationResult != 0 && locationInfo.szDisplayName[0] != L'\0') {
+        const QIcon extractedIcon = extractHighResolutionIconFromLocation(
+            QString::fromWCharArray(locationInfo.szDisplayName),
+            locationInfo.iIcon);
+        if (!extractedIcon.isNull()) {
+            return extractedIcon;
+        }
+    }
+
+    SHFILEINFOW shellInfo = {};
+    const DWORD_PTR iconResult = SHGetFileInfoW(
+        reinterpret_cast<LPCWSTR>(normalizedExtension.utf16()),
+        FILE_ATTRIBUTE_NORMAL,
+        &shellInfo,
+        sizeof(shellInfo),
+        SHGFI_USEFILEATTRIBUTES | SHGFI_ICON | SHGFI_LARGEICON);
+    if (iconResult == 0 || !shellInfo.hIcon) {
+        return QIcon();
+    }
+
+    const QIcon icon = QtWin::fromHICON(shellInfo.hIcon);
+    DestroyIcon(shellInfo.hIcon);
+    return icon;
+}
+
+QIcon appRefMsIcon(const HoveredItemInfo& info)
+{
+    const QIcon shellItemIcon = shellItemImageIconForPath(info.filePath);
+    if (!shellItemIcon.isNull()) {
+        return shellItemIcon;
+    }
+
+    const QIcon fileInfoIcon = shellFileInfoIconForPath(info.filePath);
+    if (!fileInfoIcon.isNull()) {
+        return fileInfoIcon;
+    }
+
+    const QIcon associationIcon = shellAssociationIconForExtension(QStringLiteral(".appref-ms"));
+    if (!associationIcon.isNull()) {
+        return associationIcon;
+    }
+
+    const QString dfshimPath = QDir::cleanPath(expandEnvironmentStrings(QStringLiteral("%WINDIR%/System32/dfshim.dll")));
+    const QIcon dfshimIcon = extractHighResolutionIconFromLocation(dfshimPath, 0);
+    if (!dfshimIcon.isNull()) {
+        return dfshimIcon;
+    }
+
+    const QString imageresPath = QDir::cleanPath(expandEnvironmentStrings(QStringLiteral("%WINDIR%/System32/imageres.dll")));
+    return extractHighResolutionIconFromLocation(imageresPath, 2);
+}
+
 QIcon shellNamespaceIcon(const HoveredItemInfo& info)
 {
     if (!isShellNamespaceItem(info)) {
@@ -383,6 +528,13 @@ QIcon FileTypeIconResolver::iconForInfo(const HoveredItemInfo& info)
     static QFileIconProvider iconProvider;
     const HoveredItemInfo effectiveInfo = effectiveIconInfo(info);
 
+    if (isAppRefMsFile(info)) {
+        const QIcon clickOnceIcon = appRefMsIcon(info);
+        if (!clickOnceIcon.isNull()) {
+            return clickOnceIcon;
+        }
+    }
+
     const QIcon namespaceIcon = shellNamespaceIcon(info);
     if (!namespaceIcon.isNull()) {
         return namespaceIcon;
@@ -419,4 +571,30 @@ QIcon FileTypeIconResolver::iconForInfo(const HoveredItemInfo& info)
     }
 
     return QIcon();
+}
+
+QPixmap FileTypeIconResolver::pixmapForInfo(const HoveredItemInfo& info, const QSize& displaySize)
+{
+    const QSize targetSize = displaySize.isValid() && !displaySize.isEmpty()
+        ? displaySize
+        : QSize(72, 72);
+    const QIcon icon = iconForInfo(info);
+    if (icon.isNull()) {
+        return QPixmap();
+    }
+
+    QPixmap pixmap = icon.pixmap(targetSize);
+    if (pixmap.isNull()) {
+        return pixmap;
+    }
+
+    const qreal devicePixelRatio = pixmap.devicePixelRatio();
+    const QSize logicalSize = devicePixelRatio > 0.0
+        ? pixmap.size() / devicePixelRatio
+        : pixmap.size();
+    if (logicalSize.width() <= targetSize.width() && logicalSize.height() <= targetSize.height()) {
+        return pixmap;
+    }
+
+    return pixmap.scaled(targetSize, Qt::KeepAspectRatio, Qt::SmoothTransformation);
 }

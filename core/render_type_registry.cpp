@@ -52,13 +52,27 @@ QJsonObject defaultRenderTypeConfig()
                 QStringLiteral("png"),
                 QStringLiteral("jpg"),
                 QStringLiteral("jpeg"),
+                QStringLiteral("jpe"),
                 QStringLiteral("bmp"),
+                QStringLiteral("dib"),
                 QStringLiteral("gif"),
                 QStringLiteral("webp"),
                 QStringLiteral("heic"),
                 QStringLiteral("heif"),
+                QStringLiteral("avif"),
+                QStringLiteral("tif"),
+                QStringLiteral("tiff"),
                 QStringLiteral("svg"),
                 QStringLiteral("ico"),
+                QStringLiteral("dds"),
+                QStringLiteral("tga")
+            }}
+        }},
+        {QStringLiteral("design"), QJsonObject{
+            {QStringLiteral("name"), QStringLiteral("SummaryRenderer")},
+            {QStringLiteral("typeKey"), QStringLiteral("design")},
+            {QStringLiteral("typeDetails"), QStringLiteral("Design source file.")},
+            {QStringLiteral("suffixes"), QJsonArray{
                 QStringLiteral("psd")
             }}
         }},
@@ -107,7 +121,9 @@ QJsonObject defaultRenderTypeConfig()
             {QStringLiteral("typeKey"), QStringLiteral("pdf")},
             {QStringLiteral("typeDetails"), QStringLiteral("Portable document format file.")},
             {QStringLiteral("suffixes"), QJsonArray{
-                QStringLiteral("pdf")
+                QStringLiteral("pdf"),
+                QStringLiteral("xps"),
+                QStringLiteral("oxps")
             }}
         }},
         {QStringLiteral("markdown"), QJsonObject{
@@ -274,10 +290,41 @@ QJsonObject defaultRenderTypeConfig()
             {QStringLiteral("suffixes"), QJsonArray{
                 QStringLiteral("doc"),
                 QStringLiteral("docx"),
+                QStringLiteral("rtf"),
                 QStringLiteral("xls"),
                 QStringLiteral("xlsx"),
                 QStringLiteral("ppt"),
                 QStringLiteral("pptx")
+            }}
+        }},
+        {QStringLiteral("certificate"), QJsonObject{
+            {QStringLiteral("name"), QStringLiteral("CertificateRenderer")},
+            {QStringLiteral("typeKey"), QStringLiteral("certificate")},
+            {QStringLiteral("typeDetails"), QStringLiteral("Certificate and key file.")},
+            {QStringLiteral("suffixes"), QJsonArray{
+                QStringLiteral("cer"),
+                QStringLiteral("crt"),
+                QStringLiteral("pem"),
+                QStringLiteral("der"),
+                QStringLiteral("pfx"),
+                QStringLiteral("p12"),
+                QStringLiteral("key"),
+                QStringLiteral("pub"),
+                QStringLiteral("asc"),
+                QStringLiteral("gpg")
+            }}
+        }},
+        {QStringLiteral("executable"), QJsonObject{
+            {QStringLiteral("name"), QStringLiteral("SummaryRenderer")},
+            {QStringLiteral("typeKey"), QStringLiteral("executable")},
+            {QStringLiteral("typeDetails"), QStringLiteral("Windows executable or installer file.")},
+            {QStringLiteral("suffixes"), QJsonArray{
+                QStringLiteral("exe"),
+                QStringLiteral("dll"),
+                QStringLiteral("msi"),
+                QStringLiteral("com"),
+                QStringLiteral("scr"),
+                QStringLiteral("sys")
             }}
         }},
         {QStringLiteral("archive"), QJsonObject{

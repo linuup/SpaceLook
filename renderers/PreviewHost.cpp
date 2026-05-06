@@ -6,12 +6,15 @@
 #include <QLabel>
 #include <QProgressBar>
 #include <QResizeEvent>
+#include <QSizePolicy>
 #include <QStackedWidget>
 #include <QTimer>
 #include <QVBoxLayout>
 
 #include "core/preview_state.h"
+#include "renderers/PreviewStateVisuals.h"
 #include "renderers/RendererRegistry.h"
+#include "widgets/SpaceLookWindow.h"
 
 PreviewHost::PreviewHost(PreviewState* previewState, QWidget* parent)
     : QWidget(parent)
@@ -22,6 +25,7 @@ PreviewHost::PreviewHost(PreviewState* previewState, QWidget* parent)
     setAttribute(Qt::WA_StyledBackground, true);
     setObjectName(QStringLiteral("SpaceLookPreviewHost"));
     m_stack->setObjectName(QStringLiteral("SpaceLookPreviewStack"));
+    m_stack->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Ignored);
 
     auto* layout = new QHBoxLayout(this);
     layout->setContentsMargins(12, 0, 12, 12);
@@ -53,6 +57,14 @@ PreviewHost::PreviewHost(PreviewState* previewState, QWidget* parent)
 
                 hideLoadingOverlay();
             });
+            renderer->setSummaryFallbackCallback([this, renderer](const HoveredItemInfo& info, const QString& reason) {
+                if (m_activeRenderer != renderer) {
+                    return;
+                }
+
+                showSummaryFallback(info, reason);
+            });
+            renderer->widget()->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Ignored);
             m_stack->addWidget(renderer->widget());
         }
     }
@@ -99,8 +111,17 @@ void PreviewHost::showPreview(const HoveredItemInfo& info)
     m_activeRenderer = nextRenderer;
 
     if (QWidget* rendererWidget = nextRenderer->widget()) {
+        const QList<IPreviewRenderer*> allRenderers = m_registry->renderers();
+        for (IPreviewRenderer* renderer : allRenderers) {
+            if (renderer && renderer->widget()) {
+                renderer->widget()->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Ignored);
+            }
+        }
+        rendererWidget->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
         m_stack->setCurrentWidget(rendererWidget);
         rendererWidget->setFocus(Qt::OtherFocusReason);
+        m_stack->updateGeometry();
+        updateGeometry();
         qDebug().noquote() << QStringLiteral("[SpaceLookRender] Switched stacked widget to renderer: %1")
             .arg(nextRenderer->rendererId());
     }
@@ -204,32 +225,13 @@ void PreviewHost::createLoadingOverlay()
         "#UnifiedPreviewLoadingOverlay {"
         "  background: rgba(244, 248, 252, 0.72);"
         "}"
-        "#UnifiedPreviewLoadingCard {"
-        "  background: rgba(255, 255, 255, 0.96);"
-        "  border: 1px solid rgba(206, 218, 232, 0.96);"
-        "  border-radius: 18px;"
-        "}"
-        "#UnifiedPreviewLoadingTitle {"
-        "  color: #0f2740;"
-        "  font-family: 'Microsoft YaHei UI';"
-        "  font-size: 18px;"
-        "  font-weight: 700;"
-        "}"
-        "#UnifiedPreviewLoadingMessage {"
-        "  color: #526b85;"
-        "  font-family: 'Segoe UI';"
-        "  font-size: 13px;"
-        "}"
-        "#UnifiedPreviewLoadingProgress {"
-        "  background: #e6edf5;"
-        "  border: none;"
-        "  border-radius: 2px;"
-        "}"
-        "#UnifiedPreviewLoadingProgress::chunk {"
-        "  background: #0078d4;"
-        "  border-radius: 2px;"
-        "}"
     );
+    PreviewStateVisuals::prepareStateCard(
+        card,
+        m_loadingTitleLabel,
+        m_loadingMessageLabel,
+        m_loadingProgress,
+        PreviewStateVisuals::Kind::Loading);
     updateLoadingOverlayGeometry();
 }
 
@@ -252,6 +254,12 @@ void PreviewHost::showLoadingOverlay(const HoveredItemInfo& info, const QString&
     if (m_loadingMessageLabel) {
         m_loadingMessageLabel->setText(QStringLiteral("Loading with %1...").arg(rendererLabel));
     }
+    PreviewStateVisuals::prepareStateCard(
+        m_loadingTitleLabel ? m_loadingTitleLabel->parentWidget() : nullptr,
+        m_loadingTitleLabel,
+        m_loadingMessageLabel,
+        m_loadingProgress,
+        PreviewStateVisuals::Kind::Loading);
 
     updateLoadingOverlayGeometry();
     m_loadingOverlay->show();
@@ -272,4 +280,55 @@ void PreviewHost::updateLoadingOverlayGeometry()
     }
 
     m_loadingOverlay->setGeometry(m_stack->geometry());
+}
+
+void PreviewHost::showSummaryFallback(const HoveredItemInfo& info, const QString& reason)
+{
+    IPreviewRenderer* summaryRenderer = m_registry ? m_registry->rendererById(QStringLiteral("summary")) : nullptr;
+    if (!summaryRenderer) {
+        qDebug().noquote() << QStringLiteral("[SpaceLookRender] Summary fallback unavailable for path=\"%1\" reason=\"%2\"")
+            .arg(info.filePath, reason);
+        hideLoadingOverlay();
+        return;
+    }
+
+    qDebug().noquote() << QStringLiteral("[SpaceLookRender] Falling back to SummaryRenderer for path=\"%1\" reason=\"%2\"")
+        .arg(info.filePath, reason);
+
+    HoveredItemInfo fallbackInfo = info;
+    const QString trimmedReason = reason.trimmed();
+    fallbackInfo.statusMessage = trimmedReason.isEmpty()
+        ? QStringLiteral("Failed to render preview with the selected renderer. Showing file summary instead.")
+        : QStringLiteral("Failed to render preview with the selected renderer. Showing file summary instead. %1").arg(trimmedReason);
+
+    const PreviewLoadGuard::Token loadToken = m_previewLoadGuard.begin(fallbackInfo.filePath);
+
+    if (m_activeRenderer && m_activeRenderer != summaryRenderer) {
+        m_activeRenderer->unload();
+    }
+
+    m_activeRenderer = summaryRenderer;
+
+    if (QWidget* rendererWidget = summaryRenderer->widget()) {
+        const QList<IPreviewRenderer*> allRenderers = m_registry->renderers();
+        for (IPreviewRenderer* renderer : allRenderers) {
+            if (renderer && renderer->widget()) {
+                renderer->widget()->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Ignored);
+            }
+        }
+        rendererWidget->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+        m_stack->setCurrentWidget(rendererWidget);
+        rendererWidget->setFocus(Qt::OtherFocusReason);
+        m_stack->updateGeometry();
+        updateGeometry();
+    }
+    if (SpaceLookWindow* previewWindow = qobject_cast<SpaceLookWindow*>(window())) {
+        previewWindow->applySummaryPreviewSize(fallbackInfo);
+    }
+
+    showLoadingOverlay(fallbackInfo, summaryRenderer->rendererId());
+    summaryRenderer->load(fallbackInfo);
+    if (m_previewLoadGuard.isCurrent(loadToken, fallbackInfo.filePath) && m_activeRenderer == summaryRenderer) {
+        hideLoadingOverlay();
+    }
 }

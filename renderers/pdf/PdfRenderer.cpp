@@ -2,6 +2,7 @@
 
 #include <QAbstractItemView>
 #include <QDebug>
+#include <QFileInfo>
 #include <QHBoxLayout>
 #include <QIcon>
 #include <QLabel>
@@ -18,11 +19,23 @@
 #include <QVBoxLayout>
 
 #include "renderers/pdf/PdfViewWidget.h"
+#include "renderers/document/PreviewHandlerHost.h"
 #include "renderers/FileTypeIconResolver.h"
 #include "renderers/OpenWithButton.h"
 #include "renderers/PreviewHeaderBar.h"
+#include "renderers/PreviewStateVisuals.h"
 #include "renderers/SelectableTitleLabel.h"
 #include "widgets/SpaceLookWindow.h"
+
+namespace {
+
+bool isXpsPreviewFile(const QString& filePath)
+{
+    const QString suffix = QFileInfo(filePath).suffix().toLower();
+    return suffix == QStringLiteral("xps") || suffix == QStringLiteral("oxps");
+}
+
+}
 
 PdfRenderer::PdfRenderer(QWidget* parent)
     : QWidget(parent)
@@ -43,6 +56,7 @@ PdfRenderer::PdfRenderer(QWidget* parent)
     , m_pageTotalLabel(new QLabel(this))
     , m_thumbnailList(new QListWidget(this))
     , m_pdfView(new PdfViewWidget(this))
+    , m_previewHandlerHost(new PreviewHandlerHost(this))
     , m_thumbnailRenderTimer(new QTimer(this))
 {
     setAttribute(Qt::WA_StyledBackground, true);
@@ -64,6 +78,7 @@ PdfRenderer::PdfRenderer(QWidget* parent)
     m_pageTotalLabel->setObjectName(QStringLiteral("PdfPageTotal"));
     m_thumbnailList->setObjectName(QStringLiteral("PdfThumbnailList"));
     m_pdfView->setObjectName(QStringLiteral("PdfView"));
+    m_previewHandlerHost->setObjectName(QStringLiteral("XpsPreviewHost"));
 
     auto* layout = new QVBoxLayout(this);
     layout->setContentsMargins(12, 0, 12, 12);
@@ -85,7 +100,8 @@ PdfRenderer::PdfRenderer(QWidget* parent)
 
     m_pathTitleLabel->hide();
     m_iconLabel->setFixedSize(72, 72);
-    m_iconLabel->setScaledContents(true);
+    m_iconLabel->setScaledContents(false);
+    m_iconLabel->setAlignment(Qt::AlignCenter);
     m_titleLabel->setWordWrap(true);
     m_pathValueLabel->setTextInteractionFlags(Qt::TextSelectableByMouse);
     m_pathValueLabel->setWordWrap(true);
@@ -104,12 +120,15 @@ PdfRenderer::PdfRenderer(QWidget* parent)
             previewWindow->hidePreview();
         }
     });
+    PreviewStateVisuals::prepareStatusLabel(m_statusLabel);
     m_statusLabel->hide();
     auto* contentLayout = new QHBoxLayout(m_contentRow);
     contentLayout->setContentsMargins(0, 0, 0, 0);
     contentLayout->setSpacing(12);
     contentLayout->addWidget(m_thumbnailPanel, 0);
     contentLayout->addWidget(m_pdfView, 1);
+    contentLayout->addWidget(m_previewHandlerHost, 1);
+    m_previewHandlerHost->hide();
 
     auto* thumbnailLayout = new QVBoxLayout(m_thumbnailPanel);
     thumbnailLayout->setContentsMargins(10, 10, 10, 10);
@@ -191,6 +210,11 @@ QWidget* PdfRenderer::widget()
     return this;
 }
 
+void PdfRenderer::setSummaryFallbackCallback(std::function<void(const HoveredItemInfo&, const QString&)> callback)
+{
+    m_summaryFallbackCallback = std::move(callback);
+}
+
 void PdfRenderer::load(const HoveredItemInfo& info)
 {
     m_info = info;
@@ -198,10 +222,49 @@ void PdfRenderer::load(const HoveredItemInfo& info)
 
     m_titleLabel->setText(info.fileName.trimmed().isEmpty() ? QStringLiteral("PDF Preview") : info.fileName);
     m_titleLabel->setCopyText(info.fileName.trimmed().isEmpty() ? m_titleLabel->text() : info.fileName);
-    const QIcon typeIcon(FileTypeIconResolver::iconForInfo(info));
-    m_iconLabel->setPixmap(typeIcon.pixmap(128, 128));
+    m_iconLabel->setPixmap(FileTypeIconResolver::pixmapForInfo(info, m_iconLabel->contentsRect().size()));
     m_pathValueLabel->setText(info.filePath.trimmed().isEmpty() ? QStringLiteral("(Unavailable)") : info.filePath);
     m_openWithButton->setTargetContext(info.filePath, info.typeKey);
+
+    if (isXpsPreviewFile(info.filePath)) {
+        showStatusMessage(QStringLiteral("Opening XPS document through Windows Preview Handler..."));
+        m_thumbnailRenderTimer->stop();
+        m_pendingThumbnailPages.clear();
+        m_renderedThumbnailPages.clear();
+        m_thumbnailList->clear();
+        updatePageInfo(-1, 0);
+        m_pdfView->clearDocument();
+        m_document.unload();
+        m_thumbnailPanel->hide();
+        m_pdfView->hide();
+        m_previewHandlerHost->show();
+
+        QString errorMessage;
+        if (!m_previewHandlerHost->openFile(info.filePath, &errorMessage)) {
+            if (errorMessage.contains(QStringLiteral("No Windows Preview Handler"), Qt::CaseInsensitive)) {
+                errorMessage = QStringLiteral("No Windows XPS Preview Handler is registered. Install the Windows XPS Viewer optional feature, then try again.");
+            }
+            m_previewHandlerHost->hide();
+            m_thumbnailPanel->hide();
+            m_pdfView->hide();
+            if (m_summaryFallbackCallback) {
+                m_summaryFallbackCallback(info, errorMessage);
+                return;
+            }
+            showStatusMessage(errorMessage.isEmpty()
+                ? QStringLiteral("Failed to open the XPS document.")
+                : errorMessage);
+            return;
+        }
+
+        showStatusMessage(QString());
+        return;
+    }
+
+    m_previewHandlerHost->unload();
+    m_previewHandlerHost->hide();
+    m_thumbnailPanel->show();
+    m_pdfView->show();
 
     showStatusMessage(QStringLiteral("Opening PDF document..."));
     QString errorMessage;
@@ -230,6 +293,10 @@ void PdfRenderer::unload()
     m_pathValueLabel->clear();
     m_openWithButton->setTargetContext(QString(), QString());
     showStatusMessage(QString());
+    m_previewHandlerHost->unload();
+    m_previewHandlerHost->hide();
+    m_thumbnailPanel->show();
+    m_pdfView->show();
     m_pdfView->clearDocument();
     m_document.unload();
     rebuildThumbnails();
@@ -443,7 +510,7 @@ void PdfRenderer::applyChrome()
         "}"
         "#PdfPathTitle {"
         "  color: #16324a;"
-        "  font-family: 'Segoe UI Semibold';"
+        "  font-family: 'Segoe UI Rounded';"
         "}"
         "#PdfPathValue {"
         "  color: #445d76;"
@@ -604,14 +671,14 @@ void PdfRenderer::applyChrome()
     );
 
     QFont titleFont;
-    titleFont.setFamily(QStringLiteral("Microsoft YaHei UI"));
+    titleFont.setFamily(QStringLiteral("Segoe UI Rounded"));
     titleFont.setPixelSize(20);
     titleFont.setWeight(QFont::Bold);
     m_titleLabel->setFont(titleFont);
     m_titleLabel->setWordWrap(true);
 
     QFont metaFont;
-    metaFont.setFamily(QStringLiteral("Segoe UI"));
+    metaFont.setFamily(QStringLiteral("Segoe UI Rounded"));
     metaFont.setPixelSize(13);
     m_metaLabel->setFont(metaFont);
     m_pathTitleLabel->setFont(metaFont);
@@ -627,17 +694,14 @@ void PdfRenderer::applyChrome()
 void PdfRenderer::showStatusMessage(const QString& message)
 {
     if (message.trimmed().isEmpty()) {
-        m_statusLabel->clear();
-        m_statusLabel->hide();
+        PreviewStateVisuals::clearStatus(m_statusLabel);
         return;
     }
 
-    m_statusLabel->setText(message);
-    m_statusLabel->show();
+    PreviewStateVisuals::showStatus(m_statusLabel, message);
     QTimer::singleShot(1400, m_statusLabel, [label = m_statusLabel]() {
         if (label) {
-            label->clear();
-            label->hide();
+            PreviewStateVisuals::clearStatus(label);
         }
     });
 }

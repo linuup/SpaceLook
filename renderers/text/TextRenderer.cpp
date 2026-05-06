@@ -30,6 +30,7 @@
 #include "renderers/ModeSwitchButton.h"
 #include "renderers/OpenWithButton.h"
 #include "renderers/PreviewHeaderBar.h"
+#include "renderers/PreviewStateVisuals.h"
 #include "renderers/SelectableTitleLabel.h"
 #include "core/preview_state.h"
 #include "widgets/SpaceLookWindow.h"
@@ -240,9 +241,13 @@ void LineNumberArea::paintEvent(QPaintEvent* event)
     }
 }
 
-TextLoadResult loadTextPreviewContent(const QString& filePath)
+TextLoadResult loadTextPreviewContent(const QString& filePath, const PreviewCancellationToken& cancelToken)
 {
     TextLoadResult result;
+    if (previewCancellationRequested(cancelToken)) {
+        result.statusMessage = QStringLiteral("Text preview was canceled.");
+        return result;
+    }
 
     QFile file(filePath);
     if (!file.open(QIODevice::ReadOnly)) {
@@ -253,6 +258,11 @@ TextLoadResult loadTextPreviewContent(const QString& filePath)
 
     QByteArray content = file.read(kMaxPreviewBytes + 1);
     file.close();
+    if (previewCancellationRequested(cancelToken)) {
+        content.clear();
+        result.statusMessage = QStringLiteral("Text preview was canceled.");
+        return result;
+    }
 
     const bool truncated = content.size() > kMaxPreviewBytes;
     if (truncated) {
@@ -349,7 +359,7 @@ TextRenderer::TextRenderer(PreviewState* previewState, QWidget* parent)
     m_textEdit->setFrameShape(QFrame::NoFrame);
     m_modeSwitchButton->hide();
     QFont modeFont;
-    modeFont.setFamily(QStringLiteral("Segoe UI"));
+    modeFont.setFamily(QStringLiteral("Segoe UI Rounded"));
     modeFont.setPixelSize(12);
     modeFont.setWeight(QFont::DemiBold);
     m_modeSwitchButton->setMenuFont(modeFont);
@@ -362,7 +372,8 @@ TextRenderer::TextRenderer(PreviewState* previewState, QWidget* parent)
     m_contentStack->addWidget(m_loadingCard);
     m_contentStack->addWidget(m_textEdit);
     m_iconLabel->setFixedSize(72, 72);
-    m_iconLabel->setScaledContents(true);
+    m_iconLabel->setScaledContents(false);
+    m_iconLabel->setAlignment(Qt::AlignCenter);
     m_titleLabel->setWordWrap(true);
     m_pathTitleLabel->hide();
     m_pathValueLabel->setTextInteractionFlags(Qt::TextSelectableByMouse);
@@ -382,10 +393,17 @@ TextRenderer::TextRenderer(PreviewState* previewState, QWidget* parent)
             previewWindow->hidePreview();
         }
     });
+    PreviewStateVisuals::prepareStatusLabel(m_statusLabel);
     m_statusLabel->hide();
     m_loadingTitleLabel->setText(QStringLiteral("Preparing text preview"));
     m_loadingMessageLabel->setText(QStringLiteral("The preview shell is ready. Content is loading in the background."));
     m_loadingMessageLabel->setWordWrap(true);
+    PreviewStateVisuals::prepareStateCard(
+        m_loadingCard,
+        m_loadingTitleLabel,
+        m_loadingMessageLabel,
+        nullptr,
+        PreviewStateVisuals::Kind::Loading);
 
     connect(m_titleLabel, &SelectableTitleLabel::copyFeedbackRequested, this, [this](const QString& message) {
         showStatusMessage(message);
@@ -435,39 +453,45 @@ void TextRenderer::setLoadingStateCallback(std::function<void(bool)> callback)
 
 void TextRenderer::load(const HoveredItemInfo& info)
 {
+    cancelPreviewTask(m_cancelToken);
+    const PreviewCancellationToken cancelToken = makePreviewCancellationToken();
+    m_cancelToken = cancelToken;
     m_info = info;
     const PreviewLoadGuard::Token loadToken = m_loadGuard.begin(info.filePath);
     notifyLoadingState(true);
     qDebug().noquote() << QStringLiteral("[SpaceLookRender] TextRenderer load path=\"%1\"").arg(info.filePath);
     m_titleLabel->setText(info.title.isEmpty() ? QStringLiteral("Text Preview") : info.title);
     m_titleLabel->setCopyText(m_titleLabel->text());
-    const QIcon typeIcon(FileTypeIconResolver::iconForInfo(info));
-    m_iconLabel->setPixmap(typeIcon.pixmap(128, 128));
+    m_iconLabel->setPixmap(FileTypeIconResolver::pixmapForInfo(info, m_iconLabel->contentsRect().size()));
     m_pathValueLabel->setText(info.filePath.trimmed().isEmpty() ? QStringLiteral("(Unavailable)") : info.filePath);
     m_openWithButton->setTargetContext(info.filePath, info.typeKey);
     updateModeSelector(info.filePath);
     m_loadingTitleLabel->setText(QStringLiteral("Preparing text preview"));
     m_loadingMessageLabel->setText(QStringLiteral("The preview shell is ready. Content is loading in the background."));
+    PreviewStateVisuals::prepareStateCard(
+        m_loadingCard,
+        m_loadingTitleLabel,
+        m_loadingMessageLabel,
+        nullptr,
+        PreviewStateVisuals::Kind::Loading);
     m_contentStack->setCurrentWidget(m_loadingCard);
     m_textEdit->clear();
-    m_statusLabel->setText(QStringLiteral("Loading text preview..."));
-    m_statusLabel->show();
+    PreviewStateVisuals::showStatus(m_statusLabel, QStringLiteral("Loading text preview..."), PreviewStateVisuals::Kind::Loading);
 
     auto* watcher = new QFutureWatcher<TextLoadResult>(this);
-    connect(watcher, &QFutureWatcher<TextLoadResult>::finished, this, [this, watcher, loadToken]() {
-        const TextLoadResult result = watcher->result();
+    connect(watcher, &QFutureWatcher<TextLoadResult>::finished, this, [this, watcher, loadToken, cancelToken]() {
         watcher->deleteLater();
 
-        if (!m_loadGuard.isCurrent(loadToken, m_info.filePath)) {
+        if (previewCancellationRequested(cancelToken) || !m_loadGuard.isCurrent(loadToken, m_info.filePath)) {
             qDebug().noquote() << QStringLiteral("[SpaceLookRender] TextRenderer discarded stale async result path=\"%1\"")
                 .arg(loadToken.path);
             return;
         }
 
+        const TextLoadResult result = watcher->result();
         if (!result.success) {
             qDebug().noquote() << QStringLiteral("[SpaceLookRender] TextRenderer failed to open: %1").arg(loadToken.path);
-            m_statusLabel->setText(result.statusMessage);
-            m_statusLabel->show();
+            PreviewStateVisuals::showStatus(m_statusLabel, result.statusMessage, PreviewStateVisuals::Kind::Error);
             m_textEdit->setPlainText(result.text);
             m_contentStack->setCurrentWidget(m_textEdit);
             notifyLoadingState(false);
@@ -478,11 +502,9 @@ void TextRenderer::load(const HoveredItemInfo& info)
         m_textEdit->setPlainText(previewText);
         m_contentStack->setCurrentWidget(m_textEdit);
         if (result.statusMessage.trimmed().isEmpty()) {
-            m_statusLabel->clear();
-            m_statusLabel->hide();
+            PreviewStateVisuals::clearStatus(m_statusLabel);
         } else {
-            m_statusLabel->setText(result.statusMessage);
-            m_statusLabel->show();
+            PreviewStateVisuals::showStatus(m_statusLabel, result.statusMessage);
         }
 
         qDebug().noquote() << QStringLiteral("[SpaceLookRender] TextRenderer loaded async chars=%1 path=\"%2\"")
@@ -490,21 +512,21 @@ void TextRenderer::load(const HoveredItemInfo& info)
             .arg(loadToken.path);
         notifyLoadingState(false);
     });
-    watcher->setFuture(QtConcurrent::run([filePath = info.filePath]() {
-        return loadTextPreviewContent(filePath);
+    watcher->setFuture(QtConcurrent::run([filePath = info.filePath, cancelToken]() {
+        return loadTextPreviewContent(filePath, cancelToken);
     }));
 }
 
 void TextRenderer::unload()
 {
+    cancelPreviewTask(m_cancelToken);
     m_loadGuard.cancel();
     notifyLoadingState(false);
     m_textEdit->clear();
     m_contentStack->setCurrentWidget(m_loadingCard);
     m_pathValueLabel->clear();
     m_openWithButton->setTargetContext(QString(), QString());
-    m_statusLabel->clear();
-    m_statusLabel->hide();
+    PreviewStateVisuals::clearStatus(m_statusLabel);
     m_info = HoveredItemInfo();
 }
 
@@ -518,17 +540,14 @@ void TextRenderer::notifyLoadingState(bool loading)
 void TextRenderer::showStatusMessage(const QString& message)
 {
     if (message.trimmed().isEmpty()) {
-        m_statusLabel->clear();
-        m_statusLabel->hide();
+        PreviewStateVisuals::clearStatus(m_statusLabel);
         return;
     }
 
-    m_statusLabel->setText(message);
-    m_statusLabel->show();
+    PreviewStateVisuals::showStatus(m_statusLabel, message);
     QTimer::singleShot(1400, m_statusLabel, [label = m_statusLabel]() {
         if (label) {
-            label->clear();
-            label->hide();
+            PreviewStateVisuals::clearStatus(label);
         }
     });
 }
@@ -572,7 +591,7 @@ void TextRenderer::applyChrome()
         "}"
         "#TextPathTitle {"
         "  color: #16324a;"
-        "  font-family: 'Segoe UI Semibold';"
+        "  font-family: 'Segoe UI Rounded';"
         "}"
         "#TextPathValue {"
         "  color: #445d76;"
@@ -722,14 +741,14 @@ void TextRenderer::applyChrome()
     );
 
     QFont titleFont;
-    titleFont.setFamily(QStringLiteral("Microsoft YaHei UI"));
+    titleFont.setFamily(QStringLiteral("Segoe UI Rounded"));
     titleFont.setPixelSize(20);
     titleFont.setWeight(QFont::Bold);
     m_titleLabel->setFont(titleFont);
     m_titleLabel->setWordWrap(true);
 
     QFont metaFont;
-    metaFont.setFamily(QStringLiteral("Segoe UI"));
+    metaFont.setFamily(QStringLiteral("Segoe UI Rounded"));
     metaFont.setPixelSize(13);
     m_metaLabel->setFont(metaFont);
     m_pathTitleLabel->setFont(metaFont);
@@ -740,7 +759,7 @@ void TextRenderer::applyChrome()
     m_loadingMessageLabel->setFont(metaFont);
 
     QFont loadingTitleFont;
-    loadingTitleFont.setFamily(QStringLiteral("Segoe UI Semibold"));
+    loadingTitleFont.setFamily(QStringLiteral("Segoe UI Rounded"));
     loadingTitleFont.setPixelSize(18);
     m_loadingTitleLabel->setFont(loadingTitleFont);
 

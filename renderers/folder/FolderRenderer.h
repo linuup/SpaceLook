@@ -5,11 +5,14 @@
 
 #include "core/hovered_item_info.h"
 #include "renderers/IPreviewRenderer.h"
+#include "renderers/PreviewCancellationToken.h"
 #include "renderers/PreviewLoadGuard.h"
 
 class QLabel;
+class QLineEdit;
 class OpenWithButton;
 class QPoint;
+class QEvent;
 class QTreeWidget;
 class QTreeWidgetItem;
 class SelectableTitleLabel;
@@ -43,9 +46,13 @@ public:
         bool success = false;
     };
 
+protected:
+    bool eventFilter(QObject* watched, QEvent* event) override;
+
 private:
     void applyChrome();
     void showStatusMessage(const QString& message);
+    void updateFolderCountStatus(int entryCount);
     void populateTree(QTreeWidgetItem* parentItem, const QVector<FolderEntry>& entries);
     void clearTreeItemChildren(QTreeWidgetItem* item);
     QTreeWidgetItem* ensureFolderItem(const QString& folderPath,
@@ -61,12 +68,15 @@ private:
     void openTreeItem(QTreeWidgetItem* item);
     void openTreeItemInExplorer(QTreeWidgetItem* item);
     void renameTreeItem(QTreeWidgetItem* item);
+    void confirmInlineRename();
+    void cancelInlineRename();
     void handleInlineRename(QTreeWidgetItem* item, int column);
     void updateTreeItemPathPrefix(QTreeWidgetItem* item, const QString& oldPath, const QString& newPath);
     void notifyLoadingState(bool loading);
 
     HoveredItemInfo m_info;
     PreviewLoadGuard m_loadGuard;
+    PreviewCancellationToken m_cancelToken;
     std::function<void(bool)> m_loadingStateCallback;
     QWidget* m_headerRow = nullptr;
     QLabel* m_iconLabel = nullptr;
@@ -78,4 +88,9 @@ private:
     OpenWithButton* m_openWithButton = nullptr;
     QLabel* m_statusLabel = nullptr;
     QTreeWidget* m_treeWidget = nullptr;
+    QTreeWidgetItem* m_renamingItem = nullptr;
+    QLineEdit* m_renameEditor = nullptr;
+    QString m_folderCountStatus;
+    int m_rootEntryCount = -1;
+    int m_statusMessageSerial = 0;
 };

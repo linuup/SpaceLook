@@ -1,6 +1,7 @@
 #include "widgets/SpaceLookWindow.h"
 
 #include "core/preview_state.h"
+#include "settings/render_type_settings.h"
 #include "settings/spacelook_ui_settings.h"
 #include "renderers/OpenWithButton.h"
 #include "renderers/PreviewHost.h"
@@ -26,6 +27,7 @@
 #include <QRegion>
 #include <QQmlContext>
 #include <QQmlEngine>
+#include <QQmlError>
 #include <QMenu>
 #include <QQuickView>
 #include <QQuickItem>
@@ -153,6 +155,69 @@ private:
 };
 
 SettingsQuickView* g_settingsWindow = nullptr;
+
+QRect centeredSettingsGeometry(const QSize& requestedSize)
+{
+    QScreen* screen = QGuiApplication::screenAt(QCursor::pos());
+    if (!screen) {
+        screen = QGuiApplication::primaryScreen();
+    }
+
+    const QRect availableGeometry = screen
+        ? screen->availableGeometry()
+        : QRect(80, 80, 1200, 800);
+    const QSize safeSize(qMin(requestedSize.width(), availableGeometry.width()),
+                         qMin(requestedSize.height(), availableGeometry.height()));
+    const QPoint topLeft(
+        availableGeometry.x() + (availableGeometry.width() - safeSize.width()) / 2,
+        availableGeometry.y() + (availableGeometry.height() - safeSize.height()) / 2);
+    return QRect(topLeft, safeSize);
+}
+
+bool windowIntersectsAnyScreen(const QRect& geometry)
+{
+    const QList<QScreen*> screens = QGuiApplication::screens();
+    for (QScreen* screen : screens) {
+        if (screen && screen->availableGeometry().intersects(geometry)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+void showSettingsWindowVisible(SettingsQuickView* settingsWindow)
+{
+    if (!settingsWindow) {
+        return;
+    }
+
+    const QSize desiredSize = settingsWindow->size().isValid()
+        ? settingsWindow->size()
+        : QSize(820, 620);
+    if (!windowIntersectsAnyScreen(QRect(settingsWindow->position(), desiredSize))) {
+        settingsWindow->setGeometry(centeredSettingsGeometry(desiredSize));
+    }
+
+    if (settingsWindow->visibility() == QWindow::Minimized) {
+        settingsWindow->showNormal();
+    } else {
+        settingsWindow->show();
+    }
+    settingsWindow->raise();
+    settingsWindow->requestActivate();
+
+    QTimer::singleShot(0, settingsWindow, [settingsWindow]() {
+        if (!settingsWindow) {
+            return;
+        }
+        if (settingsWindow->visibility() == QWindow::Minimized) {
+            settingsWindow->showNormal();
+        }
+        settingsWindow->raise();
+        settingsWindow->requestActivate();
+    });
+}
 
 QString bstrToQString(BSTR value)
 {
@@ -510,6 +575,7 @@ SpaceLookWindow::~SpaceLookWindow()
 void SpaceLookWindow::showPreview(const HoveredItemInfo& info)
 {
     const PreviewLoadGuard::Token previewToken = m_previewGuard.begin(info.filePath);
+    const bool compactSummaryPreview = isCompactSummaryPreview(info);
     if (m_menuBar) {
         m_menuBar->syncToWindowState();
     }
@@ -521,7 +587,7 @@ void SpaceLookWindow::showPreview(const HoveredItemInfo& info)
         m_menuBar->show();
         m_menuBar->raise();
     }
-    if (isCompactSummaryPreview(info)) {
+    if (compactSummaryPreview) {
         m_expandedPreview = false;
         applyPreferredSizeForPreview(info);
     } else if (m_expandedPreview && supportsExpandedPreview(info)) {
@@ -530,6 +596,14 @@ void SpaceLookWindow::showPreview(const HoveredItemInfo& info)
         m_expandedPreview = false;
         applyPreferredSizeForPreview(info);
     }
+
+    if (m_previewHost) {
+        m_previewHost->showPreview(info);
+        if (compactSummaryPreview || m_previewHost->activeRendererId() == QStringLiteral("summary")) {
+            applySummaryPreviewSize(info);
+        }
+    }
+
     show();
     if (m_menuRegion) {
         m_menuRegion->show();
@@ -546,14 +620,9 @@ void SpaceLookWindow::showPreview(const HoveredItemInfo& info)
         if (!m_previewGuard.isCurrent(previewToken, info.filePath) || !isVisible() || !m_previewHost) {
             return;
         }
-        m_previewHost->showPreview(info);
-        if (m_menuRegion) {
-            m_menuRegion->show();
-            m_menuRegion->raise();
-        }
-        if (m_menuBar) {
-            m_menuBar->show();
-            m_menuBar->raise();
+
+        if (isCompactSummaryPreview(info) || m_previewHost->activeRendererId() == QStringLiteral("summary")) {
+            applySummaryPreviewSize(info);
         }
     });
 }
@@ -700,6 +769,17 @@ void SpaceLookWindow::toggleExpandedPreview()
     }
 }
 
+void SpaceLookWindow::applySummaryPreviewSize(const HoveredItemInfo& info)
+{
+    HoveredItemInfo summaryInfo = info;
+    summaryInfo.rendererName = QStringLiteral("summary");
+    m_expandedPreview = false;
+    applyPreferredSizeForPreview(summaryInfo);
+    if (m_menuBar) {
+        m_menuBar->syncToWindowState();
+    }
+}
+
 bool SpaceLookWindow::isExpandedPreview() const
 {
     return m_expandedPreview;
@@ -737,9 +817,7 @@ void SpaceLookWindow::showOpenWithMenuAt(const QPoint& globalPos)
 void SpaceLookWindow::showSettingsWindow()
 {
     if (g_settingsWindow) {
-        g_settingsWindow->show();
-        g_settingsWindow->raise();
-        g_settingsWindow->requestActivate();
+        showSettingsWindowVisible(g_settingsWindow);
         return;
     }
 
@@ -748,6 +826,7 @@ void SpaceLookWindow::showSettingsWindow()
         g_settingsWindow = nullptr;
     });
     g_settingsWindow->rootContext()->setContextProperty(QStringLiteral("uiSettings"), &SpaceLookUiSettings::instance());
+    g_settingsWindow->rootContext()->setContextProperty(QStringLiteral("renderTypeSettings"), &RenderTypeSettings::instance());
     g_settingsWindow->rootContext()->setContextProperty(QStringLiteral("settingsWindow"), this);
     g_settingsWindow->setColor(Qt::transparent);
     g_settingsWindow->setIcon(SPACELOOKAppIcon());
@@ -761,13 +840,17 @@ void SpaceLookWindow::showSettingsWindow()
         qDebug().noquote() << QStringLiteral("[SpaceLookSettings] status=%1 source=%2")
             .arg(static_cast<int>(status))
             .arg(settingsSource.toString());
+        if (status == QQuickView::Error && g_settingsWindow) {
+            const QList<QQmlError> errors = g_settingsWindow->errors();
+            for (const QQmlError& error : errors) {
+                qDebug().noquote() << QStringLiteral("[SpaceLookSettings] qml error=%1").arg(error.toString());
+            }
+        }
     });
     g_settingsWindow->setSource(settingsSource);
-    g_settingsWindow->resize(820, 620);
+    g_settingsWindow->setGeometry(centeredSettingsGeometry(QSize(820, 620)));
 
-    g_settingsWindow->show();
-    g_settingsWindow->raise();
-    g_settingsWindow->requestActivate();
+    showSettingsWindowVisible(g_settingsWindow);
 }
 
 void SpaceLookWindow::requestSettingsWindowMinimize()
@@ -1330,40 +1413,14 @@ bool SpaceLookWindow::isWelcomePreview(const HoveredItemInfo& info) const
 
 bool SpaceLookWindow::isCompactSummaryPreview(const HoveredItemInfo& info) const
 {
-    const bool usesSummaryRenderer = info.rendererName == QStringLiteral("summary") ||
-        info.typeKey == QStringLiteral("file") ||
-        info.typeKey == QStringLiteral("shortcut") ||
-        info.typeKey == QStringLiteral("shell_item");
-    if (!usesSummaryRenderer) {
-        return false;
+    QString rendererName = info.rendererName.trimmed().toLower();
+    if (rendererName.endsWith(QStringLiteral("renderer"))) {
+        rendererName.chop(QStringLiteral("renderer").size());
+    } else if (rendererName.endsWith(QStringLiteral("render"))) {
+        rendererName.chop(QStringLiteral("render").size());
     }
 
-    const QString lowerFilePath = info.filePath.trimmed().toLower();
-    static const QStringList compactBinarySuffixes = {
-        QStringLiteral(".exe"),
-        QStringLiteral(".dll"),
-        QStringLiteral(".sys"),
-        QStringLiteral(".ocx"),
-        QStringLiteral(".cpl"),
-        QStringLiteral(".com"),
-        QStringLiteral(".scr"),
-        QStringLiteral(".msi"),
-        QStringLiteral(".msp"),
-        QStringLiteral(".msu"),
-        QStringLiteral(".cab"),
-        QStringLiteral(".bin"),
-        QStringLiteral(".dat"),
-        QStringLiteral(".pak"),
-        QStringLiteral(".iso"),
-        QStringLiteral(".img")
-    };
-    for (const QString& suffix : compactBinarySuffixes) {
-        if (lowerFilePath.endsWith(suffix)) {
-            return true;
-        }
-    }
-
-    return true;
+    return rendererName == QStringLiteral("summary");
 }
 
 bool SpaceLookWindow::supportsExpandedPreview(const HoveredItemInfo& info) const
@@ -1401,8 +1458,8 @@ void SpaceLookWindow::applyPreferredSizeForPreview(const HoveredItemInfo& info)
     } else if (isLargeContentPreview(info)) {
         preferredSize = QSize(1180, 820);
     } else if (isCompactSummaryPreview(info)) {
-        preferredSize = QSize(620, 260);
-        minimumSizeForType = QSize(560, 230);
+        preferredSize = QSize(620, 450);
+        minimumSizeForType = QSize(560, 340);
     } else if (isMediumContentPreview(info)) {
         preferredSize = QSize(960, 700);
     } else {

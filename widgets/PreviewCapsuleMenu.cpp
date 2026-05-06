@@ -604,7 +604,7 @@ void PreviewCapsuleMenu::applyMenuVisibility()
         button->setVisible(settings.showMenuClose());
     }
     if (QAbstractButton* button = menuButton(MenuAction::More)) {
-        button->setVisible(settings.showMenuMore());
+        button->setVisible(true);
     }
 
     if (QAbstractButton* button = menuButton(MenuAction::Expand)) {

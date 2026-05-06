@@ -7,6 +7,7 @@
 
 #include "core/hovered_item_info.h"
 #include "renderers/IPreviewRenderer.h"
+#include "renderers/PreviewCancellationToken.h"
 #include "renderers/PreviewLoadGuard.h"
 
 class QLabel;
@@ -40,6 +41,7 @@ private:
 
     HoveredItemInfo m_info;
     PreviewLoadGuard m_loadGuard;
+    PreviewCancellationToken m_cancelToken;
     std::function<void(bool)> m_loadingStateCallback;
     QWidget* m_headerRow = nullptr;
     QLabel* m_iconLabel = nullptr;

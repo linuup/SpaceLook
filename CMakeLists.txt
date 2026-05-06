@@ -83,6 +83,7 @@ target_link_libraries(SpaceLook
         OleAut32
         Uuid
         Uiautomationcore
+        Crypt32
         gdiplus
         Qt5::Core
         Qt5::Gui
@@ -155,6 +156,27 @@ target_link_libraries(SpaceLook
 
 if(WIN32)
     set(QT_PLUGIN_ROOT "${Qt5_DIR}/../../../plugins")
+    set(QT_QML_ROOT "${Qt5_DIR}/../../../qml")
+    set(SPACELOOK_QT_IMAGEFORMAT_PLUGINS
+        "$<$<CONFIG:Debug>:${QT_PLUGIN_ROOT}/imageformats/qgifd.dll>"
+        "$<$<NOT:$<CONFIG:Debug>>:${QT_PLUGIN_ROOT}/imageformats/qgif.dll>"
+        "$<$<CONFIG:Debug>:${QT_PLUGIN_ROOT}/imageformats/qicnsd.dll>"
+        "$<$<NOT:$<CONFIG:Debug>>:${QT_PLUGIN_ROOT}/imageformats/qicns.dll>"
+        "$<$<CONFIG:Debug>:${QT_PLUGIN_ROOT}/imageformats/qicod.dll>"
+        "$<$<NOT:$<CONFIG:Debug>>:${QT_PLUGIN_ROOT}/imageformats/qico.dll>"
+        "$<$<CONFIG:Debug>:${QT_PLUGIN_ROOT}/imageformats/qjpegd.dll>"
+        "$<$<NOT:$<CONFIG:Debug>>:${QT_PLUGIN_ROOT}/imageformats/qjpeg.dll>"
+        "$<$<CONFIG:Debug>:${QT_PLUGIN_ROOT}/imageformats/qsvgd.dll>"
+        "$<$<NOT:$<CONFIG:Debug>>:${QT_PLUGIN_ROOT}/imageformats/qsvg.dll>"
+        "$<$<CONFIG:Debug>:${QT_PLUGIN_ROOT}/imageformats/qtgad.dll>"
+        "$<$<NOT:$<CONFIG:Debug>>:${QT_PLUGIN_ROOT}/imageformats/qtga.dll>"
+        "$<$<CONFIG:Debug>:${QT_PLUGIN_ROOT}/imageformats/qtiffd.dll>"
+        "$<$<NOT:$<CONFIG:Debug>>:${QT_PLUGIN_ROOT}/imageformats/qtiff.dll>"
+        "$<$<CONFIG:Debug>:${QT_PLUGIN_ROOT}/imageformats/qwbmpd.dll>"
+        "$<$<NOT:$<CONFIG:Debug>>:${QT_PLUGIN_ROOT}/imageformats/qwbmp.dll>"
+        "$<$<CONFIG:Debug>:${QT_PLUGIN_ROOT}/imageformats/qwebpd.dll>"
+        "$<$<NOT:$<CONFIG:Debug>>:${QT_PLUGIN_ROOT}/imageformats/qwebp.dll>"
+    )
     set(LIBMPV_DLL_PATH "" CACHE FILEPATH "Path to a libmpv runtime DLL to deploy with SpaceLook")
     set(SPACELOOK_MPV_PART1 "${CMAKE_CURRENT_SOURCE_DIR}/third_party/mpv/libmpv-2.dll.part1")
     set(SPACELOOK_MPV_PART2 "${CMAKE_CURRENT_SOURCE_DIR}/third_party/mpv/libmpv-2.dll.part2")
@@ -231,6 +253,7 @@ if(WIN32)
         COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:SpaceLook>/ksyntaxhighlighting"
         COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:SpaceLook>/ksyntaxhighlighting/syntax"
         COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:SpaceLook>/ksyntaxhighlighting/themes"
+        COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:SpaceLook>/QtQuick"
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "${QT_PLUGIN_ROOT}/mediaservice/wmfengine.dll"
             "${QT_PLUGIN_ROOT}/mediaservice/dsengine.dll"
@@ -243,8 +266,7 @@ if(WIN32)
             "${QT_PLUGIN_ROOT}/playlistformats/qtmultimedia_m3u.dll"
             "$<TARGET_FILE_DIR:SpaceLook>/playlistformats"
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "${QT_PLUGIN_ROOT}/imageformats/qgif.dll"
-            "${QT_PLUGIN_ROOT}/imageformats/qwebp.dll"
+            ${SPACELOOK_QT_IMAGEFORMAT_PLUGINS}
             "$<TARGET_FILE_DIR:SpaceLook>/imageformats"
         COMMAND ${CMAKE_COMMAND} -E copy_directory
             "${CMAKE_CURRENT_SOURCE_DIR}/third_party/ksyntaxhighlighting/data/syntax"
@@ -252,13 +274,41 @@ if(WIN32)
         COMMAND ${CMAKE_COMMAND} -E copy_directory
             "${CMAKE_CURRENT_SOURCE_DIR}/third_party/ksyntaxhighlighting/data/themes"
             "$<TARGET_FILE_DIR:SpaceLook>/ksyntaxhighlighting/themes"
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${QT_QML_ROOT}/QtQml"
+            "$<TARGET_FILE_DIR:SpaceLook>/QtQml"
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${QT_QML_ROOT}/QtQuick.2"
+            "$<TARGET_FILE_DIR:SpaceLook>/QtQuick.2"
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${QT_QML_ROOT}/QtQuick/Controls.2"
+            "$<TARGET_FILE_DIR:SpaceLook>/QtQuick/Controls.2"
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${QT_QML_ROOT}/QtQuick/Layouts"
+            "$<TARGET_FILE_DIR:SpaceLook>/QtQuick/Layouts"
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${QT_QML_ROOT}/QtQuick/Templates.2"
+            "$<TARGET_FILE_DIR:SpaceLook>/QtQuick/Templates.2"
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${QT_QML_ROOT}/QtQuick/Window.2"
+            "$<TARGET_FILE_DIR:SpaceLook>/QtQuick/Window.2"
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "${CMAKE_CURRENT_SOURCE_DIR}/third_party/webview2/x64/WebView2Loader.dll"
             "$<TARGET_FILE_DIR:SpaceLook>"
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "${CMAKE_CURRENT_SOURCE_DIR}/third_party/pdfium/bin/pdfium.dll"
             "$<TARGET_FILE_DIR:SpaceLook>"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${CMAKE_CURRENT_SOURCE_DIR}/third_party/libavif/bin/avifdec.exe"
+            "$<TARGET_FILE_DIR:SpaceLook>"
+        COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:SpaceLook>/7zip"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${CMAKE_CURRENT_SOURCE_DIR}/third_party/7zip/runtime/7z.exe"
+            "${CMAKE_CURRENT_SOURCE_DIR}/third_party/7zip/runtime/7z.dll"
+            "${CMAKE_CURRENT_SOURCE_DIR}/third_party/7zip/runtime/License.txt"
+            "$<TARGET_FILE_DIR:SpaceLook>/7zip"
         COMMENT "Copying Qt multimedia plugins for SpaceLook..."
+        COMMAND_EXPAND_LISTS
     )
 
     if(SPACELOOK_LIBMPV_DLL)

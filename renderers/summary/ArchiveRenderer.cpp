@@ -1,6 +1,9 @@
 #include "renderers/summary/ArchiveRenderer.h"
 
 #include <QDebug>
+#include <QCoreApplication>
+#include <QDir>
+#include <QElapsedTimer>
 #include <QFileInfo>
 #include <QFutureWatcher>
 #include <QHash>
@@ -20,6 +23,7 @@
 #include "renderers/FileTypeIconResolver.h"
 #include "renderers/OpenWithButton.h"
 #include "renderers/PreviewHeaderBar.h"
+#include "renderers/PreviewStateVisuals.h"
 #include "renderers/SelectableTitleLabel.h"
 #include "widgets/SpaceLookWindow.h"
 
@@ -45,6 +49,27 @@ QIcon iconForArchiveEntry(const QString& entryPath, bool isDirectory)
     info.isDirectory = isDirectory;
     info.typeKey = isDirectory ? QStringLiteral("folder") : QStringLiteral("file");
     return FileTypeIconResolver::iconForInfo(info);
+}
+
+QString bundledSevenZipPath()
+{
+    const QString applicationDir = QCoreApplication::applicationDirPath();
+    const QStringList candidates = {
+        QDir(applicationDir).filePath(QStringLiteral("7zip/7z.exe")),
+        QDir(applicationDir).filePath(QStringLiteral("7z.exe")),
+#ifdef SPACELOOK_PROJECT_DIR
+        QDir(QStringLiteral(SPACELOOK_PROJECT_DIR)).filePath(QStringLiteral("third_party/7zip/runtime/7z.exe")),
+#endif
+        QDir(QDir::currentPath()).filePath(QStringLiteral("third_party/7zip/runtime/7z.exe"))
+    };
+
+    for (const QString& candidate : candidates) {
+        if (QFileInfo::exists(candidate)) {
+            return QDir::toNativeSeparators(candidate);
+        }
+    }
+
+    return QStringLiteral("7z");
 }
 
 }
@@ -94,13 +119,15 @@ ArchiveRenderer::ArchiveRenderer(QWidget* parent)
     pathLayout->addWidget(m_pathValueLabel, 1);
 
     m_iconLabel->setFixedSize(72, 72);
-    m_iconLabel->setScaledContents(true);
+    m_iconLabel->setScaledContents(false);
+    m_iconLabel->setAlignment(Qt::AlignCenter);
     m_titleLabel->setWordWrap(true);
     m_pathTitleLabel->hide();
     m_pathValueLabel->setTextInteractionFlags(Qt::TextSelectableByMouse);
     m_pathValueLabel->setWordWrap(true);
     m_pathValueLabel->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
     m_pathRow->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+    PreviewStateVisuals::prepareStatusLabel(m_statusLabel);
     m_statusLabel->hide();
 
     m_treeWidget->setColumnCount(1);
@@ -168,6 +195,9 @@ void ArchiveRenderer::setLoadingStateCallback(std::function<void(bool)> callback
 
 void ArchiveRenderer::load(const HoveredItemInfo& info)
 {
+    cancelPreviewTask(m_cancelToken);
+    const PreviewCancellationToken cancelToken = makePreviewCancellationToken();
+    m_cancelToken = cancelToken;
     m_info = info;
     const PreviewLoadGuard::Token loadToken = m_loadGuard.begin(info.filePath);
     notifyLoadingState(true);
@@ -176,40 +206,37 @@ void ArchiveRenderer::load(const HoveredItemInfo& info)
 
     m_titleLabel->setText(info.title.isEmpty() ? QStringLiteral("Archive Preview") : info.title);
     m_titleLabel->setCopyText(m_titleLabel->text());
-    const QIcon typeIcon(FileTypeIconResolver::iconForInfo(info));
-    m_iconLabel->setPixmap(typeIcon.pixmap(128, 128));
+    m_iconLabel->setPixmap(FileTypeIconResolver::pixmapForInfo(info, m_iconLabel->contentsRect().size()));
     m_pathValueLabel->setText(info.filePath.trimmed().isEmpty() ? QStringLiteral("(Unavailable)") : info.filePath);
     m_openWithButton->setTargetContext(info.filePath, info.typeKey);
     m_treeWidget->clear();
-    m_statusLabel->setText(QStringLiteral("Loading archive contents..."));
-    m_statusLabel->show();
+    PreviewStateVisuals::showStatus(m_statusLabel, QStringLiteral("Loading archive contents..."), PreviewStateVisuals::Kind::Loading);
 
     auto* watcher = new QFutureWatcher<ArchiveLoadResult>(this);
-    connect(watcher, &QFutureWatcher<ArchiveLoadResult>::finished, this, [this, watcher, loadToken]() {
-        const ArchiveLoadResult result = watcher->result();
+    connect(watcher, &QFutureWatcher<ArchiveLoadResult>::finished, this, [this, watcher, loadToken, cancelToken]() {
         watcher->deleteLater();
 
-        if (!m_loadGuard.isCurrent(loadToken, m_info.filePath)) {
+        if (previewCancellationRequested(cancelToken) || !m_loadGuard.isCurrent(loadToken, m_info.filePath)) {
             qDebug().noquote() << QStringLiteral("[SpaceLookRender] ArchiveRenderer discarded stale result path=\"%1\"")
                 .arg(loadToken.path);
             return;
         }
 
+        const ArchiveLoadResult result = watcher->result();
         if (!result.success) {
-            m_statusLabel->setText(result.statusMessage);
-            m_statusLabel->show();
+            PreviewStateVisuals::showStatus(m_statusLabel, result.statusMessage, PreviewStateVisuals::Kind::Error);
             notifyLoadingState(false);
             return;
         }
 
         populateTree(result.entries);
         if (result.entries.isEmpty()) {
-            m_statusLabel->setText(QStringLiteral("The archive is empty."));
-            m_statusLabel->show();
+            PreviewStateVisuals::showStatus(m_statusLabel, QStringLiteral("The archive is empty."), PreviewStateVisuals::Kind::Empty);
         } else {
-            m_statusLabel->setText(QStringLiteral("Loaded %1 entries. Click folders to expand.")
-                .arg(result.entries.size()));
-            m_statusLabel->show();
+            PreviewStateVisuals::showStatus(
+                m_statusLabel,
+                QStringLiteral("Loaded %1 entries. Click folders to expand.").arg(result.entries.size()),
+                PreviewStateVisuals::Kind::Success);
         }
 
         qDebug().noquote() << QStringLiteral("[SpaceLookRender] ArchiveRenderer entries=%1 path=\"%2\"")
@@ -218,20 +245,20 @@ void ArchiveRenderer::load(const HoveredItemInfo& info)
         notifyLoadingState(false);
     });
 
-    watcher->setFuture(QtConcurrent::run([this, filePath = info.filePath]() {
-        return loadArchiveEntries(filePath);
+    watcher->setFuture(QtConcurrent::run([this, filePath = info.filePath, cancelToken]() {
+        return loadArchiveEntries(filePath, cancelToken);
     }));
 }
 
 void ArchiveRenderer::unload()
 {
+    cancelPreviewTask(m_cancelToken);
     m_loadGuard.cancel();
     notifyLoadingState(false);
     m_treeWidget->clear();
     m_pathValueLabel->clear();
     m_openWithButton->setTargetContext(QString(), QString());
-    m_statusLabel->clear();
-    m_statusLabel->hide();
+    PreviewStateVisuals::clearStatus(m_statusLabel);
     m_info = HoveredItemInfo();
 }
 
@@ -267,7 +294,7 @@ void ArchiveRenderer::applyChrome()
         "}"
         "#ArchivePathTitle {"
         "  color: #16324a;"
-        "  font-family: 'Segoe UI Semibold';"
+        "  font-family: 'Segoe UI Rounded';"
         "}"
         "#ArchivePathValue {"
         "  color: #445d76;"
@@ -330,7 +357,7 @@ void ArchiveRenderer::applyChrome()
         "  border: none;"
         "  border-bottom: 1px solid rgba(204, 214, 226, 0.95);"
         "  padding: 8px 10px;"
-        "  font-family: 'Segoe UI Semibold';"
+        "  font-family: 'Segoe UI Rounded';"
         "}"
         "#ArchiveTree QScrollBar:vertical {"
         "  background: rgba(232, 238, 245, 0.8);"
@@ -380,13 +407,13 @@ void ArchiveRenderer::applyChrome()
     );
 
     QFont titleFont;
-    titleFont.setFamily(QStringLiteral("Microsoft YaHei UI"));
+    titleFont.setFamily(QStringLiteral("Segoe UI Rounded"));
     titleFont.setPixelSize(20);
     titleFont.setWeight(QFont::Bold);
     m_titleLabel->setFont(titleFont);
 
     QFont metaFont;
-    metaFont.setFamily(QStringLiteral("Segoe UI"));
+    metaFont.setFamily(QStringLiteral("Segoe UI Rounded"));
     metaFont.setPixelSize(13);
     m_metaLabel->setFont(metaFont);
     m_pathTitleLabel->setFont(metaFont);
@@ -394,7 +421,7 @@ void ArchiveRenderer::applyChrome()
     m_statusLabel->setFont(metaFont);
 
     QFont treeFont;
-    treeFont.setFamily(QStringLiteral("Segoe UI"));
+    treeFont.setFamily(QStringLiteral("Segoe UI Rounded"));
     treeFont.setPixelSize(13);
     m_treeWidget->setFont(treeFont);
 }
@@ -402,17 +429,14 @@ void ArchiveRenderer::applyChrome()
 void ArchiveRenderer::showStatusMessage(const QString& message)
 {
     if (message.trimmed().isEmpty()) {
-        m_statusLabel->clear();
-        m_statusLabel->hide();
+        PreviewStateVisuals::clearStatus(m_statusLabel);
         return;
     }
 
-    m_statusLabel->setText(message);
-    m_statusLabel->show();
+    PreviewStateVisuals::showStatus(m_statusLabel, message);
     QTimer::singleShot(1400, m_statusLabel, [label = m_statusLabel]() {
         if (label) {
-            label->clear();
-            label->hide();
+            PreviewStateVisuals::clearStatus(label);
         }
     });
 }
@@ -494,9 +518,14 @@ QTreeWidgetItem* ArchiveRenderer::ensureFolderItem(const QString& folderPath,
     return item;
 }
 
-ArchiveRenderer::ArchiveLoadResult ArchiveRenderer::loadArchiveEntries(const QString& filePath) const
+ArchiveRenderer::ArchiveLoadResult ArchiveRenderer::loadArchiveEntries(const QString& filePath,
+                                                                       const PreviewCancellationToken& cancelToken) const
 {
     ArchiveLoadResult result;
+    if (previewCancellationRequested(cancelToken)) {
+        result.statusMessage = QStringLiteral("Archive preview was canceled.");
+        return result;
+    }
 
     const QString trimmedPath = filePath.trimmed();
     if (trimmedPath.isEmpty()) {
@@ -504,35 +533,136 @@ ArchiveRenderer::ArchiveLoadResult ArchiveRenderer::loadArchiveEntries(const QSt
         return result;
     }
 
-    QProcess process;
-    process.setProgram(QStringLiteral("tar"));
-    process.setArguments({ QStringLiteral("-tf"), QDir::toNativeSeparators(trimmedPath) });
-    process.start();
-    if (!process.waitForStarted(5000)) {
-        result.statusMessage = QStringLiteral("Failed to start the archive listing tool.");
+    auto runProcess = [&cancelToken](const QString& program, const QStringList& arguments, QByteArray* stdOutput, QString* errorMessage) {
+        QProcess process;
+        process.setProgram(program);
+        process.setArguments(arguments);
+        process.start();
+        if (!process.waitForStarted(5000)) {
+            if (errorMessage) {
+                *errorMessage = QStringLiteral("Failed to start archive listing tool: %1").arg(program);
+            }
+            return false;
+        }
+
+        QElapsedTimer timeout;
+        timeout.start();
+        while (!process.waitForFinished(100)) {
+            if (previewCancellationRequested(cancelToken)) {
+                process.kill();
+                process.waitForFinished(1000);
+                if (errorMessage) {
+                    *errorMessage = QStringLiteral("Archive preview was canceled.");
+                }
+                return false;
+            }
+
+            if (timeout.elapsed() < 15000) {
+                continue;
+            }
+
+            process.kill();
+            process.waitForFinished(3000);
+            if (errorMessage) {
+                *errorMessage = QStringLiteral("Timed out while reading archive contents.");
+            }
+            return false;
+        }
+
+        if (stdOutput) {
+            *stdOutput = process.readAllStandardOutput();
+        }
+
+        const QString stdError = QString::fromLocal8Bit(process.readAllStandardError()).trimmed();
+        if (process.exitStatus() != QProcess::NormalExit || process.exitCode() != 0) {
+            if (errorMessage) {
+                *errorMessage = stdError.isEmpty()
+                    ? QStringLiteral("This archive format could not be listed.")
+                    : stdError;
+            }
+            return false;
+        }
+
+        return true;
+    };
+
+    QByteArray sevenZipOutput;
+    QString sevenZipError;
+    if (runProcess(bundledSevenZipPath(),
+                   { QStringLiteral("l"), QStringLiteral("-slt"), QStringLiteral("-ba"), QStringLiteral("-sccUTF-8"), QDir::toNativeSeparators(trimmedPath) },
+                   &sevenZipOutput,
+                   &sevenZipError)) {
+        const QString stdOutput = QString::fromUtf8(sevenZipOutput);
+        ArchiveEntry currentEntry;
+        bool hasCurrentEntry = false;
+        const QStringList lines = stdOutput.split(QRegularExpression(QStringLiteral("[\\r\\n]+")), Qt::KeepEmptyParts);
+        for (const QString& rawLine : lines) {
+            if (previewCancellationRequested(cancelToken)) {
+                result.entries.clear();
+                result.statusMessage = QStringLiteral("Archive preview was canceled.");
+                return result;
+            }
+
+            if (rawLine.startsWith(QStringLiteral("Path = "))) {
+                if (hasCurrentEntry && !normalizedArchivePath(currentEntry.path).isEmpty()) {
+                    currentEntry.path = normalizedArchivePath(currentEntry.path);
+                    result.entries.append(currentEntry);
+                }
+
+                currentEntry = ArchiveEntry();
+                currentEntry.path = rawLine.mid(QStringLiteral("Path = ").size()).trimmed();
+                hasCurrentEntry = true;
+                continue;
+            }
+
+            if (hasCurrentEntry && rawLine.startsWith(QStringLiteral("Folder = "))) {
+                currentEntry.isDirectory = rawLine.mid(QStringLiteral("Folder = ").size()).trimmed() == QStringLiteral("+");
+            }
+        }
+
+        if (hasCurrentEntry && !normalizedArchivePath(currentEntry.path).isEmpty()) {
+            currentEntry.path = normalizedArchivePath(currentEntry.path);
+            result.entries.append(currentEntry);
+        }
+
+        if (result.entries.isEmpty() && !stdOutput.trimmed().isEmpty()) {
+            ArchiveEntry streamEntry;
+            streamEntry.path = QFileInfo(trimmedPath).completeBaseName();
+            if (streamEntry.path.trimmed().isEmpty()) {
+                streamEntry.path = QFileInfo(trimmedPath).fileName();
+            }
+            streamEntry.isDirectory = false;
+            result.entries.append(streamEntry);
+        }
+
+        result.success = true;
         return result;
     }
 
-    if (!process.waitForFinished(15000)) {
-        process.kill();
-        process.waitForFinished(3000);
-        result.statusMessage = QStringLiteral("Timed out while reading archive contents.");
-        return result;
-    }
-
-    const QString stdOutput = QString::fromLocal8Bit(process.readAllStandardOutput());
-    const QString stdError = QString::fromLocal8Bit(process.readAllStandardError()).trimmed();
-    if (process.exitStatus() != QProcess::NormalExit || process.exitCode() != 0) {
-        result.statusMessage = stdError.isEmpty()
-            ? QStringLiteral("This archive format could not be listed.")
-            : stdError;
+    QByteArray tarOutput;
+    QString tarError;
+    if (!runProcess(QStringLiteral("tar"),
+                    { QStringLiteral("-tf"), QDir::toNativeSeparators(trimmedPath) },
+                    &tarOutput,
+                    &tarError)) {
+        result.statusMessage = sevenZipError.isEmpty() ? tarError : sevenZipError;
+        if (!tarError.isEmpty() && tarError != result.statusMessage) {
+            result.statusMessage += QStringLiteral("\n") + tarError;
+        }
         qDebug().noquote() << QStringLiteral("[SpaceLookRender] ArchiveRenderer listing failed path=\"%1\" error=\"%2\"")
             .arg(trimmedPath, result.statusMessage);
         return result;
     }
 
+    const QString stdOutput = QString::fromLocal8Bit(tarOutput);
     const QStringList lines = stdOutput.split(QRegularExpression(QStringLiteral("[\\r\\n]+")), Qt::SkipEmptyParts);
     for (const QString& rawLine : lines) {
+        if (previewCancellationRequested(cancelToken)) {
+            result.entries.clear();
+            result.statusMessage = QStringLiteral("Archive preview was canceled.");
+            return result;
+        }
+
         const QString normalizedPath = normalizedArchivePath(rawLine);
         if (normalizedPath.isEmpty()) {
             continue;

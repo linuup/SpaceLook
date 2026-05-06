@@ -17,13 +17,27 @@
       "png",
       "jpg",
       "jpeg",
+      "jpe",
       "bmp",
+      "dib",
       "gif",
       "webp",
       "heic",
       "heif",
+      "avif",
+      "tif",
+      "tiff",
       "svg",
       "ico",
+      "dds",
+      "tga"
+    ]
+  },
+  "design": {
+    "name": "SummaryRenderer",
+    "typeKey": "design",
+    "typeDetails": "Design source file.",
+    "suffixes": [
       "psd"
     ]
   },
@@ -72,7 +86,9 @@
     "typeKey": "pdf",
     "typeDetails": "Portable document format file.",
     "suffixes": [
-      "pdf"
+      "pdf",
+      "xps",
+      "oxps"
     ]
   },
   "markdown": {
@@ -239,10 +255,41 @@
     "suffixes": [
       "doc",
       "docx",
+      "rtf",
       "xls",
       "xlsx",
       "ppt",
       "pptx"
+    ]
+  },
+  "certificate": {
+    "name": "CertificateRenderer",
+    "typeKey": "certificate",
+    "typeDetails": "Certificate and key file.",
+    "suffixes": [
+      "cer",
+      "crt",
+      "pem",
+      "der",
+      "pfx",
+      "p12",
+      "key",
+      "pub",
+      "asc",
+      "gpg"
+    ]
+  },
+  "executable": {
+    "name": "SummaryRenderer",
+    "typeKey": "executable",
+    "typeDetails": "Windows executable or installer file.",
+    "suffixes": [
+      "exe",
+      "dll",
+      "msi",
+      "com",
+      "scr",
+      "sys"
     ]
   },
   "archive": {

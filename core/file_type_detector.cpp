@@ -894,6 +894,71 @@ QString explorerShellPathForHoveredItem(HWND hwnd,
     return bestPath;
 }
 
+QString explorerSelectedShellPath(HWND hwnd)
+{
+    IWebBrowserApp* browser = explorerBrowserForWindow(hwnd);
+    if (!browser) {
+        logLookupStep(QStringLiteral("Explorer selection fallback skipped because browser lookup failed"));
+        return QString();
+    }
+
+    IDispatch* document = nullptr;
+    const HRESULT documentHr = browser->get_Document(&document);
+    browser->Release();
+    if (FAILED(documentHr) || !document) {
+        logLookupStep(QStringLiteral("Explorer selection fallback skipped because document lookup failed"));
+        return QString();
+    }
+
+    IShellFolderViewDual* shellView = nullptr;
+    const HRESULT shellViewHr = document->QueryInterface(IID_PPV_ARGS(&shellView));
+    document->Release();
+    if (FAILED(shellViewHr) || !shellView) {
+        logLookupStep(QStringLiteral("Explorer selection fallback skipped because shell view query failed"));
+        return QString();
+    }
+
+    FolderItems* selectedItems = nullptr;
+    const HRESULT selectedHr = shellView->SelectedItems(&selectedItems);
+    shellView->Release();
+    if (FAILED(selectedHr) || !selectedItems) {
+        logLookupStep(QStringLiteral("Explorer selection fallback skipped because selected items lookup failed"));
+        return QString();
+    }
+
+    long count = 0;
+    selectedItems->get_Count(&count);
+    if (count != 1) {
+        selectedItems->Release();
+        logLookupStep(QStringLiteral("Explorer selection fallback ignored selected count=%1").arg(count));
+        return QString();
+    }
+
+    VARIANT variantIndex;
+    VariantInit(&variantIndex);
+    variantIndex.vt = VT_I4;
+    variantIndex.lVal = 0;
+
+    FolderItem* selectedItem = nullptr;
+    const HRESULT itemHr = selectedItems->Item(variantIndex, &selectedItem);
+    VariantClear(&variantIndex);
+    selectedItems->Release();
+    if (FAILED(itemHr) || !selectedItem) {
+        logLookupStep(QStringLiteral("Explorer selection fallback selected item query failed"));
+        return QString();
+    }
+
+    const QString selectedPath = explorerFolderItemPath(selectedItem);
+    selectedItem->Release();
+    if (selectedPath.isEmpty()) {
+        logLookupStep(QStringLiteral("Explorer selection fallback selected path is empty"));
+        return QString();
+    }
+
+    logLookupStep(QStringLiteral("Explorer selection fallback success: %1").arg(selectedPath));
+    return selectedPath;
+}
+
 QString filePathFromElementChain(IUIAutomation* automation, IUIAutomationElement* element, const QString& folderPath)
 {
     if (!automation || !element || folderPath.isEmpty()) {
@@ -1147,6 +1212,31 @@ HoveredItemInfo FileTypeDetector::inspectPath(const QString& filePath,
 
     const QFileInfo fileInfo(cleanPath);
     const DetectedTypeInfo typeInfo = detectTypeInfo(cleanPath, false);
+    const QString shortcutTargetPath = resolveShortcutTarget(cleanPath);
+    const QFileInfo shortcutTargetInfo(shortcutTargetPath);
+    if (!shortcutTargetPath.trimmed().isEmpty() &&
+        shortcutTargetInfo.exists() &&
+        shortcutTargetInfo.isDir()) {
+        HoveredItemInfo info;
+        info.valid = true;
+        info.exists = true;
+        info.isDirectory = true;
+        info.title = fileInfo.fileName().isEmpty() ? shortcutTargetInfo.fileName() : fileInfo.fileName();
+        info.typeKey = QStringLiteral("folder");
+        info.typeDetails = QStringLiteral("Shortcut to a folder.");
+        info.rendererName = QStringLiteral("folder");
+        info.sourceKind = sourceLabel.trimmed().isEmpty() ? QStringLiteral("Unknown") : sourceLabel;
+        info.filePath = QDir::cleanPath(shortcutTargetInfo.absoluteFilePath());
+        info.fileName = shortcutTargetInfo.fileName();
+        info.folderPath = shortcutTargetInfo.absolutePath();
+        info.resolvedPath = info.filePath;
+        info.sourceLabel = sourceLabel;
+        info.windowClassName = windowClassName;
+        info.statusMessage = QStringLiteral("Loaded folder information from the shortcut target.");
+        logLookupStep(QStringLiteral("inspectPath shortcut folder result: link=\"%1\" target=\"%2\"")
+            .arg(cleanPath, info.filePath));
+        return info;
+    }
 
     HoveredItemInfo info;
     info.valid = fileInfo.exists();
@@ -1160,7 +1250,7 @@ HoveredItemInfo FileTypeDetector::inspectPath(const QString& filePath,
     info.filePath = cleanPath;
     info.fileName = fileInfo.fileName();
     info.folderPath = fileInfo.absolutePath();
-    info.resolvedPath = resolveShortcutTarget(cleanPath);
+    info.resolvedPath = shortcutTargetPath;
     info.sourceLabel = sourceLabel;
     info.windowClassName = windowClassName;
     info.statusMessage = fileInfo.exists()
@@ -1210,12 +1300,57 @@ HoveredItemInfo FileTypeDetector::inspectItemUnderCursor() const
     IUIAutomationElement* element = nullptr;
     const HRESULT elementHr = automation->ElementFromPoint(cursorPos, &element);
     if (FAILED(elementHr) || !element) {
-        automation->Release();
-        if (shouldUninitialize) {
-            CoUninitialize();
+        const HWND pointWindow = WindowFromPoint(cursorPos);
+        HWND rootWindow = GetAncestor(pointWindow, GA_ROOT);
+        QString windowClass = classNameForWindow(rootWindow);
+        if (!isSupportedDesktopRootClass(windowClass)) {
+            QString scannedWindows;
+            const HWND fallbackRootWindow = findUnderlyingSupportedRootWindow(cursorPos, &scannedWindows);
+            logLookupStep(QStringLiteral("ElementFromPoint failed, underlying window scan: %1")
+                .arg(scannedWindows.isEmpty() ? QStringLiteral("(none)") : scannedWindows));
+            if (fallbackRootWindow) {
+                rootWindow = fallbackRootWindow;
+                windowClass = classNameForWindow(rootWindow);
+            }
         }
-        logLookupStep(QStringLiteral("No UI element under cursor"));
-        return makeFailureInfo(QStringLiteral("No UI element is under the mouse cursor."));
+
+        if (isSupportedDesktopRootClass(windowClass)) {
+            if (IUIAutomationElement* hoveredElement = bestItemElementAtPointInRoot(automation, rootWindow, cursorPos)) {
+                element = hoveredElement;
+                logLookupStep(QStringLiteral("ElementFromPoint failed, recovered hovered item from root window: %1").arg(windowClass));
+            } else if (IUIAutomationElement* fallbackElement = deepestElementAtPointInRoot(automation, rootWindow, cursorPos)) {
+                element = fallbackElement;
+                logLookupStep(QStringLiteral("ElementFromPoint failed, recovered deepest element from root window: %1").arg(windowClass));
+            }
+        }
+
+        if (element) {
+            logLookupStep(QStringLiteral("Continuing lookup with recovered hover element"));
+        } else {
+            if (windowClass == QStringLiteral("CabinetWClass")) {
+                const QString selectedPath = explorerSelectedShellPath(rootWindow);
+                if (!selectedPath.isEmpty()) {
+                    automation->Release();
+                    if (shouldUninitialize) {
+                        CoUninitialize();
+                    }
+                    HoveredItemInfo info = inspectPath(
+                        selectedPath,
+                        QStringLiteral("ExplorerSelection"),
+                        windowClass);
+                    info.statusMessage = QStringLiteral("Detected the selected Explorer item after cursor lookup missed the hovered UI element.");
+                    logLookupStep(QStringLiteral("end inspectItemUnderCursor via Explorer selection fallback"));
+                    return info;
+                }
+            }
+
+            automation->Release();
+            if (shouldUninitialize) {
+                CoUninitialize();
+            }
+            logLookupStep(QStringLiteral("No UI element under cursor"));
+            return makeFailureInfo(QStringLiteral("No UI element is under the mouse cursor."));
+        }
     }
 
     BSTR hoveredNameValue = nullptr;

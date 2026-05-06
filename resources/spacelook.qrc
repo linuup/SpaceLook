@@ -11,6 +11,13 @@
     <file alias="icon/voice.svg">voice.svg</file>
     <file alias="icon/mute.svg">mute.svg</file>
     <file alias="image/welcome-hero.png">welcome-hero.png</file>
+    <file alias="welcome-icons/welcome-archive.svg">welcome-icons/welcome-archive.svg</file>
+    <file alias="welcome-icons/welcome-code.svg">welcome-icons/welcome-code.svg</file>
+    <file alias="welcome-icons/welcome-document.svg">welcome-icons/welcome-document.svg</file>
+    <file alias="welcome-icons/welcome-folder.svg">welcome-icons/welcome-folder.svg</file>
+    <file alias="welcome-icons/welcome-image.svg">welcome-icons/welcome-image.svg</file>
+    <file alias="welcome-icons/welcome-share.svg">welcome-icons/welcome-share.svg</file>
+    <file alias="welcome-icons/welcome-text.svg">welcome-icons/welcome-text.svg</file>
     <file alias="file-icon/apk.svg">file-icon/apk.svg</file>
     <file alias="file-icon/apk_1.svg">file-icon/apk_1.svg</file>
     <file alias="file-icon/code.svg">file-icon/code.svg</file>

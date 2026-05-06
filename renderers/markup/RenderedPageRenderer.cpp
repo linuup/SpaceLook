@@ -22,6 +22,7 @@
 #include "renderers/FileTypeIconResolver.h"
 #include "renderers/OpenWithButton.h"
 #include "renderers/PreviewHeaderBar.h"
+#include "renderers/PreviewStateVisuals.h"
 #include "renderers/SelectableTitleLabel.h"
 #include "renderers/markup/LiteHtmlView.h"
 #include "renderers/markup/WebView2HtmlView.h"
@@ -38,9 +39,13 @@ struct RenderedPageLoadResult
     bool success = false;
 };
 
-RenderedPageLoadResult loadRenderedPageContent(const QString& filePath)
+RenderedPageLoadResult loadRenderedPageContent(const QString& filePath, const PreviewCancellationToken& cancelToken)
 {
     RenderedPageLoadResult result;
+    if (previewCancellationRequested(cancelToken)) {
+        result.statusMessage = QStringLiteral("Rendered page preview was canceled.");
+        return result;
+    }
 
     QFile file(filePath);
     if (!file.open(QIODevice::ReadOnly)) {
@@ -51,6 +56,11 @@ RenderedPageLoadResult loadRenderedPageContent(const QString& filePath)
 
     QByteArray content = file.read(kMaxRenderedPagePreviewBytes + 1);
     file.close();
+    if (previewCancellationRequested(cancelToken)) {
+        content.clear();
+        result.statusMessage = QStringLiteral("Rendered page preview was canceled.");
+        return result;
+    }
 
     if (content.size() > kMaxRenderedPagePreviewBytes) {
         content.chop(content.size() - static_cast<int>(kMaxRenderedPagePreviewBytes));
@@ -64,42 +74,7 @@ RenderedPageLoadResult loadRenderedPageContent(const QString& filePath)
 
 QString loadingHtmlPage(const QString& title, const QString& message)
 {
-    return QStringLiteral(
-        "<!DOCTYPE html>"
-        "<html>"
-        "<head>"
-        "<meta charset=\"utf-8\">"
-        "<style>"
-        "body {"
-        "  margin: 0;"
-        "  padding: 28px;"
-        "  background: linear-gradient(135deg, #f8fbff 0%, #eef5fb 100%);"
-        "  color: #16324a;"
-        "  font-family: 'Segoe UI', sans-serif;"
-        "}"
-        ".card {"
-        "  max-width: 960px;"
-        "  margin: 0 auto;"
-        "  background: rgba(255, 255, 255, 0.96);"
-        "  border: 1px solid #dce6f0;"
-        "  border-radius: 18px;"
-        "  padding: 22px 24px;"
-        "  box-shadow: 0 10px 30px rgba(17, 39, 63, 0.06);"
-        "}"
-        "h2 {"
-        "  margin: 0 0 12px 0;"
-        "  color: #0f2740;"
-        "}"
-        "p {"
-        "  margin: 0;"
-        "  line-height: 1.65;"
-        "  color: #58708a;"
-        "}"
-        "</style>"
-        "</head>"
-        "<body><div class=\"card\"><h2>%1</h2><p>%2</p></div></body>"
-        "</html>")
-        .arg(title.toHtmlEscaped(), message.toHtmlEscaped());
+    return PreviewStateVisuals::htmlStatePage(title, message, PreviewStateVisuals::Kind::Loading);
 }
 
 QString webView2InstallPromptHtml(const QString& detail)
@@ -115,7 +90,7 @@ QString webView2InstallPromptHtml(const QString& detail)
         "  padding: 32px;"
         "  background: linear-gradient(135deg, #f8fbff 0%, #edf5ff 100%);"
         "  color: #18324a;"
-        "  font-family: 'Segoe UI', sans-serif;"
+        "  font-family: 'Segoe UI Rounded', sans-serif;"
         "}"
         ".card {"
         "  max-width: 760px;"
@@ -163,7 +138,7 @@ QString markdownPreviewCss()
         "  color: #1f2328;"
         "}"
         "body {"
-        "  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif;"
+        "  font-family: 'Segoe UI Rounded', 'Noto Sans', Helvetica, Arial, sans-serif;"
         "  font-size: 16px;"
         "  line-height: 1.5;"
         "  padding: 32px 40px 48px 40px;"
@@ -567,12 +542,14 @@ RenderedPageRenderer::RenderedPageRenderer(QWidget* parent)
     pathLayout->addWidget(m_pathValueLabel, 1);
 
     m_iconLabel->setFixedSize(72, 72);
-    m_iconLabel->setScaledContents(true);
+    m_iconLabel->setScaledContents(false);
+    m_iconLabel->setAlignment(Qt::AlignCenter);
     m_titleLabel->setWordWrap(true);
     m_pathValueLabel->setTextInteractionFlags(Qt::TextSelectableByMouse);
     m_pathValueLabel->setWordWrap(true);
     m_pathValueLabel->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
     m_pathRow->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+    PreviewStateVisuals::prepareStatusLabel(m_statusLabel);
     m_statusLabel->hide();
     m_contentStack->addWidget(m_webView);
     m_contentStack->addWidget(m_fallbackHtmlView);
@@ -598,15 +575,16 @@ RenderedPageRenderer::RenderedPageRenderer(QWidget* parent)
         if (m_contentStack) {
             m_contentStack->setCurrentWidget(m_webView);
         }
-        m_statusLabel->clear();
-        m_statusLabel->hide();
+        PreviewStateVisuals::clearStatus(m_statusLabel);
         notifyLoadingState(false);
     });
     connect(m_webView, &WebView2HtmlView::unavailable, this, [this](const QString& message) {
         m_contentStack->setCurrentWidget(m_fallbackHtmlView);
         m_fallbackHtmlView->setDocumentHtml(webView2InstallPromptHtml(message), m_info.filePath);
-        m_statusLabel->setText(QStringLiteral("Microsoft Edge WebView2 Runtime is required for modern HTML preview."));
-        m_statusLabel->show();
+        PreviewStateVisuals::showStatus(
+            m_statusLabel,
+            QStringLiteral("Microsoft Edge WebView2 Runtime is required for modern HTML preview."),
+            PreviewStateVisuals::Kind::Error);
         notifyLoadingState(false);
     });
 
@@ -641,6 +619,9 @@ void RenderedPageRenderer::setLoadingStateCallback(std::function<void(bool)> cal
 
 void RenderedPageRenderer::load(const HoveredItemInfo& info)
 {
+    cancelPreviewTask(m_cancelToken);
+    const PreviewCancellationToken cancelToken = makePreviewCancellationToken();
+    m_cancelToken = cancelToken;
     m_info = info;
     const PreviewLoadGuard::Token loadToken = m_loadGuard.begin(info.filePath);
     notifyLoadingState(true);
@@ -656,12 +637,10 @@ void RenderedPageRenderer::load(const HoveredItemInfo& info)
 
     m_titleLabel->setText(previewTitle);
     m_titleLabel->setCopyText(previewTitle);
-    const QIcon typeIcon(FileTypeIconResolver::iconForInfo(info));
-    m_iconLabel->setPixmap(typeIcon.pixmap(128, 128));
+    m_iconLabel->setPixmap(FileTypeIconResolver::pixmapForInfo(info, m_iconLabel->contentsRect().size()));
     m_pathValueLabel->setText(info.filePath.trimmed().isEmpty() ? QStringLiteral("(Unavailable)") : info.filePath);
     m_openWithButton->setTargetContext(info.filePath, info.typeKey);
-    m_statusLabel->setText(loadingMessage);
-    m_statusLabel->show();
+    PreviewStateVisuals::showStatus(m_statusLabel, loadingMessage, PreviewStateVisuals::Kind::Loading);
     m_contentStack->setCurrentWidget(m_webView);
     QString webViewError;
     if (!m_webView->setDocumentHtml(loadingHtmlPage(previewTitle, loadingMessage), info.filePath, &webViewError)) {
@@ -670,21 +649,23 @@ void RenderedPageRenderer::load(const HoveredItemInfo& info)
     }
 
     auto* watcher = new QFutureWatcher<RenderedPageLoadResult>(this);
-    connect(watcher, &QFutureWatcher<RenderedPageLoadResult>::finished, this, [this, watcher, loadToken, typeKey = info.typeKey]() {
-        const RenderedPageLoadResult result = watcher->result();
+    connect(watcher, &QFutureWatcher<RenderedPageLoadResult>::finished, this, [this, watcher, loadToken, typeKey = info.typeKey, cancelToken]() {
         watcher->deleteLater();
 
-        if (!m_loadGuard.isCurrent(loadToken, m_info.filePath)) {
+        if (previewCancellationRequested(cancelToken) || !m_loadGuard.isCurrent(loadToken, m_info.filePath)) {
             qDebug().noquote() << QStringLiteral("[SpaceLookRender] RenderedPageRenderer discarded stale async result path=\"%1\"")
                 .arg(loadToken.path);
             return;
         }
 
+        const RenderedPageLoadResult result = watcher->result();
         if (!result.success) {
-            m_statusLabel->setText(result.statusMessage);
-            m_statusLabel->show();
+            PreviewStateVisuals::showStatus(m_statusLabel, result.statusMessage, PreviewStateVisuals::Kind::Error);
             QString errorMessage;
-            const QString unavailableHtml = loadingHtmlPage(QStringLiteral("Preview Unavailable"), result.text);
+            const QString unavailableHtml = PreviewStateVisuals::htmlStatePage(
+                QStringLiteral("Preview Unavailable"),
+                result.text,
+                PreviewStateVisuals::Kind::Error);
             if (m_webView->setDocumentHtml(unavailableHtml, loadToken.path, &errorMessage)) {
                 m_contentStack->setCurrentWidget(m_webView);
             } else {
@@ -706,11 +687,9 @@ void RenderedPageRenderer::load(const HoveredItemInfo& info)
         }
 
         if (result.statusMessage.trimmed().isEmpty()) {
-            m_statusLabel->clear();
-            m_statusLabel->hide();
+            PreviewStateVisuals::clearStatus(m_statusLabel);
         } else {
-            m_statusLabel->setText(result.statusMessage);
-            m_statusLabel->show();
+            PreviewStateVisuals::showStatus(m_statusLabel, result.statusMessage);
         }
 
         qDebug().noquote() << QStringLiteral("[SpaceLookRender] RenderedPageRenderer loaded async chars=%1 path=\"%2\"")
@@ -718,21 +697,21 @@ void RenderedPageRenderer::load(const HoveredItemInfo& info)
             .arg(loadToken.path);
         notifyLoadingState(false);
     });
-    watcher->setFuture(QtConcurrent::run([filePath = info.filePath]() {
-        return loadRenderedPageContent(filePath);
+    watcher->setFuture(QtConcurrent::run([filePath = info.filePath, cancelToken]() {
+        return loadRenderedPageContent(filePath, cancelToken);
     }));
 }
 
 void RenderedPageRenderer::unload()
 {
+    cancelPreviewTask(m_cancelToken);
     m_loadGuard.cancel();
     notifyLoadingState(false);
     m_webView->clearDocument();
     m_fallbackHtmlView->clearDocument();
     m_pathValueLabel->clear();
     m_openWithButton->setTargetContext(QString(), QString());
-    m_statusLabel->clear();
-    m_statusLabel->hide();
+    PreviewStateVisuals::clearStatus(m_statusLabel);
     m_info = HoveredItemInfo();
 }
 
@@ -746,17 +725,14 @@ void RenderedPageRenderer::notifyLoadingState(bool loading)
 void RenderedPageRenderer::showStatusMessage(const QString& message)
 {
     if (message.trimmed().isEmpty()) {
-        m_statusLabel->clear();
-        m_statusLabel->hide();
+        PreviewStateVisuals::clearStatus(m_statusLabel);
         return;
     }
 
-    m_statusLabel->setText(message);
-    m_statusLabel->show();
+    PreviewStateVisuals::showStatus(m_statusLabel, message);
     QTimer::singleShot(1400, m_statusLabel, [label = m_statusLabel]() {
         if (label) {
-            label->clear();
-            label->hide();
+            PreviewStateVisuals::clearStatus(label);
         }
     });
 }
@@ -887,14 +863,14 @@ void RenderedPageRenderer::applyChrome()
     );
 
     QFont titleFont;
-    titleFont.setFamily(QStringLiteral("Microsoft YaHei UI"));
+    titleFont.setFamily(QStringLiteral("Segoe UI Rounded"));
     titleFont.setPixelSize(20);
     titleFont.setWeight(QFont::Bold);
     m_titleLabel->setFont(titleFont);
     m_titleLabel->setWordWrap(true);
 
     QFont metaFont;
-    metaFont.setFamily(QStringLiteral("Segoe UI"));
+    metaFont.setFamily(QStringLiteral("Segoe UI Rounded"));
     metaFont.setPixelSize(13);
     m_pathValueLabel->setFont(metaFont);
     m_statusLabel->setFont(metaFont);

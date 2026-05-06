@@ -5,6 +5,7 @@
 
 #include "core/hovered_item_info.h"
 #include "renderers/IPreviewRenderer.h"
+#include "renderers/PreviewCancellationToken.h"
 #include "renderers/PreviewLoadGuard.h"
 
 class QLabel;
@@ -48,11 +49,12 @@ private:
     QTreeWidgetItem* ensureFolderItem(const QString& folderPath,
                                       QTreeWidgetItem* parentItem,
                                       const QString& folderName);
-    ArchiveLoadResult loadArchiveEntries(const QString& filePath) const;
+    ArchiveLoadResult loadArchiveEntries(const QString& filePath, const PreviewCancellationToken& cancelToken) const;
     void notifyLoadingState(bool loading);
 
     HoveredItemInfo m_info;
     PreviewLoadGuard m_loadGuard;
+    PreviewCancellationToken m_cancelToken;
     std::function<void(bool)> m_loadingStateCallback;
     QWidget* m_headerRow = nullptr;
     QLabel* m_iconLabel = nullptr;

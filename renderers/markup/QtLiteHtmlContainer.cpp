@@ -88,7 +88,7 @@ litehtml::uint_ptr QtLiteHtmlContainer::create_font(const litehtml::font_descrip
         }
     }
     if (family.isEmpty()) {
-        family = QStringLiteral("Segoe UI");
+        family = QStringLiteral("Segoe UI Rounded");
     }
 
     handle->font = QFont(family);
@@ -163,7 +163,7 @@ litehtml::pixel_t QtLiteHtmlContainer::get_default_font_size() const
 
 const char* QtLiteHtmlContainer::get_default_font_name() const
 {
-    return "Segoe UI";
+    return "Segoe UI Rounded";
 }
 
 void QtLiteHtmlContainer::draw_list_marker(litehtml::uint_ptr hdc, const litehtml::list_marker& marker)

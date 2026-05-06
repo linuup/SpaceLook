@@ -10,10 +10,13 @@ Rectangle {
     color: "#f5f8fb"
 
     property var resolvedUiSettings: fallbackUiSettings
+    property var resolvedRenderTypeSettings: fallbackRenderTypeSettings
     property int activeNavIndex: 0
-    property string displayFontFamily: "Segoe UI Variable Display"
-    property string textFontFamily: "Segoe UI Variable Text"
-    property string bodyFontFamily: "Segoe UI"
+    property int selectedRenderTypeIndex: -1
+    property var renderTypeEntries: []
+    property string displayFontFamily: "Segoe UI Rounded"
+    property string textFontFamily: "Segoe UI Rounded"
+    property string bodyFontFamily: "Segoe UI Rounded"
     property string iconFontFamily: iconFontLoader.status === FontLoader.Ready
                                     ? iconFontLoader.name
                                     : "Segoe Fluent Icons"
@@ -51,25 +54,62 @@ Rectangle {
         property bool showMenuMore: true
     }
 
+    QtObject {
+        id: fallbackRenderTypeSettings
+        property string configFilePath: ""
+        property string statusMessage: "RenderType settings are unavailable."
+        property var entries: []
+        signal changed()
+        function load() {
+        }
+        function saveEntries(entries) {
+            return false
+        }
+    }
+
     FontLoader {
         id: iconFontLoader
         source: Qt.resolvedUrl("../resources/Segoe Fluent Icons.ttf")
     }
 
     function navText(index) {
-        return index === 0 ? "General" : "Toolbar"
+        if (index === 0) {
+            return "General"
+        }
+        if (index === 1) {
+            return "Toolbar"
+        }
+        return "File Types"
     }
 
     function navSubtitle(index) {
-        return index === 0 ? "Startup and window behavior" : "Preview menu appearance"
+        if (index === 0) {
+            return "Startup and window behavior"
+        }
+        if (index === 1) {
+            return "Preview menu appearance"
+        }
+        return "Renderer mapping rules"
     }
 
     function navGlyph(index) {
-        return index === 0 ? "\uE713" : "\uE8FD"
+        if (index === 0) {
+            return "\uE713"
+        }
+        if (index === 1) {
+            return "\uE8FD"
+        }
+        return "\uE8B7"
     }
 
     function navTarget(index) {
-        return index === 0 ? generalSection : toolbarSection
+        if (index === 0) {
+            return generalSection
+        }
+        if (index === 1) {
+            return toolbarSection
+        }
+        return renderTypeSection
     }
 
     function sectionTargetY(sectionItem) {
@@ -90,6 +130,10 @@ Rectangle {
     }
 
     function syncActiveNavFromScroll() {
+        if (contentFlickable.contentY + 80 >= renderTypeSection.y) {
+            activeNavIndex = 2
+            return
+        }
         if (contentFlickable.contentY + 80 >= toolbarSection.y) {
             activeNavIndex = 1
             return
@@ -98,11 +142,142 @@ Rectangle {
         activeNavIndex = 0
     }
 
+    function copyRenderTypeEntry(entry) {
+        return {
+            key: entry.key || "",
+            name: entry.name || "",
+            typeKey: entry.typeKey || "",
+            typeDetails: entry.typeDetails || "",
+            suffixes: entry.suffixes || ""
+        }
+    }
+
+    function reloadRenderTypeEntries() {
+        if (!resolvedRenderTypeSettings) {
+            return
+        }
+        resolvedRenderTypeSettings.load()
+        var loadedEntries = []
+        var sourceEntries = resolvedRenderTypeSettings.entries || []
+        for (var index = 0; index < sourceEntries.length; ++index) {
+            loadedEntries.push(copyRenderTypeEntry(sourceEntries[index]))
+        }
+        renderTypeEntries = loadedEntries
+        selectedRenderTypeIndex = renderTypeEntries.length > 0 ? 0 : -1
+        loadSelectedRenderTypeEntry()
+    }
+
+    function refreshRenderTypeEntriesFromBridge() {
+        if (!resolvedRenderTypeSettings) {
+            return
+        }
+        var loadedEntries = []
+        var sourceEntries = resolvedRenderTypeSettings.entries || []
+        for (var index = 0; index < sourceEntries.length; ++index) {
+            loadedEntries.push(copyRenderTypeEntry(sourceEntries[index]))
+        }
+        renderTypeEntries = loadedEntries
+        if (selectedRenderTypeIndex >= renderTypeEntries.length) {
+            selectedRenderTypeIndex = renderTypeEntries.length - 1
+        }
+        if (selectedRenderTypeIndex < 0 && renderTypeEntries.length > 0) {
+            selectedRenderTypeIndex = 0
+        }
+        loadSelectedRenderTypeEntry()
+    }
+
+    function loadSelectedRenderTypeEntry() {
+        if (!renderTypeKeyField) {
+            return
+        }
+        if (selectedRenderTypeIndex < 0 || selectedRenderTypeIndex >= renderTypeEntries.length) {
+            renderTypeKeyField.text = ""
+            renderTypeNameField.text = ""
+            renderTypeTypeKeyField.text = ""
+            renderTypeDetailsField.text = ""
+            renderTypeSuffixesField.text = ""
+            return
+        }
+
+        var entry = renderTypeEntries[selectedRenderTypeIndex]
+        renderTypeKeyField.text = entry.key || ""
+        renderTypeNameField.text = entry.name || ""
+        renderTypeTypeKeyField.text = entry.typeKey || ""
+        renderTypeDetailsField.text = entry.typeDetails || ""
+        renderTypeSuffixesField.text = entry.suffixes || ""
+    }
+
+    function applyRenderTypeEditor() {
+        if (selectedRenderTypeIndex < 0 || selectedRenderTypeIndex >= renderTypeEntries.length) {
+            return
+        }
+
+        var nextEntries = renderTypeEntries.slice()
+        nextEntries[selectedRenderTypeIndex] = {
+            key: renderTypeKeyField.text.trim(),
+            name: renderTypeNameField.text.trim(),
+            typeKey: renderTypeTypeKeyField.text.trim(),
+            typeDetails: renderTypeDetailsField.text.trim(),
+            suffixes: renderTypeSuffixesField.text.trim()
+        }
+        renderTypeEntries = nextEntries
+    }
+
+    function selectRenderTypeEntry(index) {
+        applyRenderTypeEditor()
+        selectedRenderTypeIndex = index
+        loadSelectedRenderTypeEntry()
+    }
+
+    function addRenderTypeEntry() {
+        applyRenderTypeEditor()
+        var nextEntries = renderTypeEntries.slice()
+        nextEntries.push({
+            key: "custom",
+            name: "SummaryRenderer",
+            typeKey: "custom",
+            typeDetails: "Custom file type.",
+            suffixes: "example"
+        })
+        renderTypeEntries = nextEntries
+        selectedRenderTypeIndex = renderTypeEntries.length - 1
+        loadSelectedRenderTypeEntry()
+    }
+
+    function removeRenderTypeEntry() {
+        if (selectedRenderTypeIndex < 0 || selectedRenderTypeIndex >= renderTypeEntries.length) {
+            return
+        }
+        var nextEntries = renderTypeEntries.slice()
+        nextEntries.splice(selectedRenderTypeIndex, 1)
+        renderTypeEntries = nextEntries
+        selectedRenderTypeIndex = Math.min(selectedRenderTypeIndex, renderTypeEntries.length - 1)
+        loadSelectedRenderTypeEntry()
+    }
+
+    function saveRenderTypeEntries() {
+        applyRenderTypeEditor()
+        if (resolvedRenderTypeSettings) {
+            resolvedRenderTypeSettings.saveEntries(renderTypeEntries)
+        }
+    }
+
     Component.onCompleted: {
         if (typeof uiSettings !== "undefined" && uiSettings) {
             resolvedUiSettings = uiSettings
         }
+        if (typeof renderTypeSettings !== "undefined" && renderTypeSettings) {
+            resolvedRenderTypeSettings = renderTypeSettings
+        }
+        reloadRenderTypeEntries()
         syncActiveNavFromScroll()
+    }
+
+    Connections {
+        target: root.resolvedRenderTypeSettings
+        function onChanged() {
+            root.refreshRenderTypeEntriesFromBridge()
+        }
     }
 
     component WindowActionButton: Button {
@@ -669,6 +844,11 @@ Rectangle {
                         navIndex: 1
                     }
 
+                    SidebarButton {
+                        Layout.fillWidth: true
+                        navIndex: 2
+                    }
+
                     Item {
                         Layout.fillHeight: true
                     }
@@ -1010,6 +1190,274 @@ Rectangle {
                                     glyph: "\uE712"
                                     checkedValue: resolvedUiSettings.showMenuMore
                                     onToggledValue: resolvedUiSettings.showMenuMore = checked
+                                }
+                            }
+                        }
+                    }
+
+                    CardShell {
+                        id: renderTypeSection
+                        width: parent.width
+                        implicitHeight: renderTypeContent.implicitHeight + 42
+
+                        Column {
+                            id: renderTypeContent
+                            anchors.fill: parent
+                            anchors.margins: 22
+                            spacing: 18
+
+                            SectionHeader {
+                                width: parent.width
+                                glyph: "\uE8B7"
+                                title: "File Types"
+                                subtitle: "Edit RenderType.json mappings. Each row maps suffixes to one renderer."
+                            }
+
+                            Rectangle {
+                                width: parent.width
+                                height: 42
+                                radius: 14
+                                color: "#f8fbfc"
+                                border.width: 1
+                                border.color: "#e1ebf0"
+
+                                Text {
+                                    anchors.left: parent.left
+                                    anchors.right: parent.right
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    anchors.leftMargin: 14
+                                    anchors.rightMargin: 14
+                                    text: resolvedRenderTypeSettings.configFilePath
+                                    color: root.mutedInkColor
+                                    font.family: root.bodyFontFamily
+                                    font.pixelSize: 11
+                                    elide: Text.ElideMiddle
+                                    renderType: Text.NativeRendering
+                                }
+                            }
+
+                            RowLayout {
+                                width: parent.width
+                                height: 430
+                                spacing: 14
+
+                                Rectangle {
+                                    Layout.preferredWidth: 260
+                                    Layout.fillHeight: true
+                                    radius: 18
+                                    color: "#f8fbfc"
+                                    border.width: 1
+                                    border.color: "#e1ebf0"
+
+                                    ListView {
+                                        id: renderTypeList
+                                        property bool settingsNoDrag: true
+                                        anchors.fill: parent
+                                        anchors.margins: 8
+                                        clip: true
+                                        spacing: 6
+                                        model: root.renderTypeEntries
+
+                                        delegate: Rectangle {
+                                            property bool settingsNoDrag: true
+                                            width: renderTypeList.width
+                                            height: 58
+                                            radius: 14
+                                            color: index === root.selectedRenderTypeIndex ? root.accentSoftColor : (rowMouse.containsMouse ? "#ffffff" : "transparent")
+                                            border.width: index === root.selectedRenderTypeIndex ? 1 : 0
+                                            border.color: "#b6dde2"
+
+                                            Column {
+                                                anchors.left: parent.left
+                                                anchors.right: parent.right
+                                                anchors.verticalCenter: parent.verticalCenter
+                                                anchors.leftMargin: 12
+                                                anchors.rightMargin: 12
+                                                spacing: 2
+
+                                                Text {
+                                                    width: parent.width
+                                                    text: modelData.key || "Untitled"
+                                                    color: root.inkColor
+                                                    font.family: root.textFontFamily
+                                                    font.pixelSize: 13
+                                                    font.weight: Font.DemiBold
+                                                    elide: Text.ElideRight
+                                                    renderType: Text.NativeRendering
+                                                }
+
+                                                Text {
+                                                    width: parent.width
+                                                    text: (modelData.name || "") + "  " + (modelData.suffixes || "")
+                                                    color: root.mutedInkColor
+                                                    font.family: root.bodyFontFamily
+                                                    font.pixelSize: 11
+                                                    elide: Text.ElideRight
+                                                    renderType: Text.NativeRendering
+                                                }
+                                            }
+
+                                            MouseArea {
+                                                id: rowMouse
+                                                anchors.fill: parent
+                                                hoverEnabled: true
+                                                onClicked: root.selectRenderTypeEntry(index)
+                                            }
+                                        }
+                                    }
+                                }
+
+                                Rectangle {
+                                    Layout.fillWidth: true
+                                    Layout.fillHeight: true
+                                    radius: 18
+                                    color: "#fbfdfe"
+                                    border.width: 1
+                                    border.color: "#e1ebf0"
+
+                                    Column {
+                                        anchors.fill: parent
+                                        anchors.margins: 18
+                                        spacing: 12
+
+                                        Text {
+                                            text: "Mapping details"
+                                            color: root.inkColor
+                                            font.family: root.textFontFamily
+                                            font.pixelSize: 15
+                                            font.weight: Font.DemiBold
+                                            renderType: Text.NativeRendering
+                                        }
+
+                                        GridLayout {
+                                            width: parent.width
+                                            columns: 2
+                                            columnSpacing: 12
+                                            rowSpacing: 10
+
+                                            TextField {
+                                                id: renderTypeKeyField
+                                                property bool settingsNoDrag: true
+                                                Layout.fillWidth: true
+                                                placeholderText: "Group key, for example code"
+                                                font.family: root.bodyFontFamily
+                                                font.pixelSize: 13
+                                                onEditingFinished: root.applyRenderTypeEditor()
+                                            }
+
+                                            TextField {
+                                                id: renderTypeNameField
+                                                property bool settingsNoDrag: true
+                                                Layout.fillWidth: true
+                                                placeholderText: "Renderer, for example CodeRenderer"
+                                                font.family: root.bodyFontFamily
+                                                font.pixelSize: 13
+                                                onEditingFinished: root.applyRenderTypeEditor()
+                                            }
+
+                                            TextField {
+                                                id: renderTypeTypeKeyField
+                                                property bool settingsNoDrag: true
+                                                Layout.fillWidth: true
+                                                placeholderText: "typeKey, for example code"
+                                                font.family: root.bodyFontFamily
+                                                font.pixelSize: 13
+                                                onEditingFinished: root.applyRenderTypeEditor()
+                                            }
+
+                                            TextField {
+                                                id: renderTypeDetailsField
+                                                property bool settingsNoDrag: true
+                                                Layout.fillWidth: true
+                                                placeholderText: "Type description"
+                                                font.family: root.bodyFontFamily
+                                                font.pixelSize: 13
+                                                onEditingFinished: root.applyRenderTypeEditor()
+                                            }
+                                        }
+
+                                        Text {
+                                            text: "Suffixes"
+                                            color: root.inkColor
+                                            font.family: root.textFontFamily
+                                            font.pixelSize: 13
+                                            font.weight: Font.DemiBold
+                                            renderType: Text.NativeRendering
+                                        }
+
+                                        TextArea {
+                                            id: renderTypeSuffixesField
+                                            property bool settingsNoDrag: true
+                                            width: parent.width
+                                            height: 120
+                                            wrapMode: TextEdit.Wrap
+                                            placeholderText: "Comma or space separated suffixes, for example ts tsx js"
+                                            font.family: root.bodyFontFamily
+                                            font.pixelSize: 13
+                                            selectByMouse: true
+                                            background: Rectangle {
+                                                radius: 14
+                                                color: "#ffffff"
+                                                border.width: 1
+                                                border.color: root.borderColor
+                                            }
+                                        }
+
+                                        Rectangle {
+                                            width: parent.width
+                                            height: 58
+                                            radius: 16
+                                            color: "#f8fbfc"
+                                            border.width: 1
+                                            border.color: "#e1ebf0"
+
+                                            Text {
+                                                anchors.fill: parent
+                                                anchors.margins: 12
+                                                text: resolvedRenderTypeSettings.statusMessage
+                                                color: root.mutedInkColor
+                                                font.family: root.bodyFontFamily
+                                                font.pixelSize: 12
+                                                wrapMode: Text.Wrap
+                                                renderType: Text.NativeRendering
+                                            }
+                                        }
+
+                                        RowLayout {
+                                            width: parent.width
+                                            spacing: 10
+
+                                            Button {
+                                                property bool settingsNoDrag: true
+                                                text: "Add"
+                                                onClicked: root.addRenderTypeEntry()
+                                            }
+
+                                            Button {
+                                                property bool settingsNoDrag: true
+                                                text: "Remove"
+                                                enabled: root.selectedRenderTypeIndex >= 0
+                                                onClicked: root.removeRenderTypeEntry()
+                                            }
+
+                                            Item {
+                                                Layout.fillWidth: true
+                                            }
+
+                                            Button {
+                                                property bool settingsNoDrag: true
+                                                text: "Reload"
+                                                onClicked: root.reloadRenderTypeEntries()
+                                            }
+
+                                            Button {
+                                                property bool settingsNoDrag: true
+                                                text: "Save"
+                                                highlighted: true
+                                                onClicked: root.saveRenderTypeEntries()
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
