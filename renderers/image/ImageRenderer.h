@@ -6,6 +6,7 @@
 
 #include "core/hovered_item_info.h"
 #include "renderers/IPreviewRenderer.h"
+#include "renderers/PreviewLoadGuard.h"
 
 class QLabel;
 class QMovie;
@@ -26,6 +27,8 @@ public:
     QWidget* widget() override;
     void load(const HoveredItemInfo& info) override;
     void unload() override;
+    bool reportsLoadingState() const override;
+    void setLoadingStateCallback(std::function<void(bool)> callback) override;
 
 protected:
     bool eventFilter(QObject* watched, QEvent* event) override;
@@ -49,10 +52,12 @@ private:
     QSize scaledVisualSize(const QSize& sourceSize, double zoomFactor) const;
     bool canPanImage() const;
     void updateDragCursor();
+    void notifyLoadingState(bool loading);
 
     HoveredItemInfo m_info;
     QPixmap m_originalPixmap;
-    quint64 m_loadRequestId = 0;
+    PreviewLoadGuard m_loadGuard;
+    std::function<void(bool)> m_loadingStateCallback;
     bool m_hasHighResolutionImage = false;
     double m_zoomFactor = 1.0;
     bool m_isDragging = false;

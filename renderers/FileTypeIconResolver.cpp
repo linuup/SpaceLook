@@ -1,9 +1,17 @@
 #include "renderers/FileTypeIconResolver.h"
+#include "core/file_suffix_utils.h"
 
 #include <QDir>
 #include <QFileIconProvider>
 #include <QFileInfo>
+#include <QImage>
+#include <QPixmap>
 #include <QUrl>
+#include <QtWin>
+
+#include <Windows.h>
+#include <shellapi.h>
+#include <shlobj.h>
 
 namespace {
 
@@ -27,11 +35,15 @@ QString bySuffix(const QString& suffix)
     }
     if (lower == QStringLiteral("md") || lower == QStringLiteral("json") || lower == QStringLiteral("xml") ||
         lower == QStringLiteral("yaml") || lower == QStringLiteral("yml") || lower == QStringLiteral("toml") ||
-        lower == QStringLiteral("ini") || lower == QStringLiteral("conf") || lower == QStringLiteral("cfg")) {
+        lower == QStringLiteral("ini") || lower == QStringLiteral("conf") || lower == QStringLiteral("cfg") ||
+        lower == QStringLiteral("tsbuildinfo")) {
         return QStringLiteral(":/SPACELOOK/file-icon/office-txt.svg");
     }
     if (lower == QStringLiteral("js") || lower == QStringLiteral("jsx")) {
         return QStringLiteral(":/SPACELOOK/file-icon/js.svg");
+    }
+    if (lower == QStringLiteral("html") || lower == QStringLiteral("htm")) {
+        return QStringLiteral(":/SPACELOOK/file-icon/code.svg");
     }
     if (lower == QStringLiteral("css") || lower == QStringLiteral("scss") || lower == QStringLiteral("sass") ||
         lower == QStringLiteral("less")) {
@@ -45,7 +57,7 @@ QString bySuffix(const QString& suffix)
     if (lower == QStringLiteral("mp4") || lower == QStringLiteral("mkv") || lower == QStringLiteral("avi") ||
         lower == QStringLiteral("mov") || lower == QStringLiteral("wmv") || lower == QStringLiteral("webm") ||
         lower == QStringLiteral("m4v") || lower == QStringLiteral("mpg") || lower == QStringLiteral("mpeg") ||
-        lower == QStringLiteral("ts")) {
+        lower == QStringLiteral("mts") || lower == QStringLiteral("m2ts")) {
         return QStringLiteral(":/SPACELOOK/file-icon/mp4.svg");
     }
     if (lower == QStringLiteral("png")) {
@@ -88,6 +100,23 @@ bool isShortcutLikeType(const HoveredItemInfo& info)
         info.typeKey == QStringLiteral("shell_item");
 }
 
+bool isShellNamespaceItem(const HoveredItemInfo& info)
+{
+    const QString trimmedPath = info.filePath.trimmed();
+    if (trimmedPath.isEmpty()) {
+        return false;
+    }
+
+    if (info.typeKey != QStringLiteral("shell_item") &&
+        info.typeKey != QStringLiteral("shell_folder")) {
+        return false;
+    }
+
+    return trimmedPath.startsWith(QStringLiteral("::")) ||
+        trimmedPath.startsWith(QStringLiteral("shell:"), Qt::CaseInsensitive) ||
+        (trimmedPath.startsWith(QLatin1Char('{')) && trimmedPath.endsWith(QLatin1Char('}')));
+}
+
 bool shouldPreferResolvedSystemIcon(const HoveredItemInfo& info)
 {
     return isShortcutLikeType(info);
@@ -128,16 +157,174 @@ HoveredItemInfo effectiveIconInfo(const HoveredItemInfo& info)
     return effectiveInfo;
 }
 
+QImage qImageFromHBitmap(HBITMAP bitmapHandle)
+{
+    if (!bitmapHandle) {
+        return QImage();
+    }
+
+    BITMAP bitmapInfo = {};
+    if (GetObjectW(bitmapHandle, sizeof(bitmapInfo), &bitmapInfo) == 0 ||
+        bitmapInfo.bmWidth <= 0 ||
+        bitmapInfo.bmHeight == 0) {
+        return QImage();
+    }
+
+    BITMAPINFO dibInfo = {};
+    dibInfo.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    dibInfo.bmiHeader.biWidth = bitmapInfo.bmWidth;
+    dibInfo.bmiHeader.biHeight = -std::abs(bitmapInfo.bmHeight);
+    dibInfo.bmiHeader.biPlanes = 1;
+    dibInfo.bmiHeader.biBitCount = 32;
+    dibInfo.bmiHeader.biCompression = BI_RGB;
+
+    QImage image(bitmapInfo.bmWidth, std::abs(bitmapInfo.bmHeight), QImage::Format_ARGB32_Premultiplied);
+    if (image.isNull()) {
+        return QImage();
+    }
+
+    HDC screenDc = GetDC(nullptr);
+    if (!screenDc) {
+        return QImage();
+    }
+
+    const int copied = GetDIBits(screenDc,
+                                 bitmapHandle,
+                                 0,
+                                 static_cast<UINT>(image.height()),
+                                 image.bits(),
+                                 &dibInfo,
+                                 DIB_RGB_COLORS);
+    ReleaseDC(nullptr, screenDc);
+    if (copied == 0) {
+        return QImage();
+    }
+
+    return image;
+}
+
+QString expandEnvironmentStrings(const QString& path)
+{
+    const std::wstring nativePath = path.toStdWString();
+    const DWORD requiredSize = ExpandEnvironmentStringsW(nativePath.c_str(), nullptr, 0);
+    if (requiredSize == 0) {
+        return path;
+    }
+
+    std::wstring expandedPath;
+    expandedPath.resize(requiredSize);
+    const DWORD expandedSize = ExpandEnvironmentStringsW(nativePath.c_str(),
+                                                         expandedPath.data(),
+                                                         requiredSize);
+    if (expandedSize == 0) {
+        return path;
+    }
+
+    if (!expandedPath.empty() && expandedPath.back() == L'\0') {
+        expandedPath.pop_back();
+    }
+    return QString::fromWCharArray(expandedPath.c_str());
+}
+
+QIcon extractHighResolutionIconFromLocation(const QString& iconLocation, int iconIndex)
+{
+    const QString expandedLocation = QDir::cleanPath(expandEnvironmentStrings(iconLocation.trimmed()));
+    if (expandedLocation.isEmpty()) {
+        return QIcon();
+    }
+
+    HICON iconHandle = nullptr;
+    const UINT extractedCount = PrivateExtractIconsW(reinterpret_cast<LPCWSTR>(expandedLocation.utf16()),
+                                                     iconIndex,
+                                                     256,
+                                                     256,
+                                                     &iconHandle,
+                                                     nullptr,
+                                                     1,
+                                                     LR_DEFAULTCOLOR);
+    if (extractedCount == 0 || !iconHandle) {
+        return QIcon();
+    }
+
+    const QIcon icon = QtWin::fromHICON(iconHandle);
+    DestroyIcon(iconHandle);
+    return icon;
+}
+
+QIcon shellNamespaceIcon(const HoveredItemInfo& info)
+{
+    if (!isShellNamespaceItem(info)) {
+        return QIcon();
+    }
+
+    const std::wstring nativePath = info.filePath.trimmed().toStdWString();
+    PIDLIST_ABSOLUTE pidl = nullptr;
+    if (FAILED(SHParseDisplayName(nativePath.c_str(), nullptr, &pidl, 0, nullptr)) || !pidl) {
+        return QIcon();
+    }
+
+    SHFILEINFOW iconLocationInfo = {};
+    const DWORD_PTR locationResult = SHGetFileInfoW(reinterpret_cast<LPCWSTR>(pidl),
+                                                    0,
+                                                    &iconLocationInfo,
+                                                    sizeof(iconLocationInfo),
+                                                    SHGFI_PIDL | SHGFI_ICONLOCATION);
+    if (locationResult != 0 && iconLocationInfo.szDisplayName[0] != L'\0') {
+        const QIcon extractedIcon = extractHighResolutionIconFromLocation(
+            QString::fromWCharArray(iconLocationInfo.szDisplayName),
+            iconLocationInfo.iIcon);
+        if (!extractedIcon.isNull()) {
+            CoTaskMemFree(pidl);
+            return extractedIcon;
+        }
+    }
+
+    IShellItemImageFactory* imageFactory = nullptr;
+    if (SUCCEEDED(SHCreateItemFromIDList(pidl, IID_PPV_ARGS(&imageFactory))) && imageFactory) {
+        HBITMAP bitmapHandle = nullptr;
+        const SIZE requestedSize = { 256, 256 };
+        const HRESULT imageHr = imageFactory->GetImage(requestedSize,
+                                                       SIIGBF_BIGGERSIZEOK | SIIGBF_ICONONLY,
+                                                       &bitmapHandle);
+        imageFactory->Release();
+        if (SUCCEEDED(imageHr) && bitmapHandle) {
+            const QImage image = qImageFromHBitmap(bitmapHandle);
+            DeleteObject(bitmapHandle);
+            CoTaskMemFree(pidl);
+            if (!image.isNull()) {
+                return QIcon(QPixmap::fromImage(image));
+            }
+        }
+    }
+
+    SHFILEINFOW shellInfo = {};
+    const DWORD_PTR result = SHGetFileInfoW(reinterpret_cast<LPCWSTR>(pidl),
+                                            0,
+                                            &shellInfo,
+                                            sizeof(shellInfo),
+                                            SHGFI_PIDL | SHGFI_ICON | SHGFI_LARGEICON);
+    CoTaskMemFree(pidl);
+    if (result == 0 || !shellInfo.hIcon) {
+        return QIcon();
+    }
+
+    const QIcon icon = QtWin::fromHICON(shellInfo.hIcon);
+    DestroyIcon(shellInfo.hIcon);
+    return icon;
+}
+
 QString specificIconResourcePath(const HoveredItemInfo& info)
 {
     if (info.isDirectory || info.typeKey == QStringLiteral("folder") || info.typeKey == QStringLiteral("shell_folder")) {
         return QStringLiteral(":/SPACELOOK/file-icon/folder.svg");
     }
 
-    const QString suffix = QFileInfo(info.filePath).suffix();
-    const QString suffixIcon = bySuffix(suffix);
-    if (!suffixIcon.isEmpty()) {
-        return suffixIcon;
+    const QStringList suffixCandidates = FileSuffixUtils::suffixCandidates(info.filePath);
+    for (const QString& suffixCandidate : suffixCandidates) {
+        const QString suffixIcon = bySuffix(suffixCandidate);
+        if (!suffixIcon.isEmpty()) {
+            return suffixIcon;
+        }
     }
 
     if (info.typeKey == QStringLiteral("pdf")) {
@@ -148,6 +335,12 @@ QString specificIconResourcePath(const HoveredItemInfo& info)
     }
     if (info.typeKey == QStringLiteral("code")) {
         return QStringLiteral(":/SPACELOOK/file-icon/code.svg");
+    }
+    if (info.typeKey == QStringLiteral("html")) {
+        return QStringLiteral(":/SPACELOOK/file-icon/code.svg");
+    }
+    if (info.typeKey == QStringLiteral("markdown")) {
+        return QStringLiteral(":/SPACELOOK/file-icon/office-txt.svg");
     }
     if (info.typeKey == QStringLiteral("text")) {
         return QStringLiteral(":/SPACELOOK/file-icon/office-txt.svg");
@@ -189,6 +382,11 @@ QIcon FileTypeIconResolver::iconForInfo(const HoveredItemInfo& info)
 {
     static QFileIconProvider iconProvider;
     const HoveredItemInfo effectiveInfo = effectiveIconInfo(info);
+
+    const QIcon namespaceIcon = shellNamespaceIcon(info);
+    if (!namespaceIcon.isNull()) {
+        return namespaceIcon;
+    }
 
     if (shouldPreferResolvedSystemIcon(info) && !effectiveInfo.filePath.trimmed().isEmpty()) {
         const QFileInfo resolvedFileInfo(effectiveInfo.filePath);

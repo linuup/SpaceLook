@@ -1,6 +1,5 @@
 #include "catalog/open_with_catalog.h"
 
-#include <QDebug>
 #include <QDir>
 #include <QFileIconProvider>
 #include <QFileInfo>
@@ -40,26 +39,19 @@ QVector<OpenWithCatalog::AppEntry> fileAssociationAppsForFile(const QString& fil
     QVector<OpenWithCatalog::AppEntry> result;
     const QString normalizedPath = QDir::toNativeSeparators(filePath.trimmed());
     if (normalizedPath.isEmpty()) {
-        qDebug().noquote() << QStringLiteral("[SpaceLookAssoc] file path is empty");
         return result;
     }
 
     const QFileInfo fileInfo(normalizedPath);
     if (!fileInfo.exists()) {
-        qDebug().noquote() << QStringLiteral("[SpaceLookAssoc] file missing path=\"%1\"").arg(normalizedPath);
         return result;
     }
-
-    qDebug().noquote() << QStringLiteral("[SpaceLookAssoc] begin file=\"%1\" suffix=\"%2\"")
-        .arg(normalizedPath, fileInfo.suffix().toLower());
 
     IEnumAssocHandlers* enumHandlers = nullptr;
     const HRESULT enumHr = SHAssocEnumHandlers(reinterpret_cast<LPCWSTR>(normalizedPath.utf16()),
                                                ASSOC_FILTER_NONE,
                                                &enumHandlers);
     if (FAILED(enumHr) || !enumHandlers) {
-        qDebug().noquote() << QStringLiteral("[SpaceLookAssoc] SHAssocEnumHandlers failed hr=0x%1 file=\"%2\"")
-            .arg(QString::number(static_cast<qulonglong>(enumHr), 16), normalizedPath);
         return result;
     }
 
@@ -68,10 +60,6 @@ QVector<OpenWithCatalog::AppEntry> fileAssociationAppsForFile(const QString& fil
         IAssocHandler* handler = nullptr;
         const HRESULT nextHr = enumHandlers->Next(1, &handler, nullptr);
         if (nextHr != S_OK || !handler) {
-            if (nextHr != S_FALSE) {
-                qDebug().noquote() << QStringLiteral("[SpaceLookAssoc] enum next stopped hr=0x%1")
-                    .arg(QString::number(static_cast<qulonglong>(nextHr), 16));
-            }
             break;
         }
 
@@ -99,9 +87,6 @@ QVector<OpenWithCatalog::AppEntry> fileAssociationAppsForFile(const QString& fil
             executablePath = QDir::toNativeSeparators(executablePath);
         }
 
-        qDebug().noquote() << QStringLiteral("[SpaceLookAssoc] handler name=\"%1\" iconPath=\"%2\" exeGuess=\"%3\"")
-            .arg(resolvedName, resolvedIconPath, executablePath);
-
         if (!executablePath.isEmpty() && QFileInfo(executablePath).exists()) {
             const QString dedupeKey = executablePath.toLower();
             if (!seenPaths.contains(dedupeKey)) {
@@ -112,15 +97,7 @@ QVector<OpenWithCatalog::AppEntry> fileAssociationAppsForFile(const QString& fil
                 entry.icon = iconFromLocation(executablePath, iconIndex);
                 result.append(entry);
                 seenPaths.insert(dedupeKey);
-                qDebug().noquote() << QStringLiteral("[SpaceLookAssoc] accepted name=\"%1\" exe=\"%2\"")
-                    .arg(entry.displayName, entry.executablePath);
-            } else {
-                qDebug().noquote() << QStringLiteral("[SpaceLookAssoc] skipped duplicate exe=\"%1\"")
-                    .arg(executablePath);
             }
-        } else {
-            qDebug().noquote() << QStringLiteral("[SpaceLookAssoc] skipped unresolved handler name=\"%1\" exeGuess=\"%2\"")
-                .arg(resolvedName, executablePath);
         }
 
         if (uiName) {
@@ -133,9 +110,6 @@ QVector<OpenWithCatalog::AppEntry> fileAssociationAppsForFile(const QString& fil
     }
 
     enumHandlers->Release();
-    qDebug().noquote() << QStringLiteral("[SpaceLookAssoc] end file=\"%1\" totalEntries=%2")
-        .arg(normalizedPath)
-        .arg(result.size());
     return result;
 }
 

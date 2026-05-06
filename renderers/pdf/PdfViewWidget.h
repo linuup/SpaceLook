@@ -6,6 +6,7 @@
 #include <QVector>
 
 class PdfDocument;
+class QTimer;
 
 struct PdfRenderedPage
 {
@@ -25,9 +26,12 @@ public:
     void resetZoomToFitWidth();
     void setZoomFactor(double factor);
     double zoomFactor() const;
+    int currentPageIndex() const;
+    void scrollToPage(int pageIndex);
 
 signals:
     void zoomFactorChanged(double factor);
+    void currentPageChanged(int pageIndex, int pageCount);
 
 protected:
     void paintEvent(QPaintEvent* event) override;
@@ -43,9 +47,14 @@ private:
     int contentWidth() const;
     int contentHeight() const;
     double fitWidthZoom() const;
+    double fitPageHeightZoom() const;
+    void updateCurrentPageFromScroll();
 
     PdfDocument* m_document = nullptr;
     QHash<int, PdfRenderedPage> m_renderedPages;
     QVector<QSizeF> m_pageSizesPoints;
+    QTimer* m_loadingTimer = nullptr;
     double m_zoomFactor = 1.0;
+    int m_currentPageIndex = -1;
+    int m_loadingFrame = 0;
 };

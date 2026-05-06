@@ -19,6 +19,43 @@ SpaceLookIpcServer::SpaceLookIpcServer(QObject* parent)
     connect(m_server, &QLocalServer::newConnection, this, &SpaceLookIpcServer::handleNewConnection);
 }
 
+bool SpaceLookIpcServer::sendPreviewRequest(const QString& filePath, int timeoutMs)
+{
+    const QString path = filePath.trimmed();
+    if (path.isEmpty()) {
+        return false;
+    }
+
+    QLocalSocket socket;
+    socket.connectToServer(QString::fromLatin1(kSpaceLookServerName));
+    if (!socket.waitForConnected(timeoutMs)) {
+        qWarning().noquote() << QStringLiteral("[SpaceLook IPC] failed to connect to running instance: error=\"%1\"")
+            .arg(socket.errorString());
+        return false;
+    }
+
+    QJsonObject payload;
+    payload.insert(QStringLiteral("cmd"), QStringLiteral("preview"));
+    payload.insert(QStringLiteral("path"), path);
+
+    QByteArray message = QJsonDocument(payload).toJson(QJsonDocument::Compact);
+    message.append('\n');
+
+    if (socket.write(message) != message.size()) {
+        qWarning().noquote() << QStringLiteral("[SpaceLook IPC] failed to write preview request");
+        return false;
+    }
+
+    if (!socket.waitForBytesWritten(timeoutMs)) {
+        qWarning().noquote() << QStringLiteral("[SpaceLook IPC] preview request write timed out: error=\"%1\"")
+            .arg(socket.errorString());
+        return false;
+    }
+
+    socket.disconnectFromServer();
+    return true;
+}
+
 bool SpaceLookIpcServer::startListening()
 {
     if (m_server->isListening()) {

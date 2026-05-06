@@ -23,7 +23,7 @@ QString previewIdentityFor(const HoveredItemInfo& info)
     }
     return QStringLiteral("%1|%2|%3|%4")
         .arg(info.sourceKind.trimmed().toLower(),
-             info.itemKind.trimmed().toLower(),
+             info.rendererName.trimmed().toLower(),
              info.title.trimmed().toLower(),
              info.windowClassName.trimmed().toLower());
 }
@@ -65,10 +65,16 @@ void PreviewManager::showInitialPreview()
         return;
     }
 
-    SpaceLookWindow* window = ensureWindow();
-    if (window) {
-        window->hidePreview();
-    }
+    HoveredItemInfo welcomeInfo;
+    welcomeInfo.valid = true;
+    welcomeInfo.exists = true;
+    welcomeInfo.title = QStringLiteral("SpaceLook");
+    welcomeInfo.typeKey = QStringLiteral("welcome");
+    welcomeInfo.typeDetails = QStringLiteral("Welcome");
+    welcomeInfo.rendererName = QStringLiteral("welcome");
+    welcomeInfo.sourceKind = QStringLiteral("SpaceLook");
+    welcomeInfo.statusMessage = QStringLiteral("Ready to preview the item under your cursor.");
+    showHoveredItem(welcomeInfo);
 }
 
 void PreviewManager::openPreviewForPath(const QString& filePath)
@@ -174,9 +180,6 @@ void PreviewManager::handleSpaceHotkey()
 void PreviewManager::showHoveredItem(const HoveredItemInfo& info)
 {
     HoveredItemInfo updatedInfo = info;
-    if (updatedInfo.typeLabel.trimmed().isEmpty()) {
-        updatedInfo.typeLabel = m_fileTypeDetector.detectTypeLabel(updatedInfo.filePath);
-    }
     if (updatedInfo.title.trimmed().isEmpty()) {
         updatedInfo.title = updatedInfo.fileName.trimmed().isEmpty()
             ? QStringLiteral("Space Look")

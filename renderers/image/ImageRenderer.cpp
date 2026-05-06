@@ -309,11 +309,21 @@ QWidget* ImageRenderer::widget()
     return this;
 }
 
+bool ImageRenderer::reportsLoadingState() const
+{
+    return true;
+}
+
+void ImageRenderer::setLoadingStateCallback(std::function<void(bool)> callback)
+{
+    m_loadingStateCallback = std::move(callback);
+}
+
 void ImageRenderer::load(const HoveredItemInfo& info)
 {
     m_info = info;
-    ++m_loadRequestId;
-    const quint64 requestId = m_loadRequestId;
+    const PreviewLoadGuard::Token loadToken = m_loadGuard.begin(info.filePath);
+    notifyLoadingState(true);
     qDebug().noquote() << QStringLiteral("[SpaceLookRender] ImageRenderer load path=\"%1\"").arg(info.filePath);
     m_titleLabel->setText(info.title.isEmpty() ? QStringLiteral("Image Preview") : info.title);
     m_titleLabel->setCopyText(m_titleLabel->text());
@@ -333,17 +343,18 @@ void ImageRenderer::load(const HoveredItemInfo& info)
     updateDragCursor();
 
     if (isAnimatedImageFile(info.filePath) && tryLoadAnimatedImage(info.filePath)) {
+        notifyLoadingState(false);
         return;
     }
 
     auto* thumbnailWatcher = new QFutureWatcher<ImageLoadResult>(this);
-    connect(thumbnailWatcher, &QFutureWatcher<ImageLoadResult>::finished, this, [this, thumbnailWatcher, requestId, filePath = info.filePath]() {
+    connect(thumbnailWatcher, &QFutureWatcher<ImageLoadResult>::finished, this, [this, thumbnailWatcher, loadToken]() {
         const ImageLoadResult result = thumbnailWatcher->result();
         thumbnailWatcher->deleteLater();
 
-        if (requestId != m_loadRequestId || m_info.filePath != filePath) {
+        if (!m_loadGuard.isCurrent(loadToken, m_info.filePath)) {
             qDebug().noquote() << QStringLiteral("[SpaceLookRender] ImageRenderer discarded stale thumbnail result path=\"%1\"")
-                .arg(filePath);
+                .arg(loadToken.path);
             return;
         }
 
@@ -362,7 +373,7 @@ void ImageRenderer::load(const HoveredItemInfo& info)
         qDebug().noquote() << QStringLiteral("[SpaceLookRender] ImageRenderer thumbnail loaded size=%1x%2 path=\"%3\"")
             .arg(m_originalPixmap.width())
             .arg(m_originalPixmap.height())
-            .arg(filePath);
+            .arg(loadToken.path);
     });
     thumbnailWatcher->setFuture(QtConcurrent::run([this, filePath = info.filePath]() {
         return loadThumbnailPreviewContent(filePath, [this](const QString& path) {
@@ -371,18 +382,18 @@ void ImageRenderer::load(const HoveredItemInfo& info)
     }));
 
     auto* watcher = new QFutureWatcher<ImageLoadResult>(this);
-    connect(watcher, &QFutureWatcher<ImageLoadResult>::finished, this, [this, watcher, requestId, filePath = info.filePath]() {
+    connect(watcher, &QFutureWatcher<ImageLoadResult>::finished, this, [this, watcher, loadToken]() {
         const ImageLoadResult result = watcher->result();
         watcher->deleteLater();
 
-        if (requestId != m_loadRequestId || m_info.filePath != filePath) {
+        if (!m_loadGuard.isCurrent(loadToken, m_info.filePath)) {
             qDebug().noquote() << QStringLiteral("[SpaceLookRender] ImageRenderer discarded stale async result path=\"%1\"")
-                .arg(filePath);
+                .arg(loadToken.path);
             return;
         }
 
         if (!result.success) {
-            qDebug().noquote() << QStringLiteral("[SpaceLookRender] ImageRenderer failed to load: %1").arg(filePath);
+            qDebug().noquote() << QStringLiteral("[SpaceLookRender] ImageRenderer failed to load: %1").arg(loadToken.path);
             if (m_originalPixmap.isNull()) {
                 m_statusLabel->setText(result.statusMessage);
                 m_statusLabel->show();
@@ -391,6 +402,7 @@ void ImageRenderer::load(const HoveredItemInfo& info)
                 m_statusLabel->setText(result.statusMessage);
                 m_statusLabel->show();
             }
+            notifyLoadingState(false);
             return;
         }
 
@@ -401,6 +413,7 @@ void ImageRenderer::load(const HoveredItemInfo& info)
                 m_statusLabel->show();
                 m_imageLabel->setText(QStringLiteral("Image preview is unavailable."));
             }
+            notifyLoadingState(false);
             return;
         }
 
@@ -411,7 +424,8 @@ void ImageRenderer::load(const HoveredItemInfo& info)
         qDebug().noquote() << QStringLiteral("[SpaceLookRender] ImageRenderer full image loaded size=%1x%2 path=\"%3\"")
             .arg(m_originalPixmap.width())
             .arg(m_originalPixmap.height())
-            .arg(filePath);
+            .arg(loadToken.path);
+        notifyLoadingState(false);
     });
     watcher->setFuture(QtConcurrent::run([this, filePath = info.filePath]() {
         ImageLoadResult result = loadImagePreviewContent(filePath, [this](const QString& path) {
@@ -723,7 +737,8 @@ void ImageRenderer::clearAnimatedImage()
 
 void ImageRenderer::unload()
 {
-    ++m_loadRequestId;
+    m_loadGuard.cancel();
+    notifyLoadingState(false);
     clearAnimatedImage();
     m_originalPixmap = QPixmap();
     m_hasHighResolutionImage = false;
@@ -737,6 +752,13 @@ void ImageRenderer::unload()
     m_statusLabel->hide();
     m_info = HoveredItemInfo();
     updateDragCursor();
+}
+
+void ImageRenderer::notifyLoadingState(bool loading)
+{
+    if (m_loadingStateCallback) {
+        m_loadingStateCallback(loading);
+    }
 }
 
 void ImageRenderer::showStatusMessage(const QString& message)

@@ -2,6 +2,7 @@
 
 #include "renderers/FluentIconFont.h"
 #include "catalog/open_with_catalog.h"
+#include "core/file_suffix_utils.h"
 
 #include <QCoreApplication>
 #include <QAction>
@@ -358,7 +359,7 @@ QString OpenWithButton::preferenceScopeKey() const
         return normalizedTypeKey;
     }
 
-    const QString suffix = QFileInfo(m_targetPath).suffix().trimmed().toLower();
+    const QString suffix = FileSuffixUtils::fullSuffix(m_targetPath);
     if (!suffix.isEmpty()) {
         return QStringLiteral("suffix:%1").arg(suffix);
     }

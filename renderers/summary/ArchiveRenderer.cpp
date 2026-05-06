@@ -156,11 +156,21 @@ QWidget* ArchiveRenderer::widget()
     return this;
 }
 
+bool ArchiveRenderer::reportsLoadingState() const
+{
+    return true;
+}
+
+void ArchiveRenderer::setLoadingStateCallback(std::function<void(bool)> callback)
+{
+    m_loadingStateCallback = std::move(callback);
+}
+
 void ArchiveRenderer::load(const HoveredItemInfo& info)
 {
     m_info = info;
-    ++m_loadRequestId;
-    const quint64 requestId = m_loadRequestId;
+    const PreviewLoadGuard::Token loadToken = m_loadGuard.begin(info.filePath);
+    notifyLoadingState(true);
 
     qDebug().noquote() << QStringLiteral("[SpaceLookRender] ArchiveRenderer load path=\"%1\"").arg(info.filePath);
 
@@ -175,19 +185,20 @@ void ArchiveRenderer::load(const HoveredItemInfo& info)
     m_statusLabel->show();
 
     auto* watcher = new QFutureWatcher<ArchiveLoadResult>(this);
-    connect(watcher, &QFutureWatcher<ArchiveLoadResult>::finished, this, [this, watcher, requestId, filePath = info.filePath]() {
+    connect(watcher, &QFutureWatcher<ArchiveLoadResult>::finished, this, [this, watcher, loadToken]() {
         const ArchiveLoadResult result = watcher->result();
         watcher->deleteLater();
 
-        if (requestId != m_loadRequestId || m_info.filePath != filePath) {
+        if (!m_loadGuard.isCurrent(loadToken, m_info.filePath)) {
             qDebug().noquote() << QStringLiteral("[SpaceLookRender] ArchiveRenderer discarded stale result path=\"%1\"")
-                .arg(filePath);
+                .arg(loadToken.path);
             return;
         }
 
         if (!result.success) {
             m_statusLabel->setText(result.statusMessage);
             m_statusLabel->show();
+            notifyLoadingState(false);
             return;
         }
 
@@ -203,7 +214,8 @@ void ArchiveRenderer::load(const HoveredItemInfo& info)
 
         qDebug().noquote() << QStringLiteral("[SpaceLookRender] ArchiveRenderer entries=%1 path=\"%2\"")
             .arg(result.entries.size())
-            .arg(filePath);
+            .arg(loadToken.path);
+        notifyLoadingState(false);
     });
 
     watcher->setFuture(QtConcurrent::run([this, filePath = info.filePath]() {
@@ -213,13 +225,21 @@ void ArchiveRenderer::load(const HoveredItemInfo& info)
 
 void ArchiveRenderer::unload()
 {
-    ++m_loadRequestId;
+    m_loadGuard.cancel();
+    notifyLoadingState(false);
     m_treeWidget->clear();
     m_pathValueLabel->clear();
     m_openWithButton->setTargetContext(QString(), QString());
     m_statusLabel->clear();
     m_statusLabel->hide();
     m_info = HoveredItemInfo();
+}
+
+void ArchiveRenderer::notifyLoadingState(bool loading)
+{
+    if (m_loadingStateCallback) {
+        m_loadingStateCallback(loading);
+    }
 }
 
 void ArchiveRenderer::applyChrome()

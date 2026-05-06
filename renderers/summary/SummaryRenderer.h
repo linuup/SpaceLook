@@ -52,6 +52,5 @@ private:
     QLabel* m_sizeValueLabel = nullptr;
     QWidget* m_resolvedTargetSection = nullptr;
     QLabel* m_resolvedTargetValueLabel = nullptr;
-    PreviewState* m_previewState = nullptr;
     HoveredItemInfo m_currentInfo;
 };

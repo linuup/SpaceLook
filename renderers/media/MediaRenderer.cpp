@@ -34,6 +34,11 @@
 
 namespace {
 
+constexpr int kDefaultMediaVolume = 50;
+constexpr int kMaxMediaVolume = 100;
+constexpr double kMpvVolumeGain = 2.0;
+constexpr int kMaxQtPlayerVolume = 100;
+
 bool isVideoType(const HoveredItemInfo& info)
 {
     return info.typeKey == QStringLiteral("video");
@@ -122,6 +127,7 @@ public:
             !setOptionString("osc", "no", errorMessage) ||
             !setOptionString("border", "no", errorMessage) ||
             !setOptionString("keep-open", "yes", errorMessage) ||
+            !setOptionString("volume-max", "200", errorMessage) ||
             !setOptionString("pause", "yes", errorMessage)) {
             shutdown();
             return false;
@@ -477,8 +483,8 @@ MediaRenderer::MediaRenderer(QWidget* parent)
     pathLayout->setSpacing(8);
     pathLayout->addWidget(m_pathValueLabel, 1);
 
-    m_stageLayout->setContentsMargins(10, 10, 10, 10);
-    m_stageLayout->setSpacing(8);
+    m_stageLayout->setContentsMargins(12, 12, 12, 12);
+    m_stageLayout->setSpacing(10);
     auto* viewportLayout = new QStackedLayout(m_mediaViewport);
     viewportLayout->setStackingMode(QStackedLayout::StackAll);
     viewportLayout->setContentsMargins(0, 0, 0, 0);
@@ -489,11 +495,11 @@ MediaRenderer::MediaRenderer(QWidget* parent)
     m_stageLayout->addWidget(m_mediaViewport, 1);
 
     auto* controlsShellLayout = new QVBoxLayout(m_controlsCard);
-    controlsShellLayout->setContentsMargins(10, 8, 10, 8);
-    controlsShellLayout->setSpacing(6);
+    controlsShellLayout->setContentsMargins(14, 10, 14, 10);
+    controlsShellLayout->setSpacing(0);
 
     auto* controlsLayout = new QHBoxLayout();
-    controlsLayout->setSpacing(8);
+    controlsLayout->setSpacing(10);
     controlsLayout->addWidget(m_playPauseButton);
     controlsLayout->addWidget(m_positionLabel);
     controlsLayout->addWidget(m_positionSlider, 1);
@@ -549,10 +555,20 @@ MediaRenderer::MediaRenderer(QWidget* parent)
     m_positionSlider->setRange(0, 0);
     m_positionLabel->setText(QStringLiteral("00:00"));
     m_durationLabel->setText(QStringLiteral("00:00"));
+    m_positionLabel->setFixedWidth(48);
+    m_durationLabel->setFixedWidth(48);
     m_positionSlider->installEventFilter(this);
-    m_volumeSlider->setRange(0, 100);
+    m_volumeSlider->setRange(0, kMaxMediaVolume);
     m_volumeSlider->setValue(m_audioVolume);
-    m_volumeSlider->setFixedWidth(74);
+    m_volumeSlider->setFixedWidth(108);
+    m_playPauseButton->setFixedSize(44, 44);
+    m_volumeButton->setFixedSize(36, 36);
+    m_playPauseButton->setCursor(Qt::PointingHandCursor);
+    m_volumeButton->setCursor(Qt::PointingHandCursor);
+    m_positionSlider->setCursor(Qt::PointingHandCursor);
+    m_volumeSlider->setCursor(Qt::PointingHandCursor);
+    m_playPauseButton->setToolTip(QStringLiteral("Play or pause"));
+    m_volumeButton->setToolTip(QStringLiteral("Mute or restore volume"));
     m_playPauseButton->setText(playGlyph());
     m_volumeButton->setText(volumeGlyph());
     m_volumeValueLabel->setText(QString::number(m_audioVolume));
@@ -773,10 +789,10 @@ void MediaRenderer::load(const HoveredItemInfo& info)
             return;
         }
 
-        m_videoMuted = true;
-        m_videoVolume = 50;
-        m_mpvBackend->setMuted(true);
-        m_mpvBackend->setVolume(static_cast<double>(m_videoVolume));
+        m_videoMuted = false;
+        m_videoVolume = kDefaultMediaVolume;
+        m_mpvBackend->setMuted(false);
+        m_mpvBackend->setVolume(static_cast<double>(m_videoVolume) * kMpvVolumeGain);
         m_mpvBackend->setPaused(true);
         m_mpvPaused = true;
         updateStatusLabel(QString());
@@ -806,10 +822,10 @@ void MediaRenderer::load(const HoveredItemInfo& info)
             return;
         }
 
-        m_videoMuted = true;
-        m_videoVolume = 50;
-        m_mpvBackend->setMuted(true);
-        m_mpvBackend->setVolume(static_cast<double>(m_videoVolume));
+        m_videoMuted = false;
+        m_videoVolume = kDefaultMediaVolume;
+        m_mpvBackend->setMuted(false);
+        m_mpvBackend->setVolume(static_cast<double>(m_videoVolume) * kMpvVolumeGain);
         m_mpvPaused = true;
         m_videoPollTimer->start();
         updateStatusLabel(QString());
@@ -833,8 +849,8 @@ void MediaRenderer::load(const HoveredItemInfo& info)
     }
 
     m_player->stop();
-    m_player->setMuted(true);
-    m_player->setVolume(m_audioVolume);
+    m_player->setMuted(false);
+    m_player->setVolume(qMin(m_audioVolume, kMaxQtPlayerVolume));
     m_player->setMedia(QUrl::fromLocalFile(info.filePath));
     updateStatusLabel(QString());
     updateMediaUi();
@@ -874,10 +890,7 @@ void MediaRenderer::applyChrome()
 {
     setStyleSheet(
         "#MediaRendererRoot {"
-        "  background: qlineargradient(x1:0, y1:0, x2:1, y2:1,"
-        "      stop:0 #f9fbff,"
-        "      stop:0.52 #f5f8fc,"
-        "      stop:1 #eef3f9);"
+        "  background: #f3f3f3;"
         "  border-radius: 0px;"
         "}"
         "QLabel {"
@@ -889,17 +902,17 @@ void MediaRenderer::applyChrome()
         "  padding: 0px;"
         "}"
         "#MediaTitle {"
-        "  color: #102a43;"
+        "  color: #1f1f1f;"
         "}"
         "#MediaMeta {"
-        "  color: #60758d;"
+        "  color: #616161;"
         "}"
         "#MediaPathTitle {"
         "  color: #16324a;"
         "  font-family: 'Segoe UI Semibold';"
         "}"
         "#MediaPathValue {"
-        "  color: #445d76;"
+        "  color: #5f5f5f;"
         "}"
         "#MediaOpenWithButton QToolButton {"
         "  background: rgba(238, 244, 252, 0.96);"
@@ -932,125 +945,121 @@ void MediaRenderer::applyChrome()
         "  padding-right: 5px;"
         "}"
         "#MediaStatus {"
-        "  color: #4f4b12;"
-        "  background: rgba(255, 243, 212, 0.94);"
-        "  border: 1px solid rgba(231, 202, 132, 0.95);"
-        "  border-radius: 12px;"
-        "  padding: 8px 10px;"
+        "  color: #3b3a00;"
+        "  background: #fff4ce;"
+        "  border: 1px solid #f3d77d;"
+        "  border-radius: 4px;"
+        "  padding: 8px 12px;"
         "}"
         "#MediaStage {"
-        "  background: qlineargradient(x1:0, y1:0, x2:1, y2:1,"
-        "      stop:0 #152131,"
-        "      stop:0.58 #203246,"
-        "      stop:1 #2b4058);"
-        "  border: 1px solid rgba(82, 106, 131, 0.68);"
-        "  border-radius: 20px;"
+        "  background: #111111;"
+        "  border: 1px solid #d0d0d0;"
+        "  border-radius: 8px;"
         "}"
         "#MediaControlsCard {"
-        "  background: rgba(244, 248, 255, 0.12);"
-        "  border: 1px solid rgba(255, 255, 255, 0.09);"
-        "  border-radius: 16px;"
+        "  background: rgba(250, 250, 250, 0.94);"
+        "  border: 1px solid rgba(255, 255, 255, 0.68);"
+        "  border-radius: 6px;"
         "}"
         "#MediaViewport {"
         "  background: transparent;"
         "}"
         "#MediaAudioPlaceholder, #MediaVideoHost, #MediaVideoPlaceholder {"
-        "  background: rgba(255, 255, 255, 0.08);"
-        "  color: #edf5ff;"
-        "  border: 1px solid rgba(255, 255, 255, 0.12);"
-        "  border-radius: 16px;"
+        "  background: #1b1b1b;"
+        "  color: #f3f3f3;"
+        "  border: 1px solid #2b2b2b;"
+        "  border-radius: 4px;"
         "  padding: 12px;"
         "}"
         "#MediaCenterOverlay {"
         "  background: transparent;"
-        "  color: rgba(248, 252, 255, 0.92);"
+        "  color: rgba(255, 255, 255, 0.92);"
         "}"
         "#MediaPlayPause {"
-        "  background: rgba(249, 252, 255, 0.98);"
-        "  color: #16324a;"
-        "  border: none;"
-        "  border-radius: 16px;"
-        "  min-width: 40px;"
-        "  min-height: 36px;"
+        "  background: #0078d4;"
+        "  color: #ffffff;"
+        "  border: 1px solid #0078d4;"
+        "  border-radius: 22px;"
+        "  min-width: 44px;"
+        "  min-height: 44px;"
         "  padding: 0px;"
         "}"
         "#MediaPlayPause:hover {"
-        "  background: rgba(255, 255, 255, 1.0);"
+        "  background: #106ebe;"
+        "  border-color: #106ebe;"
         "}"
         "#MediaPlayPause:pressed {"
-        "  background: rgba(220, 233, 246, 1.0);"
+        "  background: #005a9e;"
+        "  border-color: #005a9e;"
         "}"
         "#MediaVolumeButton {"
-        "  background: rgba(241, 247, 255, 0.16);"
-        "  color: #f5fbff;"
-        "  border: 1px solid rgba(255, 255, 255, 0.16);"
-        "  border-radius: 16px;"
-        "  min-width: 40px;"
+        "  background: transparent;"
+        "  color: #1f1f1f;"
+        "  border: 1px solid transparent;"
+        "  border-radius: 4px;"
+        "  min-width: 36px;"
         "  min-height: 36px;"
         "  padding: 0px;"
         "}"
         "#MediaVolumeButton:hover {"
-        "  background: rgba(241, 247, 255, 0.23);"
+        "  background: #e5e5e5;"
+        "  border-color: #e5e5e5;"
         "}"
         "#MediaVolumeButton:pressed {"
-        "  background: rgba(241, 247, 255, 0.28);"
+        "  background: #d0d0d0;"
+        "  border-color: #d0d0d0;"
         "}"
         "#MediaVolumeValue {"
-        "  color: #eff6ff;"
-        "  font-family: 'Segoe UI Semibold';"
+        "  color: #4c4c4c;"
+        "  font-family: 'Segoe UI';"
         "  font-size: 12px;"
         "  min-width: 28px;"
         "}"
         "#MediaTimeLabel {"
-        "  color: #e2eefc;"
-        "  min-width: 36px;"
+        "  color: #4c4c4c;"
+        "  min-width: 48px;"
         "}"
         "#MediaSlider::groove:horizontal {"
-        "  height: 8px;"
-        "  border-radius: 4px;"
-        "  background: rgba(189, 208, 229, 0.18);"
+        "  height: 3px;"
+        "  border-radius: 1px;"
+        "  background: #c8c8c8;"
         "}"
         "#MediaSlider::sub-page:horizontal {"
-        "  border-radius: 4px;"
-        "  background: qlineargradient(x1:0, y1:0, x2:1, y2:0,"
-        "      stop:0 rgba(120, 210, 255, 0.98),"
-        "      stop:0.54 rgba(91, 170, 250, 0.98),"
-        "      stop:1 rgba(74, 136, 226, 0.98));"
+        "  border-radius: 1px;"
+        "  background: #0078d4;"
         "}"
         "#MediaSlider::add-page:horizontal {"
-        "  border-radius: 4px;"
-        "  background: rgba(196, 212, 233, 0.14);"
+        "  border-radius: 1px;"
+        "  background: #c8c8c8;"
         "}"
         "#MediaSlider::handle:horizontal {"
-        "  background: #ffffff;"
-        "  border: 2px solid rgba(100, 170, 255, 0.96);"
+        "  background: #0078d4;"
+        "  border: 2px solid #ffffff;"
         "  width: 14px;"
-        "  margin: -4px 0;"
+        "  margin: -7px 0;"
         "  border-radius: 7px;"
         "}"
         "#MediaSlider::handle:horizontal:hover {"
-        "  background: #f8fbff;"
+        "  background: #106ebe;"
         "}"
         "#MediaVolumeSlider::groove:horizontal {"
-        "  height: 7px;"
-        "  border-radius: 3px;"
-        "  background: rgba(201, 215, 235, 0.16);"
+        "  height: 3px;"
+        "  border-radius: 1px;"
+        "  background: #c8c8c8;"
         "}"
         "#MediaVolumeSlider::sub-page:horizontal {"
-        "  border-radius: 3px;"
-        "  background: qlineargradient(x1:0, y1:0, x2:1, y2:0,"
-        "      stop:0 rgba(86, 146, 236, 0.98),"
-        "      stop:1 rgba(123, 212, 255, 0.98));"
+        "  border-radius: 1px;"
+        "  background: #0078d4;"
         "}"
         "#MediaVolumeSlider::add-page:horizontal {"
-        "  border-radius: 3px;"
-        "  background: rgba(201, 215, 235, 0.10);"
+        "  border-radius: 1px;"
+        "  background: #c8c8c8;"
         "}"
         "#MediaVolumeSlider::handle:horizontal {"
-        "  background: #ffffff;"
-        "  border: 2px solid rgba(101, 171, 255, 0.96);"
+        "  background: #0078d4;"
+        "  border: 2px solid #ffffff;"
         "  width: 12px;"
-        "  margin: -4px 0;"
+        "  margin: -7px 0;"
         "  border-radius: 6px;"
         "}"
     );
@@ -1223,19 +1232,19 @@ void MediaRenderer::togglePlayback()
 
 void MediaRenderer::toggleVolumePopup()
 {
-    setVolumeLevel(isMutedState() ? 50 : 0);
+    setVolumeLevel(isMutedState() ? kDefaultMediaVolume : 0);
 }
 
 void MediaRenderer::setVolumeLevel(int value)
 {
-    const int clampedValue = qBound(0, value, 100);
+    const int clampedValue = qBound(0, value, kMaxMediaVolume);
 
     if (m_usingMpvPlayback) {
         m_videoVolume = clampedValue;
         m_videoMuted = clampedValue == 0;
         if (m_mpvBackend && m_mpvBackend->isLoaded()) {
             m_mpvBackend->setMuted(m_videoMuted);
-            m_mpvBackend->setVolume(static_cast<double>(clampedValue));
+            m_mpvBackend->setVolume(static_cast<double>(clampedValue) * kMpvVolumeGain);
         }
         updateVolumeButton();
         updateVolumePopup();
@@ -1245,7 +1254,7 @@ void MediaRenderer::setVolumeLevel(int value)
     m_audioVolume = clampedValue;
     if (m_player) {
         m_player->setMuted(clampedValue == 0);
-        m_player->setVolume(clampedValue);
+        m_player->setVolume(qMin(clampedValue, kMaxQtPlayerVolume));
     }
     updateVolumeButton();
     updateVolumePopup();
@@ -1347,8 +1356,7 @@ void MediaRenderer::updateMediaUi()
 
     if (!video) {
         m_audioPlaceholder->setPixmap(QPixmap());
-        m_audioPlaceholder->setText(QStringLiteral("%1\n\nClick to play or pause").arg(
-            displayTitleForMedia(m_info)));
+        m_audioPlaceholder->setText(displayTitleForMedia(m_info));
     } else {
         m_videoPlaceholder->setPixmap(QPixmap());
         m_videoPlaceholder->setText(QString());

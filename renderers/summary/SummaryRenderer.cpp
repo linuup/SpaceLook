@@ -100,8 +100,9 @@ SummaryRenderer::SummaryRenderer(PreviewState* previewState, QWidget* parent)
     , m_detailsPanel(new QWidget(this))
     , m_detailsScrollArea(new QScrollArea(this))
     , m_detailsContent(new QWidget(this))
-    , m_previewState(previewState)
 {
+    Q_UNUSED(previewState);
+
     setAttribute(Qt::WA_StyledBackground, true);
     setObjectName(QStringLiteral("SummaryRendererRoot"));
     m_headerRow->setObjectName(QStringLiteral("SummaryHeaderRow"));
@@ -205,28 +206,6 @@ SummaryRenderer::SummaryRenderer(PreviewState* previewState, QWidget* parent)
     connect(m_titleLabel, &SelectableTitleLabel::copyFeedbackRequested, this, [this](const QString& message) {
         showStatusMessage(message);
     });
-
-    if (m_previewState) {
-        connect(m_previewState, &PreviewState::changed, this, [this]() {
-            if (!isVisible()) {
-                return;
-            }
-
-            const HoveredItemInfo info = m_previewState->hoveredItem();
-            if (info.typeKey == QStringLiteral("summary") ||
-                info.typeKey == QStringLiteral("welcome") ||
-                info.typeKey == QStringLiteral("folder") ||
-                info.typeKey == QStringLiteral("shortcut") ||
-                info.typeKey == QStringLiteral("shell_folder") ||
-                info.typeKey == QStringLiteral("file") ||
-                info.typeKey == QStringLiteral("shell_item") ||
-                info.itemKind == QStringLiteral("Folder") ||
-                info.itemKind == QStringLiteral("Shell Folder") ||
-                info.itemKind == QStringLiteral("Shortcut")) {
-                applyInfo(info);
-            }
-        });
-    }
 
     applyChrome();
     setDetailValues(HoveredItemInfo());
@@ -401,6 +380,8 @@ void SummaryRenderer::applyInfo(const HoveredItemInfo& info)
     }
 
     setDetailValues(info);
+    updateGeometry();
+    update();
 }
 
 void SummaryRenderer::applyChrome()

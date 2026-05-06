@@ -15,6 +15,7 @@ public:
     ~RendererRegistry();
 
     QList<IPreviewRenderer*> renderers() const;
+    IPreviewRenderer* rendererById(const QString& rendererId) const;
     IPreviewRenderer* rendererFor(const HoveredItemInfo& info) const;
 
 private:

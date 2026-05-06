@@ -13,6 +13,7 @@ class SpaceLookIpcServer : public QObject
 public:
     explicit SpaceLookIpcServer(QObject* parent = nullptr);
     bool startListening();
+    static bool sendPreviewRequest(const QString& filePath, int timeoutMs = 500);
 
 signals:
     void previewRequested(const QString& filePath);

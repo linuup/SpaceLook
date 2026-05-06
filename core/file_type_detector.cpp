@@ -1,4 +1,6 @@
 #include "core/file_type_detector.h"
+#include "core/file_suffix_utils.h"
+#include "core/render_type_registry.h"
 
 #include <QDir>
 #include <QFileInfo>
@@ -447,6 +449,30 @@ QString normalizeShellParsingPath(const QString& filePath)
         return QStringLiteral("::") + trimmedPath;
     }
     return trimmedPath;
+}
+
+bool isUsersFilesShellFolderPath(const QString& shellPath)
+{
+    return shellPath.contains(QStringLiteral("{59031a47-3f72-44a7-89c5-5595fe6b30ee}"), Qt::CaseInsensitive);
+}
+
+QString usersFilesFolderPathForShellPath(const QString& shellPath)
+{
+    if (!isUsersFilesShellFolderPath(shellPath)) {
+        return QString();
+    }
+
+    const QString homePath = QStandardPaths::writableLocation(QStandardPaths::HomeLocation);
+    if (homePath.trimmed().isEmpty()) {
+        return QString();
+    }
+
+    const QFileInfo homeInfo(homePath);
+    if (!homeInfo.exists() || !homeInfo.isDir()) {
+        return QString();
+    }
+
+    return QDir::cleanPath(homeInfo.absoluteFilePath());
 }
 
 QString resolveShortcutTarget(const QString& shortcutPath)
@@ -992,7 +1018,6 @@ HoveredItemInfo makeFailureInfo(const QString& statusMessage,
 {
     HoveredItemInfo info;
     info.title = QStringLiteral("Space Look");
-    info.typeLabel = QStringLiteral("Lookup");
     info.statusMessage = statusMessage;
     info.windowClassName = windowClassName;
     info.sourceLabel = sourceLabel;
@@ -1001,232 +1026,46 @@ HoveredItemInfo makeFailureInfo(const QString& statusMessage,
 
 } // namespace
 
-QString FileTypeDetector::detectTypeLabel(const QString& filePath) const
-{
-    return detectTypeInfo(filePath, isShellParsingPath(filePath)).typeLabel;
-}
-
 DetectedTypeInfo FileTypeDetector::detectTypeInfo(const QString& filePath, bool shellItem) const
 {
     DetectedTypeInfo info;
     const QString trimmedPath = filePath.trimmed();
     if (trimmedPath.isEmpty()) {
         info.typeKey = QStringLiteral("welcome");
-        info.typeLabel = QStringLiteral("Welcome");
         info.typeDetails = QStringLiteral("Ready to inspect an item under the mouse cursor.");
-        info.itemKind = QStringLiteral("Empty");
+        info.rendererName = QStringLiteral("welcome");
         return info;
     }
 
     if (shellItem) {
         info.typeKey = QStringLiteral("shell_item");
-        info.typeLabel = QStringLiteral("Shell Item");
         info.typeDetails = QStringLiteral("Windows shell namespace object.");
-        info.itemKind = QStringLiteral("Shell Item");
+        info.rendererName = QStringLiteral("summary");
         return info;
     }
 
     const QFileInfo fileInfo(trimmedPath);
     if (fileInfo.isDir()) {
         info.typeKey = QStringLiteral("folder");
-        info.typeLabel = QStringLiteral("Folder");
         info.typeDetails = QStringLiteral("File system folder.");
-        info.itemKind = QStringLiteral("Folder");
+        info.rendererName = QStringLiteral("folder");
         info.isDirectory = true;
         return info;
     }
 
-    const QString suffix = fileInfo.suffix().toLower();
-    if (suffix == QStringLiteral("lnk") ||
-        suffix == QStringLiteral("url") ||
-        suffix == QStringLiteral("appref-ms")) {
-        info.typeKey = QStringLiteral("shortcut");
-        info.typeLabel = QStringLiteral("Shortcut");
-        info.typeDetails = QStringLiteral("Shortcut or link file.");
-        info.itemKind = QStringLiteral("Shortcut");
-        return info;
-    }
+    const QString suffix = FileSuffixUtils::fullSuffix(fileInfo);
+    const QStringList suffixCandidates = FileSuffixUtils::suffixCandidates(fileInfo);
 
-    if (suffix == QStringLiteral("png") ||
-        suffix == QStringLiteral("jpg") ||
-        suffix == QStringLiteral("jpeg") ||
-        suffix == QStringLiteral("bmp") ||
-        suffix == QStringLiteral("gif") ||
-        suffix == QStringLiteral("webp") ||
-        suffix == QStringLiteral("heic") ||
-        suffix == QStringLiteral("heif") ||
-        suffix == QStringLiteral("svg") ||
-        suffix == QStringLiteral("ico") ||
-        suffix == QStringLiteral("psd")) {
-        info.typeKey = QStringLiteral("image");
-        info.typeLabel = QStringLiteral("Image");
-        info.typeDetails = QStringLiteral("Image file preview category.");
-        info.itemKind = QStringLiteral("File");
-        return info;
-    }
-
-    if (suffix == QStringLiteral("mp4") ||
-        suffix == QStringLiteral("mkv") ||
-        suffix == QStringLiteral("avi") ||
-        suffix == QStringLiteral("mov") ||
-        suffix == QStringLiteral("wmv") ||
-        suffix == QStringLiteral("webm") ||
-        suffix == QStringLiteral("m4v") ||
-        suffix == QStringLiteral("mpg") ||
-        suffix == QStringLiteral("mpeg") ||
-        suffix == QStringLiteral("ts")) {
-        info.typeKey = QStringLiteral("video");
-        info.typeLabel = QStringLiteral("Video");
-        info.typeDetails = QStringLiteral("Video media file.");
-        info.itemKind = QStringLiteral("File");
-        return info;
-    }
-
-    if (suffix == QStringLiteral("mp3") ||
-        suffix == QStringLiteral("wav") ||
-        suffix == QStringLiteral("flac") ||
-        suffix == QStringLiteral("aac") ||
-        suffix == QStringLiteral("m4a") ||
-        suffix == QStringLiteral("ogg") ||
-        suffix == QStringLiteral("wma") ||
-        suffix == QStringLiteral("opus")) {
-        info.typeKey = QStringLiteral("audio");
-        info.typeLabel = QStringLiteral("Audio");
-        info.typeDetails = QStringLiteral("Audio media file.");
-        info.itemKind = QStringLiteral("File");
-        return info;
-    }
-
-    if (suffix == QStringLiteral("pdf")) {
-        info.typeKey = QStringLiteral("pdf");
-        info.typeLabel = QStringLiteral("PDF");
-        info.typeDetails = QStringLiteral("Portable document format file.");
-        info.itemKind = QStringLiteral("File");
-        return info;
-    }
-
-    if (suffix == QStringLiteral("md") ||
-        suffix == QStringLiteral("txt") ||
-        suffix == QStringLiteral("log") ||
-        suffix == QStringLiteral("json") ||
-        suffix == QStringLiteral("ini") ||
-        suffix == QStringLiteral("xml") ||
-        suffix == QStringLiteral("yaml") ||
-        suffix == QStringLiteral("yml") ||
-        suffix == QStringLiteral("toml") ||
-        suffix == QStringLiteral("conf") ||
-        suffix == QStringLiteral("config") ||
-        suffix == QStringLiteral("cfg") ||
-        suffix == QStringLiteral("props") ||
-        suffix == QStringLiteral("targets") ||
-        suffix == QStringLiteral("bat") ||
-        suffix == QStringLiteral("cmd") ||
-        suffix == QStringLiteral("ps1") ||
-        suffix == QStringLiteral("reg") ||
-        suffix == QStringLiteral("env") ||
-        suffix == QStringLiteral("gitignore") ||
-        suffix == QStringLiteral("gitattributes") ||
-        suffix == QStringLiteral("editorconfig") ||
-        suffix == QStringLiteral("gradle") ||
-        suffix == QStringLiteral("cmake") ||
-        suffix == QStringLiteral("qrc") ||
-        suffix == QStringLiteral("qss") ||
-        suffix == QStringLiteral("ui") ||
-        suffix == QStringLiteral("pri") ||
-        suffix == QStringLiteral("pro")) {
-        info.typeKey = QStringLiteral("text");
-        info.typeLabel = QStringLiteral("Text");
-        info.typeDetails = QStringLiteral("Text based document.");
-        info.itemKind = QStringLiteral("File");
-        return info;
-    }
-
-    if (suffix == QStringLiteral("c") ||
-        suffix == QStringLiteral("cc") ||
-        suffix == QStringLiteral("cpp") ||
-        suffix == QStringLiteral("cxx") ||
-        suffix == QStringLiteral("h") ||
-        suffix == QStringLiteral("hpp") ||
-        suffix == QStringLiteral("hh") ||
-        suffix == QStringLiteral("hxx") ||
-        suffix == QStringLiteral("cs") ||
-        suffix == QStringLiteral("java") ||
-        suffix == QStringLiteral("kt") ||
-        suffix == QStringLiteral("kts") ||
-        suffix == QStringLiteral("go") ||
-        suffix == QStringLiteral("rs") ||
-        suffix == QStringLiteral("swift") ||
-        suffix == QStringLiteral("m") ||
-        suffix == QStringLiteral("mm") ||
-        suffix == QStringLiteral("py") ||
-        suffix == QStringLiteral("rb") ||
-        suffix == QStringLiteral("php") ||
-        suffix == QStringLiteral("js") ||
-        suffix == QStringLiteral("jsx") ||
-        suffix == QStringLiteral("ts") ||
-        suffix == QStringLiteral("tsx") ||
-        suffix == QStringLiteral("qml") ||
-        suffix == QStringLiteral("vue") ||
-        suffix == QStringLiteral("svelte") ||
-        suffix == QStringLiteral("css") ||
-        suffix == QStringLiteral("scss") ||
-        suffix == QStringLiteral("sass") ||
-        suffix == QStringLiteral("less") ||
-        suffix == QStringLiteral("html") ||
-        suffix == QStringLiteral("htm") ||
-        suffix == QStringLiteral("sql") ||
-        suffix == QStringLiteral("sh") ||
-        suffix == QStringLiteral("bash") ||
-        suffix == QStringLiteral("zsh") ||
-        suffix == QStringLiteral("fish") ||
-        suffix == QStringLiteral("dockerfile") ||
-        suffix == QStringLiteral("makefile") ||
-        suffix == QStringLiteral("mk")) {
-        info.typeKey = QStringLiteral("code");
-        info.typeLabel = QStringLiteral("Code");
-        info.typeDetails = QStringLiteral("Source code document.");
-        info.itemKind = QStringLiteral("File");
-        return info;
-    }
-
-    if (suffix == QStringLiteral("doc") ||
-        suffix == QStringLiteral("docx") ||
-        suffix == QStringLiteral("xls") ||
-        suffix == QStringLiteral("xlsx") ||
-        suffix == QStringLiteral("ppt") ||
-        suffix == QStringLiteral("pptx")) {
-        info.typeKey = QStringLiteral("office");
-        info.typeLabel = QStringLiteral("Office");
-        info.typeDetails = QStringLiteral("Office document.");
-        info.itemKind = QStringLiteral("File");
-        return info;
-    }
-
-    if (suffix == QStringLiteral("zip") ||
-        suffix == QStringLiteral("7z") ||
-        suffix == QStringLiteral("rar") ||
-        suffix == QStringLiteral("tar") ||
-        suffix == QStringLiteral("gz") ||
-        suffix == QStringLiteral("tgz") ||
-        suffix == QStringLiteral("bz2") ||
-        suffix == QStringLiteral("tbz") ||
-        suffix == QStringLiteral("tbz2") ||
-        suffix == QStringLiteral("xz") ||
-        suffix == QStringLiteral("txz") ||
-        suffix == QStringLiteral("cab")) {
-        info.typeKey = QStringLiteral("archive");
-        info.typeLabel = QStringLiteral("Archive");
-        info.typeDetails = QStringLiteral("Compressed archive file.");
-        info.itemKind = QStringLiteral("File");
+    if (const auto detectedInfo = RenderTypeRegistry::instance().detectTypeInfoForSuffixCandidates(suffixCandidates)) {
+        info = *detectedInfo;
         return info;
     }
 
     info.typeKey = suffix.isEmpty() ? QStringLiteral("file") : suffix;
-    info.typeLabel = suffix.isEmpty() ? QStringLiteral("File") : suffix.toUpper();
     info.typeDetails = suffix.isEmpty()
         ? QStringLiteral("Generic file system file.")
         : QStringLiteral("File with extension .%1").arg(suffix);
-    info.itemKind = QStringLiteral("File");
+    info.rendererName = QStringLiteral("summary");
     return info;
 }
 
@@ -1241,16 +1080,16 @@ HoveredItemInfo FileTypeDetector::inspectPath(const QString& filePath,
         HoveredItemInfo info;
         info.title = QStringLiteral("Space Look");
         info.typeKey = QStringLiteral("welcome");
-        info.typeLabel = QStringLiteral("Welcome");
         info.typeDetails = QStringLiteral("Ready to inspect an item under the mouse cursor.");
+        info.rendererName = QStringLiteral("welcome");
         info.sourceKind = QStringLiteral("SpaceLook");
-        info.itemKind = QStringLiteral("Empty");
         info.statusMessage = QStringLiteral("Press Space to inspect the file system item under the mouse cursor.");
         return info;
     }
 
     if (isShellParsingPath(trimmedPath)) {
         const QString shellPath = normalizeShellParsingPath(trimmedPath);
+        const QString fileSystemFolderPath = usersFilesFolderPathForShellPath(shellPath);
         PIDLIST_ABSOLUTE pidl = nullptr;
         const std::wstring shellSource = shellPath.toStdWString();
         if (SUCCEEDED(SHParseDisplayName(shellSource.c_str(), nullptr, &pidl, 0, nullptr)) && pidl) {
@@ -1262,16 +1101,19 @@ HoveredItemInfo FileTypeDetector::inspectPath(const QString& filePath,
             }
 
             SFGAOF attributes = 0;
-            bool isDirectory = false;
+            bool isDirectory = !fileSystemFolderPath.isEmpty();
             IShellItem* shellItem = nullptr;
             if (SUCCEEDED(SHCreateItemFromIDList(pidl, IID_PPV_ARGS(&shellItem))) && shellItem) {
-                if (SUCCEEDED(shellItem->GetAttributes(SFGAO_FOLDER, &attributes))) {
-                    isDirectory = (attributes & SFGAO_FOLDER) != 0;
+                if (SUCCEEDED(shellItem->GetAttributes(SFGAO_FOLDER | SFGAO_FILESYSTEM, &attributes))) {
+                    const bool isFolderLike = (attributes & SFGAO_FOLDER) != 0;
+                    const bool isFileSystemItem = (attributes & SFGAO_FILESYSTEM) != 0;
+                    isDirectory = isDirectory || (isFolderLike && isFileSystemItem);
                 }
                 shellItem->Release();
             }
 
             const DetectedTypeInfo typeInfo = detectTypeInfo(shellPath, true);
+            const QString displayPath = fileSystemFolderPath.isEmpty() ? shellPath : fileSystemFolderPath;
 
             HoveredItemInfo info;
             info.valid = true;
@@ -1279,15 +1121,17 @@ HoveredItemInfo FileTypeDetector::inspectPath(const QString& filePath,
             info.isDirectory = isDirectory;
             info.title = title.isEmpty() ? shellPath : title;
             info.typeKey = isDirectory ? QStringLiteral("shell_folder") : typeInfo.typeKey;
-            info.typeLabel = isDirectory ? QStringLiteral("Shell Folder") : typeInfo.typeLabel;
             info.typeDetails = isDirectory
                 ? QStringLiteral("Windows shell namespace folder.")
                 : typeInfo.typeDetails;
+            info.rendererName = isDirectory ? QStringLiteral("folder") : typeInfo.rendererName;
             info.sourceKind = sourceLabel.trimmed().isEmpty() ? QStringLiteral("Unknown") : sourceLabel;
-            info.itemKind = isDirectory ? QStringLiteral("Shell Folder") : typeInfo.itemKind;
-            info.filePath = shellPath;
+            info.filePath = displayPath;
             info.fileName = info.title;
-            info.folderPath = QStringLiteral("Desktop");
+            info.folderPath = fileSystemFolderPath.isEmpty()
+                ? QStringLiteral("Desktop")
+                : QFileInfo(fileSystemFolderPath).absolutePath();
+            info.resolvedPath = fileSystemFolderPath;
             info.sourceLabel = sourceLabel;
             info.windowClassName = windowClassName;
             info.statusMessage = QStringLiteral("Loaded object information for a Windows shell item.");
@@ -1310,10 +1154,9 @@ HoveredItemInfo FileTypeDetector::inspectPath(const QString& filePath,
     info.isDirectory = typeInfo.isDirectory;
     info.title = fileInfo.fileName().isEmpty() ? cleanPath : fileInfo.fileName();
     info.typeKey = typeInfo.typeKey;
-    info.typeLabel = typeInfo.typeLabel;
     info.typeDetails = typeInfo.typeDetails;
+    info.rendererName = typeInfo.rendererName;
     info.sourceKind = sourceLabel.trimmed().isEmpty() ? QStringLiteral("Unknown") : sourceLabel;
-    info.itemKind = typeInfo.itemKind;
     info.filePath = cleanPath;
     info.fileName = fileInfo.fileName();
     info.folderPath = fileInfo.absolutePath();

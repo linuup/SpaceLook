@@ -1,6 +1,7 @@
 #include "renderers/document/DocumentRenderer.h"
 
 #include <algorithm>
+#include <utility>
 
 #include <QCryptographicHash>
 #include <QDebug>
@@ -14,6 +15,7 @@
 #include <QMap>
 #include <QProcess>
 #include <QRegularExpression>
+#include <QStackedWidget>
 #include <QStandardPaths>
 #include <QTextBrowser>
 #include <QTextStream>
@@ -29,6 +31,7 @@
 #include "renderers/OpenWithButton.h"
 #include "renderers/PreviewHeaderBar.h"
 #include "renderers/SelectableTitleLabel.h"
+#include "renderers/document/PreviewHandlerHost.h"
 #include "widgets/SpaceLookWindow.h"
 
 namespace {
@@ -791,6 +794,8 @@ DocumentRenderer::DocumentRenderer(QWidget* parent)
     , m_pathValueLabel(new QLabel(this))
     , m_openWithButton(new OpenWithButton(this))
     , m_statusLabel(new QLabel(this))
+    , m_contentStack(new QStackedWidget(this))
+    , m_previewHandlerHost(new PreviewHandlerHost(this))
     , m_textBrowser(new QTextBrowser(this))
 {
     setAttribute(Qt::WA_StyledBackground, true);
@@ -804,6 +809,7 @@ DocumentRenderer::DocumentRenderer(QWidget* parent)
     m_pathValueLabel->setObjectName(QStringLiteral("DocumentPathValue"));
     m_openWithButton->setObjectName(QStringLiteral("DocumentOpenWithButton"));
     m_statusLabel->setObjectName(QStringLiteral("DocumentStatus"));
+    m_contentStack->setObjectName(QStringLiteral("DocumentContentStack"));
     m_textBrowser->setObjectName(QStringLiteral("DocumentBrowser"));
 
     auto* layout = new QVBoxLayout(this);
@@ -811,7 +817,7 @@ DocumentRenderer::DocumentRenderer(QWidget* parent)
     layout->setSpacing(14);
     layout->addWidget(m_headerRow);
     layout->addWidget(m_statusLabel);
-    layout->addWidget(m_textBrowser, 1);
+    layout->addWidget(m_contentStack, 1);
 
     auto* headerLayout = new QHBoxLayout(m_headerRow);
     headerLayout->setContentsMargins(0, 0, 0, 0);
@@ -847,6 +853,9 @@ DocumentRenderer::DocumentRenderer(QWidget* parent)
     });
     m_textBrowser->setOpenExternalLinks(false);
     m_statusLabel->hide();
+    m_contentStack->addWidget(m_previewHandlerHost);
+    m_contentStack->addWidget(m_textBrowser);
+    m_contentStack->setCurrentWidget(m_textBrowser);
 
     connect(m_titleLabel, &SelectableTitleLabel::copyFeedbackRequested, this, [this](const QString& message) {
         showStatusMessage(message);
@@ -870,11 +879,21 @@ QWidget* DocumentRenderer::widget()
     return this;
 }
 
+bool DocumentRenderer::reportsLoadingState() const
+{
+    return true;
+}
+
+void DocumentRenderer::setLoadingStateCallback(std::function<void(bool)> callback)
+{
+    m_loadingStateCallback = std::move(callback);
+}
+
 void DocumentRenderer::load(const HoveredItemInfo& info)
 {
     m_info = info;
-    ++m_loadRequestId;
-    const quint64 requestId = m_loadRequestId;
+    const PreviewLoadGuard::Token loadToken = m_loadGuard.begin(info.filePath);
+    notifyLoadingState(true);
     qDebug().noquote() << QStringLiteral("[SpaceLookRender] DocumentRenderer load path=\"%1\" typeKey=%2")
         .arg(info.filePath, info.typeKey);
 
@@ -884,27 +903,58 @@ void DocumentRenderer::load(const HoveredItemInfo& info)
     m_iconLabel->setPixmap(typeIcon.pixmap(128, 128));
     m_pathValueLabel->setText(info.filePath.trimmed().isEmpty() ? QStringLiteral("(Unavailable)") : info.filePath);
     m_openWithButton->setTargetContext(info.filePath, info.typeKey);
-    m_statusLabel->setText(QStringLiteral("Parsing Office document..."));
+    m_textBrowser->clear();
+    m_previewHandlerHost->unload();
+
+    m_contentStack->setCurrentWidget(m_previewHandlerHost);
+    QString handlerError;
+    if (m_previewHandlerHost->openFile(info.filePath, &handlerError)) {
+        m_statusLabel->clear();
+        m_statusLabel->hide();
+        notifyLoadingState(false);
+        return;
+    }
+
+    qDebug().noquote() << QStringLiteral("[SpaceLookRender] Windows Preview Handler unavailable, falling back to Qt parser path=\"%1\" reason=\"%2\"")
+        .arg(info.filePath, handlerError);
+    loadWithQtParser(info, loadToken, handlerError);
+}
+
+void DocumentRenderer::loadWithQtParser(const HoveredItemInfo& info, const PreviewLoadGuard::Token& loadToken, const QString& handlerError)
+{
+    m_contentStack->setCurrentWidget(m_textBrowser);
+    const QString loadingMessage = handlerError.trimmed().isEmpty()
+        ? QStringLiteral("Parsing Office document...")
+        : QStringLiteral("Windows Preview Handler unavailable. Falling back to built in parser...");
+    m_statusLabel->setText(loadingMessage);
     m_statusLabel->show();
-    m_textBrowser->setHtml(loadingHtmlPage(fileTitleForPreview(info), QStringLiteral("Parsing Office document...")));
+    m_textBrowser->setHtml(loadingHtmlPage(fileTitleForPreview(info), loadingMessage));
 
     auto* watcher = new QFutureWatcher<OfficePreviewResult>(this);
-    connect(watcher, &QFutureWatcher<OfficePreviewResult>::finished, this, [this, watcher, requestId, filePath = info.filePath]() {
+    connect(watcher, &QFutureWatcher<OfficePreviewResult>::finished, this, [this, watcher, loadToken, handlerError]() {
         const OfficePreviewResult preview = watcher->result();
         watcher->deleteLater();
 
-        if (requestId != m_loadRequestId || m_info.filePath != filePath) {
+        if (!m_loadGuard.isCurrent(loadToken, m_info.filePath)) {
             qDebug().noquote() << QStringLiteral("[SpaceLookRender] DocumentRenderer discarded stale async result path=\"%1\"")
-                .arg(filePath);
+                .arg(loadToken.path);
             return;
         }
 
         if (!preview.statusMessage.trimmed().isEmpty()) {
-            m_statusLabel->setText(preview.statusMessage);
+            const QString statusText = handlerError.trimmed().isEmpty()
+                ? preview.statusMessage
+                : QStringLiteral("%1 %2").arg(handlerError.trimmed(), preview.statusMessage);
+            m_statusLabel->setText(statusText.trimmed());
             m_statusLabel->show();
         } else {
-            m_statusLabel->clear();
-            m_statusLabel->hide();
+            if (handlerError.trimmed().isEmpty()) {
+                m_statusLabel->clear();
+                m_statusLabel->hide();
+            } else {
+                m_statusLabel->setText(handlerError.trimmed());
+                m_statusLabel->show();
+            }
         }
 
         if (preview.success) {
@@ -914,6 +964,7 @@ void DocumentRenderer::load(const HoveredItemInfo& info)
                 "<div class=\"card\"><h2>Preview Unavailable</h2>"
                 "<p>The Office document could not be parsed by the current Qt based preview pipeline.</p></div>")));
         }
+        notifyLoadingState(false);
     });
     watcher->setFuture(QtConcurrent::run([filePath = info.filePath]() {
         return buildOfficePreview(filePath);
@@ -922,12 +973,21 @@ void DocumentRenderer::load(const HoveredItemInfo& info)
 
 void DocumentRenderer::unload()
 {
-    ++m_loadRequestId;
+    m_loadGuard.cancel();
+    notifyLoadingState(false);
+    m_previewHandlerHost->unload();
     m_pathValueLabel->clear();
     m_openWithButton->setTargetContext(QString(), QString());
     showStatusMessage(QString());
     m_info = HoveredItemInfo();
     m_textBrowser->clear();
+}
+
+void DocumentRenderer::notifyLoadingState(bool loading)
+{
+    if (m_loadingStateCallback) {
+        m_loadingStateCallback(loading);
+    }
 }
 
 void DocumentRenderer::applyChrome()
@@ -996,6 +1056,10 @@ void DocumentRenderer::applyChrome()
         "  border: 1px solid rgba(164, 193, 229, 0.95);"
         "  border-radius: 12px;"
         "  padding: 10px 14px;"
+        "}"
+        "#DocumentContentStack {"
+        "  background: transparent;"
+        "  border: none;"
         "}"
         "#DocumentBrowser {"
         "  background: #f4f7fb;"

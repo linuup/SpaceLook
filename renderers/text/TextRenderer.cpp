@@ -1,12 +1,15 @@
 #include "renderers/text/TextRenderer.h"
 
 #include <QAbstractTextDocumentLayout>
-#include <QFile>
 #include <QDebug>
+#include <QFile>
+#include <QFileInfo>
 #include <QFutureWatcher>
 #include <QFrame>
 #include <QHBoxLayout>
 #include <QIcon>
+#include <QJsonDocument>
+#include <QJsonParseError>
 #include <QLabel>
 #include <QPainter>
 #include <QPaintEvent>
@@ -19,13 +22,16 @@
 #include <QTextBlock>
 #include <QToolButton>
 #include <QVBoxLayout>
+#include <QtXml/QDomDocument>
 #include <QtConcurrent/QtConcurrent>
 
 #include "renderers/FileTypeIconResolver.h"
 #include "renderers/FluentIconFont.h"
+#include "renderers/ModeSwitchButton.h"
 #include "renderers/OpenWithButton.h"
 #include "renderers/PreviewHeaderBar.h"
 #include "renderers/SelectableTitleLabel.h"
+#include "core/preview_state.h"
 #include "widgets/SpaceLookWindow.h"
 
 namespace {
@@ -38,6 +44,54 @@ struct TextLoadResult
     QString statusMessage;
     bool success = false;
 };
+
+bool isStructuredOverrideSuffix(const QString& filePath)
+{
+    const QString suffix = QFileInfo(filePath).suffix().trimmed().toLower();
+    return suffix == QStringLiteral("json")
+        || suffix == QStringLiteral("xml")
+        || suffix == QStringLiteral("yaml")
+        || suffix == QStringLiteral("yml");
+}
+
+QString formattedJsonPreviewText(const QString& text)
+{
+    QJsonParseError parseError;
+    const QJsonDocument document = QJsonDocument::fromJson(text.toUtf8(), &parseError);
+    if (parseError.error != QJsonParseError::NoError || document.isNull()) {
+        return text;
+    }
+
+    return QString::fromUtf8(document.toJson(QJsonDocument::Indented));
+}
+
+QString formattedXmlPreviewText(const QString& text)
+{
+    QDomDocument document;
+    QString errorMessage;
+    int errorLine = 0;
+    int errorColumn = 0;
+    if (!document.setContent(text, &errorMessage, &errorLine, &errorColumn)) {
+        Q_UNUSED(errorMessage);
+        Q_UNUSED(errorLine);
+        Q_UNUSED(errorColumn);
+        return text;
+    }
+
+    return document.toString(2);
+}
+
+QString formattedStructuredPreviewText(const QString& filePath, const QString& text)
+{
+    const QString suffix = QFileInfo(filePath).suffix().trimmed().toLower();
+    if (suffix == QStringLiteral("json")) {
+        return formattedJsonPreviewText(text);
+    }
+    if (suffix == QStringLiteral("xml")) {
+        return formattedXmlPreviewText(text);
+    }
+    return text;
+}
 
 class LineNumberTextEdit;
 
@@ -213,7 +267,7 @@ TextLoadResult loadTextPreviewContent(const QString& filePath)
 
 }
 
-TextRenderer::TextRenderer(QWidget* parent)
+TextRenderer::TextRenderer(PreviewState* previewState, QWidget* parent)
     : QWidget(parent)
     , m_headerRow(new QWidget(this))
     , m_iconLabel(new QLabel(this))
@@ -223,12 +277,16 @@ TextRenderer::TextRenderer(QWidget* parent)
     , m_pathTitleLabel(new QLabel(this))
     , m_pathValueLabel(new QLabel(this))
     , m_openWithButton(new OpenWithButton(this))
+    , m_contentSection(new QWidget(this))
+    , m_statusRow(new QWidget(this))
     , m_statusLabel(new QLabel(this))
+    , m_modeSwitchButton(new ModeSwitchButton(this))
     , m_contentStack(new QStackedWidget(this))
     , m_loadingCard(new QWidget(this))
     , m_loadingTitleLabel(new QLabel(this))
     , m_loadingMessageLabel(new QLabel(this))
     , m_textEdit(new LineNumberTextEdit(this))
+    , m_previewState(previewState)
 {
     setAttribute(Qt::WA_StyledBackground, true);
     setObjectName(QStringLiteral("TextRendererRoot"));
@@ -240,7 +298,10 @@ TextRenderer::TextRenderer(QWidget* parent)
     m_pathTitleLabel->setObjectName(QStringLiteral("TextPathTitle"));
     m_pathValueLabel->setObjectName(QStringLiteral("TextPathValue"));
     m_openWithButton->setObjectName(QStringLiteral("TextOpenWithButton"));
+    m_contentSection->setObjectName(QStringLiteral("TextContentSection"));
+    m_statusRow->setObjectName(QStringLiteral("TextStatusRow"));
     m_statusLabel->setObjectName(QStringLiteral("TextStatus"));
+    m_modeSwitchButton->setObjectName(QStringLiteral("TextModeSwitchButton"));
     m_contentStack->setObjectName(QStringLiteral("TextContentStack"));
     m_loadingCard->setObjectName(QStringLiteral("TextLoadingCard"));
     m_loadingTitleLabel->setObjectName(QStringLiteral("TextLoadingTitle"));
@@ -251,13 +312,18 @@ TextRenderer::TextRenderer(QWidget* parent)
     layout->setContentsMargins(12, 0, 12, 12);
     layout->setSpacing(14);
     layout->addWidget(m_headerRow);
-    layout->addWidget(m_statusLabel);
-    layout->addWidget(m_contentStack, 1);
+    layout->addWidget(m_contentSection, 1);
 
     auto* headerLayout = new QHBoxLayout(m_headerRow);
     headerLayout->setContentsMargins(0, 0, 0, 0);
     headerLayout->setSpacing(12);
-    auto* titleBlock = new PreviewHeaderBar(m_iconLabel, m_titleLabel, m_pathRow, m_openWithButton, m_headerRow);
+    auto* trailingActions = new QWidget(m_headerRow);
+    auto* trailingActionsLayout = new QHBoxLayout(trailingActions);
+    trailingActionsLayout->setContentsMargins(0, 0, 0, 0);
+    trailingActionsLayout->setSpacing(12);
+    trailingActionsLayout->addWidget(m_openWithButton, 0, Qt::AlignVCenter);
+
+    auto* titleBlock = new PreviewHeaderBar(m_iconLabel, m_titleLabel, m_pathRow, trailingActions, m_headerRow);
     titleBlock->setOpenActionGlyph(FluentIconFont::glyph(0xE70F), QStringLiteral("Edit"));
     headerLayout->addWidget(titleBlock->contentWidget(), 1);
 
@@ -266,9 +332,27 @@ TextRenderer::TextRenderer(QWidget* parent)
     pathLayout->setSpacing(8);
     pathLayout->addWidget(m_pathValueLabel, 1);
 
+    auto* contentSectionLayout = new QVBoxLayout(m_contentSection);
+    contentSectionLayout->setContentsMargins(0, 0, 0, 0);
+    contentSectionLayout->setSpacing(12);
+    contentSectionLayout->addWidget(m_contentStack, 1);
+    contentSectionLayout->addWidget(m_statusRow, 0);
+
+    auto* statusLayout = new QHBoxLayout(m_statusRow);
+    statusLayout->setContentsMargins(0, 0, 0, 0);
+    statusLayout->setSpacing(12);
+    statusLayout->addWidget(m_statusLabel, 1);
+    statusLayout->addWidget(m_modeSwitchButton, 0, Qt::AlignRight | Qt::AlignVCenter);
+
     m_textEdit->setReadOnly(true);
     m_textEdit->setLineWrapMode(QPlainTextEdit::NoWrap);
     m_textEdit->setFrameShape(QFrame::NoFrame);
+    m_modeSwitchButton->hide();
+    QFont modeFont;
+    modeFont.setFamily(QStringLiteral("Segoe UI"));
+    modeFont.setPixelSize(12);
+    modeFont.setWeight(QFont::DemiBold);
+    m_modeSwitchButton->setMenuFont(modeFont);
     auto* loadingLayout = new QVBoxLayout(m_loadingCard);
     loadingLayout->setContentsMargins(24, 24, 24, 24);
     loadingLayout->setSpacing(10);
@@ -306,6 +390,20 @@ TextRenderer::TextRenderer(QWidget* parent)
     connect(m_titleLabel, &SelectableTitleLabel::copyFeedbackRequested, this, [this](const QString& message) {
         showStatusMessage(message);
     });
+    m_modeSwitchButton->setModeChangedCallback([this](const QString& rendererId) {
+        if (!m_previewState) {
+            return;
+        }
+
+        const QString filePath = m_info.filePath.trimmed();
+        if (!isStructuredOverrideSuffix(filePath)) {
+            return;
+        }
+        m_previewState->setRendererOverride(rendererId);
+        if (SpaceLookWindow* previewWindow = qobject_cast<SpaceLookWindow*>(window())) {
+            previewWindow->refreshCurrentPreview();
+        }
+    });
 
     applyChrome();
 }
@@ -325,11 +423,21 @@ QWidget* TextRenderer::widget()
     return this;
 }
 
+bool TextRenderer::reportsLoadingState() const
+{
+    return true;
+}
+
+void TextRenderer::setLoadingStateCallback(std::function<void(bool)> callback)
+{
+    m_loadingStateCallback = std::move(callback);
+}
+
 void TextRenderer::load(const HoveredItemInfo& info)
 {
     m_info = info;
-    ++m_loadRequestId;
-    const quint64 requestId = m_loadRequestId;
+    const PreviewLoadGuard::Token loadToken = m_loadGuard.begin(info.filePath);
+    notifyLoadingState(true);
     qDebug().noquote() << QStringLiteral("[SpaceLookRender] TextRenderer load path=\"%1\"").arg(info.filePath);
     m_titleLabel->setText(info.title.isEmpty() ? QStringLiteral("Text Preview") : info.title);
     m_titleLabel->setCopyText(m_titleLabel->text());
@@ -337,6 +445,7 @@ void TextRenderer::load(const HoveredItemInfo& info)
     m_iconLabel->setPixmap(typeIcon.pixmap(128, 128));
     m_pathValueLabel->setText(info.filePath.trimmed().isEmpty() ? QStringLiteral("(Unavailable)") : info.filePath);
     m_openWithButton->setTargetContext(info.filePath, info.typeKey);
+    updateModeSelector(info.filePath);
     m_loadingTitleLabel->setText(QStringLiteral("Preparing text preview"));
     m_loadingMessageLabel->setText(QStringLiteral("The preview shell is ready. Content is loading in the background."));
     m_contentStack->setCurrentWidget(m_loadingCard);
@@ -345,26 +454,28 @@ void TextRenderer::load(const HoveredItemInfo& info)
     m_statusLabel->show();
 
     auto* watcher = new QFutureWatcher<TextLoadResult>(this);
-    connect(watcher, &QFutureWatcher<TextLoadResult>::finished, this, [this, watcher, requestId, filePath = info.filePath]() {
+    connect(watcher, &QFutureWatcher<TextLoadResult>::finished, this, [this, watcher, loadToken]() {
         const TextLoadResult result = watcher->result();
         watcher->deleteLater();
 
-        if (requestId != m_loadRequestId || m_info.filePath != filePath) {
+        if (!m_loadGuard.isCurrent(loadToken, m_info.filePath)) {
             qDebug().noquote() << QStringLiteral("[SpaceLookRender] TextRenderer discarded stale async result path=\"%1\"")
-                .arg(filePath);
+                .arg(loadToken.path);
             return;
         }
 
         if (!result.success) {
-            qDebug().noquote() << QStringLiteral("[SpaceLookRender] TextRenderer failed to open: %1").arg(filePath);
+            qDebug().noquote() << QStringLiteral("[SpaceLookRender] TextRenderer failed to open: %1").arg(loadToken.path);
             m_statusLabel->setText(result.statusMessage);
             m_statusLabel->show();
             m_textEdit->setPlainText(result.text);
             m_contentStack->setCurrentWidget(m_textEdit);
+            notifyLoadingState(false);
             return;
         }
 
-        m_textEdit->setPlainText(result.text);
+        const QString previewText = formattedStructuredPreviewText(loadToken.path, result.text);
+        m_textEdit->setPlainText(previewText);
         m_contentStack->setCurrentWidget(m_textEdit);
         if (result.statusMessage.trimmed().isEmpty()) {
             m_statusLabel->clear();
@@ -375,8 +486,9 @@ void TextRenderer::load(const HoveredItemInfo& info)
         }
 
         qDebug().noquote() << QStringLiteral("[SpaceLookRender] TextRenderer loaded async chars=%1 path=\"%2\"")
-            .arg(result.text.size())
-            .arg(filePath);
+            .arg(previewText.size())
+            .arg(loadToken.path);
+        notifyLoadingState(false);
     });
     watcher->setFuture(QtConcurrent::run([filePath = info.filePath]() {
         return loadTextPreviewContent(filePath);
@@ -385,7 +497,8 @@ void TextRenderer::load(const HoveredItemInfo& info)
 
 void TextRenderer::unload()
 {
-    ++m_loadRequestId;
+    m_loadGuard.cancel();
+    notifyLoadingState(false);
     m_textEdit->clear();
     m_contentStack->setCurrentWidget(m_loadingCard);
     m_pathValueLabel->clear();
@@ -393,6 +506,13 @@ void TextRenderer::unload()
     m_statusLabel->clear();
     m_statusLabel->hide();
     m_info = HoveredItemInfo();
+}
+
+void TextRenderer::notifyLoadingState(bool loading)
+{
+    if (m_loadingStateCallback) {
+        m_loadingStateCallback(loading);
+    }
 }
 
 void TextRenderer::showStatusMessage(const QString& message)
@@ -411,6 +531,20 @@ void TextRenderer::showStatusMessage(const QString& message)
             label->hide();
         }
     });
+}
+
+void TextRenderer::updateModeSelector(const QString& filePath)
+{
+    const bool supportsStructuredToggle = isStructuredOverrideSuffix(filePath);
+    m_modeSwitchButton->setVisible(supportsStructuredToggle);
+    if (!supportsStructuredToggle) {
+        return;
+    }
+
+    const QString currentRenderer = m_previewState && !m_previewState->rendererOverride().trimmed().isEmpty()
+        ? m_previewState->rendererOverride()
+        : QStringLiteral("text");
+    m_modeSwitchButton->setCurrentModeId(currentRenderer);
 }
 
 void TextRenderer::applyChrome()
@@ -472,6 +606,42 @@ void TextRenderer::applyChrome()
         "  min-width: 22px;"
         "  padding-left: 5px;"
         "  padding-right: 5px;"
+        "}"
+        "#TextModeSwitchButton QToolButton {"
+        "  background: rgba(238, 244, 252, 0.96);"
+        "  color: #17324b;"
+        "  border: 1px solid rgba(193, 208, 224, 0.95);"
+        "  padding: 3px 8px;"
+        "  min-height: 24px;"
+        "}"
+        "#TextModeSwitchButton QToolButton:hover {"
+        "  background: rgba(245, 249, 255, 1.0);"
+        "}"
+        "#TextModeSwitchButton QToolButton:pressed {"
+        "  background: rgba(224, 234, 246, 1.0);"
+        "}"
+        "#TextModeSwitchButton #ModeSwitchPrimaryButton {"
+        "  border-top-left-radius: 10px;"
+        "  border-bottom-left-radius: 10px;"
+        "  border-top-right-radius: 0px;"
+        "  border-bottom-right-radius: 0px;"
+        "  min-width: 46px;"
+        "}"
+        "#TextModeSwitchButton #ModeSwitchExpandButton {"
+        "  border-left: none;"
+        "  border-top-left-radius: 0px;"
+        "  border-bottom-left-radius: 0px;"
+        "  border-top-right-radius: 10px;"
+        "  border-bottom-right-radius: 10px;"
+        "  min-width: 20px;"
+        "  padding-left: 5px;"
+        "  padding-right: 5px;"
+        "}"
+        "#TextStatusRow {"
+        "  background: transparent;"
+        "}"
+        "#TextContentSection {"
+        "  background: transparent;"
         "}"
         "#TextStatus {"
         "  color: #27568b;"

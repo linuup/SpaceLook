@@ -9,10 +9,9 @@ struct HoveredItemInfo
     bool isDirectory = false;
     QString title;
     QString typeKey;
-    QString typeLabel;
     QString typeDetails;
+    QString rendererName;
     QString sourceKind;
-    QString itemKind;
     QString filePath;
     QString fileName;
     QString folderPath;

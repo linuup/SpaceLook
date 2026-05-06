@@ -661,21 +661,27 @@ void PreviewCapsuleMenu::updateToolbarRegionMetrics()
         SpaceLookUiSettings::instance().menuPlacement() == 3;
 
     if (verticalMenu) {
-        m_toolbar->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Expanding);
+        m_toolbar->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
         m_toolbar->setMinimumWidth(regionWidth);
         m_toolbar->setMaximumWidth(regionWidth);
-        m_toolbar->setMinimumHeight(0);
-        m_toolbar->setMaximumHeight(QWIDGETSIZE_MAX);
+        m_toolbar->setMinimumHeight(regionHeight);
+        m_toolbar->setMaximumHeight(regionHeight);
+        setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
         setMinimumWidth(regionWidth);
         setMaximumWidth(regionWidth);
+        setMinimumHeight(regionHeight);
+        setMaximumHeight(regionHeight);
         return;
     }
 
-    m_toolbar->setSizePolicy(QSizePolicy::Maximum, QSizePolicy::Fixed);
+    m_toolbar->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
     m_toolbar->setMinimumHeight(regionHeight);
     m_toolbar->setMaximumHeight(regionHeight);
     m_toolbar->setMinimumWidth(regionWidth);
     m_toolbar->setMaximumWidth(regionWidth);
+    setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
+    setMinimumWidth(regionWidth);
+    setMaximumWidth(regionWidth);
     setMinimumHeight(regionHeight);
     setMaximumHeight(regionHeight);
 }

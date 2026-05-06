@@ -27,23 +27,30 @@ PreviewHeaderBar::PreviewHeaderBar(QWidget* leadingWidget,
 
     m_contentRow->setObjectName(QStringLiteral("PreviewTitleContentRow"));
     m_contentRow->setAttribute(Qt::WA_StyledBackground, true);
+    m_contentRow->setFixedHeight(82);
     auto* contentLayout = new QHBoxLayout(m_contentRow);
     contentLayout->setContentsMargins(0, 0, 0, 0);
     contentLayout->setSpacing(12);
 
     if (m_leadingWidget) {
-        contentLayout->addWidget(m_leadingWidget, 0, Qt::AlignTop);
+        auto* leadingWrap = new QWidget(m_contentRow);
+        auto* leadingLayout = new QVBoxLayout(leadingWrap);
+        leadingLayout->setContentsMargins(0, 6, 0, 0);
+        leadingLayout->setSpacing(0);
+        leadingLayout->addWidget(m_leadingWidget, 0, Qt::AlignTop);
+        leadingLayout->addStretch(1);
+        contentLayout->addWidget(leadingWrap, 0, Qt::AlignTop);
     }
 
-    int iconHeight = 72;
+    int iconHeight = 82;
     if (m_leadingWidget) {
-        iconHeight = qMax(iconHeight, m_leadingWidget->sizeHint().height());
+        iconHeight = qMax(iconHeight, m_leadingWidget->sizeHint().height() + 10);
     }
 
     m_textColumn->setObjectName(QStringLiteral("PreviewTitleTextColumn"));
     m_textColumn->setAttribute(Qt::WA_StyledBackground, true);
     m_textColumn->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
-    m_textColumn->setFixedHeight(iconHeight);
+    m_textColumn->setFixedHeight(82);
     auto* textColumnLayout = new QVBoxLayout(m_textColumn);
     textColumnLayout->setContentsMargins(0, 0, 0, 0);
     textColumnLayout->setSpacing(0);
@@ -75,7 +82,7 @@ PreviewHeaderBar::PreviewHeaderBar(QWidget* leadingWidget,
         m_trailingColumn = new QWidget(m_contentRow);
         m_trailingColumn->setObjectName(QStringLiteral("PreviewTrailingColumn"));
         m_trailingColumn->setAttribute(Qt::WA_StyledBackground, true);
-        m_trailingColumn->setFixedHeight(iconHeight);
+        m_trailingColumn->setFixedHeight(82);
         auto* trailingLayout = new QVBoxLayout(m_trailingColumn);
         trailingLayout->setContentsMargins(0, 0, 0, 0);
         trailingLayout->addStretch(1);

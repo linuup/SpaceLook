@@ -1,6 +1,7 @@
 <RCC>
     <qresource prefix="/icons">
     <file>icon.png</file>
+    <file>icon.ico</file>
     </qresource>
     <qresource prefix="/SPACELOOK">
     <file alias="font/SegoeFluentIcons.ttf">Segoe Fluent Icons.ttf</file>
@@ -9,6 +10,7 @@
     <file alias="icon/pushpin.svg">pushpin.svg</file>
     <file alias="icon/voice.svg">voice.svg</file>
     <file alias="icon/mute.svg">mute.svg</file>
+    <file alias="image/welcome-hero.png">welcome-hero.png</file>
     <file alias="file-icon/apk.svg">file-icon/apk.svg</file>
     <file alias="file-icon/apk_1.svg">file-icon/apk_1.svg</file>
     <file alias="file-icon/code.svg">file-icon/code.svg</file>

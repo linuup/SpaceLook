@@ -3,10 +3,13 @@
 #include <QWidget>
 #include <QPoint>
 
+#include "renderers/PreviewLoadGuard.h"
+
 struct HoveredItemInfo;
 class PreviewState;
 class PreviewHost;
 class PreviewCapsuleMenu;
+class QBoxLayout;
 class QSystemTrayIcon;
 class QMenu;
 
@@ -47,34 +50,43 @@ protected:
     void mouseMoveEvent(QMouseEvent* event) override;
     void mouseReleaseEvent(QMouseEvent* event) override;
     void resizeEvent(QResizeEvent* event) override;
+    bool nativeEvent(const QByteArray& eventType, void* message, long* result) override;
 
 private:
+    void applyMenuPlacement();
     void applyWindowChromeStyle();
     void applyTaskbarVisibility();
     void applyPerformanceMode();
+    void applyRoundedWindowMask();
     void ensureTrayIcon();
     void updateTrayVisibility();
     bool isDocumentPreview(const HoveredItemInfo& info) const;
     bool isLargeContentPreview(const HoveredItemInfo& info) const;
     bool isMediumContentPreview(const HoveredItemInfo& info) const;
+    bool isWelcomePreview(const HoveredItemInfo& info) const;
     bool isCompactSummaryPreview(const HoveredItemInfo& info) const;
     bool supportsExpandedPreview(const HoveredItemInfo& info) const;
+    bool canManuallyResizeCurrentPreview() const;
     void applyPreferredSizeForPreview(const HoveredItemInfo& info);
     void applyExpandedPreviewSize(const HoveredItemInfo& info);
     void installSpaceHook();
     void uninstallSpaceHook();
     Qt::Edges resizeEdgesForPosition(const QPoint& localPos) const;
     void updateCursorForPosition(const QPoint& localPos);
+    bool shouldStartDragFromActiveHeader(const QPoint& localPos) const;
     QString currentPreviewPath() const;
 
     QWidget* m_container = nullptr;
     QWidget* m_menuRegion = nullptr;
     QWidget* m_surface = nullptr;
+    QBoxLayout* m_containerLayout = nullptr;
+    QBoxLayout* m_menuLayout = nullptr;
     PreviewHost* m_previewHost = nullptr;
     PreviewCapsuleMenu* m_menuBar = nullptr;
     PreviewState* m_previewState = nullptr;
     bool m_alwaysOnTop = false;
     bool m_expandedPreview = false;
+    PreviewLoadGuard m_previewGuard;
     bool m_suppressPreviewStopOnHide = false;
     bool m_draggingWindow = false;
     bool m_resizingWindow = false;

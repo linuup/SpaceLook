@@ -1,14 +1,19 @@
 #pragma once
 
+#include <functional>
+
 #include <QtGlobal>
 #include <QWidget>
 
 #include "core/hovered_item_info.h"
 #include "renderers/IPreviewRenderer.h"
+#include "renderers/PreviewLoadGuard.h"
 
 class QLabel;
 class OpenWithButton;
+class PreviewHandlerHost;
 class SelectableTitleLabel;
+class QStackedWidget;
 class QTextBrowser;
 class QWidget;
 
@@ -24,13 +29,18 @@ public:
     QWidget* widget() override;
     void load(const HoveredItemInfo& info) override;
     void unload() override;
+    bool reportsLoadingState() const override;
+    void setLoadingStateCallback(std::function<void(bool)> callback) override;
 
 private:
     void applyChrome();
     void showStatusMessage(const QString& message);
+    void notifyLoadingState(bool loading);
+    void loadWithQtParser(const HoveredItemInfo& info, const PreviewLoadGuard::Token& loadToken, const QString& handlerError);
 
     HoveredItemInfo m_info;
-    quint64 m_loadRequestId = 0;
+    PreviewLoadGuard m_loadGuard;
+    std::function<void(bool)> m_loadingStateCallback;
     QWidget* m_headerRow = nullptr;
     QLabel* m_iconLabel = nullptr;
     SelectableTitleLabel* m_titleLabel = nullptr;
@@ -40,5 +50,7 @@ private:
     QLabel* m_pathValueLabel = nullptr;
     OpenWithButton* m_openWithButton = nullptr;
     QLabel* m_statusLabel = nullptr;
+    QStackedWidget* m_contentStack = nullptr;
+    PreviewHandlerHost* m_previewHandlerHost = nullptr;
     QTextBrowser* m_textBrowser = nullptr;
 };

@@ -20,24 +20,19 @@ QString PreviewState::typeKey() const
     return m_info.typeKey;
 }
 
-QString PreviewState::typeLabel() const
-{
-    return m_info.typeLabel;
-}
-
 QString PreviewState::typeDetails() const
 {
     return m_info.typeDetails;
 }
 
+QString PreviewState::rendererName() const
+{
+    return m_info.rendererName;
+}
+
 QString PreviewState::sourceKind() const
 {
     return m_info.sourceKind;
-}
-
-QString PreviewState::itemKind() const
-{
-    return m_info.itemKind;
 }
 
 QString PreviewState::filePath() const
@@ -75,6 +70,11 @@ QString PreviewState::statusMessage() const
     return m_info.statusMessage;
 }
 
+QString PreviewState::rendererOverride() const
+{
+    return m_rendererOverride;
+}
+
 bool PreviewState::hasItem() const
 {
     return m_info.valid;
@@ -93,5 +93,26 @@ bool PreviewState::isDirectory() const
 void PreviewState::setHoveredItem(const HoveredItemInfo& info)
 {
     m_info = info;
+    emit changed();
+}
+
+void PreviewState::setRendererOverride(const QString& rendererId)
+{
+    const QString normalized = rendererId.trimmed().toLower();
+    if (m_rendererOverride == normalized) {
+        return;
+    }
+
+    m_rendererOverride = normalized;
+    emit changed();
+}
+
+void PreviewState::clearRendererOverride()
+{
+    if (m_rendererOverride.isEmpty()) {
+        return;
+    }
+
+    m_rendererOverride.clear();
     emit changed();
 }

@@ -1,0 +1,47 @@
+#pragma once
+
+#include <QWidget>
+
+struct ICoreWebView2;
+struct ICoreWebView2Controller;
+struct ICoreWebView2Environment;
+
+class WebView2HtmlView : public QWidget
+{
+    Q_OBJECT
+
+public:
+    explicit WebView2HtmlView(QWidget* parent = nullptr);
+    ~WebView2HtmlView() override;
+
+    bool setDocumentHtml(const QString& html, const QString& filePath, QString* errorMessage);
+    void clearDocument();
+    QString lastError() const;
+
+    static QString runtimeDownloadUrl();
+
+signals:
+    void documentLoaded();
+    void unavailable(const QString& message);
+
+protected:
+    void resizeEvent(QResizeEvent* event) override;
+    void showEvent(QShowEvent* event) override;
+
+private:
+    bool ensureRuntimeAvailable(QString* errorMessage) const;
+    bool ensureInitializing(QString* errorMessage);
+    void navigatePendingHtml();
+    void updateControllerBounds();
+    void setLastError(const QString& message);
+
+    ICoreWebView2Environment* m_environment = nullptr;
+    ICoreWebView2Controller* m_controller = nullptr;
+    ICoreWebView2* m_webView = nullptr;
+    QString m_pendingHtml;
+    QString m_pendingFilePath;
+    QString m_lastError;
+    bool m_initializing = false;
+    bool m_ready = false;
+    bool m_comInitialized = false;
+};

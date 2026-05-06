@@ -7,7 +7,7 @@ Rectangle {
     id: root
     width: 1024
     height: 720
-    color: "#edf3fb"
+    color: "#f5f8fb"
 
     property var resolvedUiSettings: fallbackUiSettings
     property int activeNavIndex: 0
@@ -18,25 +18,20 @@ Rectangle {
                                     ? iconFontLoader.name
                                     : "Segoe Fluent Icons"
 
-    property color pageBackgroundTop: "#f7fbff"
-    property color pageBackgroundBottom: "#eaf2fb"
-    property color shellColor: "#fbfdff"
-    property color shellBorderColor: "#dbe6f3"
-    property color titleBarColor: "#f9fbfe"
-    property color navBarColor: "#f8fbff"
+    property color inkColor: "#172331"
+    property color mutedInkColor: "#647386"
+    property color faintInkColor: "#91a0b2"
+    property color shellColor: "#f8fbfd"
+    property color sidebarColor: "#edf5f7"
     property color cardColor: "#ffffff"
-    property color cardBorderColor: "#d9e4f1"
-    property color cardShadowColor: "#17324f14"
-    property color accentColor: "#0078d4"
-    property color accentSoftColor: "#e7f2fd"
-    property color textColor: "#18293d"
-    property color secondaryTextColor: "#66788c"
-    property color dividerColor: "#e6edf5"
-    property color outlineColor: "#c8d5e4"
-    property color hoverColor: "#eff5fc"
-    property color pressedColor: "#e2ebf7"
-    property color destructiveHoverColor: "#d13438"
-    property color destructivePressedColor: "#b92f33"
+    property color cardHoverColor: "#f7fbfd"
+    property color borderColor: "#d9e5ed"
+    property color dividerColor: "#e8eff4"
+    property color accentColor: "#0b7f8f"
+    property color accentHoverColor: "#0e91a3"
+    property color accentSoftColor: "#dff4f6"
+    property color warmColor: "#f6efe5"
+    property color dangerColor: "#c93a3a"
 
     QtObject {
         id: fallbackUiSettings
@@ -58,11 +53,19 @@ Rectangle {
 
     FontLoader {
         id: iconFontLoader
-                source: Qt.resolvedUrl("../resources/Segoe Fluent Icons.ttf")
+        source: Qt.resolvedUrl("../resources/Segoe Fluent Icons.ttf")
     }
 
     function navText(index) {
         return index === 0 ? "General" : "Toolbar"
+    }
+
+    function navSubtitle(index) {
+        return index === 0 ? "Startup and window behavior" : "Preview menu appearance"
+    }
+
+    function navGlyph(index) {
+        return index === 0 ? "\uE713" : "\uE8FD"
     }
 
     function navTarget(index) {
@@ -74,7 +77,7 @@ Rectangle {
             return 0
         }
 
-        var targetY = sectionItem.y - 20
+        var targetY = sectionItem.y - 18
         var maxY = Math.max(0, contentFlickable.contentHeight - contentFlickable.height)
         return Math.max(0, Math.min(targetY, maxY))
     }
@@ -87,10 +90,11 @@ Rectangle {
     }
 
     function syncActiveNavFromScroll() {
-        if (contentFlickable.contentY + 48 >= toolbarSection.y) {
+        if (contentFlickable.contentY + 80 >= toolbarSection.y) {
             activeNavIndex = 1
             return
         }
+
         activeNavIndex = 0
     }
 
@@ -103,63 +107,113 @@ Rectangle {
 
     component WindowActionButton: Button {
         property string glyph: ""
-        property bool destructive: false
 
         property bool settingsNoDrag: true
         hoverEnabled: true
         padding: 0
-        implicitWidth: 42
-        implicitHeight: 32
+        implicitWidth: 38
+        implicitHeight: 30
         background: Rectangle {
-            radius: 10
-            color: parent.down
-                   ? (parent.destructive ? root.destructivePressedColor : root.pressedColor)
-                   : (parent.hovered ? (parent.destructive ? root.destructiveHoverColor : root.hoverColor) : "transparent")
+            radius: 9
+            color: parent.down ? "#b92f33" : (parent.hovered ? root.dangerColor : "transparent")
             border.width: parent.hovered ? 1 : 0
-            border.color: parent.hovered
-                          ? (parent.destructive ? "#e38f95" : "#d9e4f2")
-                          : "transparent"
+            border.color: parent.hovered ? "#d77070" : "transparent"
 
             Behavior on color {
-                ColorAnimation { duration: 120 }
+                ColorAnimation {
+                    duration: 120
+                }
             }
         }
 
         contentItem: Text {
             text: parent.glyph
-            color: parent.destructive && (parent.hovered || parent.down) ? "#ffffff" : root.secondaryTextColor
+            color: parent.hovered || parent.down ? "#ffffff" : root.mutedInkColor
             font.family: root.iconFontFamily
-            font.pixelSize: 16
+            font.pixelSize: 15
             horizontalAlignment: Text.AlignHCenter
             verticalAlignment: Text.AlignVCenter
             renderType: Text.NativeRendering
         }
     }
 
-    component NavButtonComponent: Button {
+    component SidebarButton: Button {
+        id: sidebarButton
         property int navIndex: 0
 
         property bool settingsNoDrag: true
         hoverEnabled: true
         padding: 0
-        implicitWidth: 140
-        implicitHeight: 42
-        background: Item { }
+        implicitHeight: 68
 
-        contentItem: Text {
-            text: root.navText(parent.navIndex)
-            color: root.activeNavIndex === parent.navIndex
-                   ? root.accentColor
-                   : (parent.hovered ? root.textColor : root.secondaryTextColor)
-            font.family: root.textFontFamily
-            font.pixelSize: root.activeNavIndex === parent.navIndex ? 17 : 15
-            font.weight: root.activeNavIndex === parent.navIndex ? Font.DemiBold : Font.Medium
-            horizontalAlignment: Text.AlignHCenter
-            verticalAlignment: Text.AlignVCenter
-            renderType: Text.NativeRendering
+        background: Rectangle {
+            radius: 18
+            color: root.activeNavIndex === sidebarButton.navIndex
+                   ? "#ffffff"
+                   : (parent.hovered ? "#f7fbfd" : "transparent")
+            border.width: root.activeNavIndex === sidebarButton.navIndex ? 1 : 0
+            border.color: root.borderColor
 
-            Behavior on color {
-                ColorAnimation { duration: 140 }
+            Rectangle {
+                visible: root.activeNavIndex === sidebarButton.navIndex
+                anchors.left: parent.left
+                anchors.leftMargin: 8
+                anchors.verticalCenter: parent.verticalCenter
+                width: 4
+                height: 28
+                radius: 2
+                color: root.accentColor
+            }
+        }
+
+        contentItem: RowLayout {
+            anchors.fill: parent
+            anchors.leftMargin: 22
+            anchors.rightMargin: 14
+            spacing: 12
+
+            Rectangle {
+                Layout.preferredWidth: 34
+                Layout.preferredHeight: 34
+                radius: 11
+                color: root.activeNavIndex === sidebarButton.navIndex ? root.accentSoftColor : "#ffffff"
+                border.width: 1
+                border.color: root.activeNavIndex === sidebarButton.navIndex ? "#b6dde2" : "#e5edf3"
+
+                Text {
+                    anchors.centerIn: parent
+                    text: root.navGlyph(sidebarButton.navIndex)
+                    color: root.activeNavIndex === sidebarButton.navIndex ? root.accentColor : root.mutedInkColor
+                    font.family: root.iconFontFamily
+                    font.pixelSize: 16
+                    renderType: Text.NativeRendering
+                }
+            }
+
+            ColumnLayout {
+                Layout.fillWidth: true
+                spacing: 2
+
+                Text {
+                    Layout.fillWidth: true
+                    text: root.navText(sidebarButton.navIndex)
+                    color: root.inkColor
+                    font.family: root.textFontFamily
+                    font.pixelSize: 14
+                    font.weight: Font.DemiBold
+                    elide: Text.ElideRight
+                    renderType: Text.NativeRendering
+                }
+
+                Text {
+                    Layout.fillWidth: true
+                    text: root.navSubtitle(sidebarButton.navIndex)
+                    color: root.mutedInkColor
+                    font.family: root.bodyFontFamily
+                    font.pixelSize: 11
+                    elide: Text.ElideRight
+                    renderType: Text.NativeRendering
+                }
             }
         }
 
@@ -167,87 +221,80 @@ Rectangle {
     }
 
     component CardShell: Rectangle {
-        radius: 18
+        radius: 22
         color: root.cardColor
         border.width: 1
-        border.color: root.cardBorderColor
-
-        layer.enabled: true
-        layer.samples: 4
+        border.color: root.borderColor
 
         Rectangle {
             anchors.fill: parent
-            anchors.topMargin: 1
-            anchors.bottomMargin: -8
+            anchors.topMargin: 2
+            anchors.bottomMargin: -7
+            anchors.leftMargin: 8
+            anchors.rightMargin: 8
             radius: parent.radius
-            color: root.cardShadowColor
+            color: "#12344a10"
             z: -1
         }
     }
 
     component SectionHeader: RowLayout {
+        id: sectionHeader
         property string glyph: ""
         property string title: ""
         property string subtitle: ""
 
-        spacing: 12
+        spacing: 14
 
         Rectangle {
-            Layout.alignment: Qt.AlignTop
-            implicitWidth: 34
-            implicitHeight: 34
-            radius: 10
-            color: root.accentSoftColor
+            Layout.preferredWidth: 42
+            Layout.preferredHeight: 42
+            radius: 14
+            gradient: Gradient {
+                GradientStop {
+                    position: 0.0
+                    color: root.accentSoftColor
+                }
+                GradientStop {
+                    position: 1.0
+                    color: root.warmColor
+                }
+            }
 
             Text {
                 anchors.centerIn: parent
-                text: parent.parent.glyph
+                text: sectionHeader.glyph
                 color: root.accentColor
                 font.family: root.iconFontFamily
-                font.pixelSize: 17
+                font.pixelSize: 18
                 renderType: Text.NativeRendering
             }
         }
 
         ColumnLayout {
-            spacing: 2
+            Layout.fillWidth: true
+            spacing: 3
 
             Text {
-                text: parent.parent.title
-                color: root.textColor
-                font.family: root.textFontFamily
-                font.pixelSize: 18
+                Layout.fillWidth: true
+                text: sectionHeader.title
+                color: root.inkColor
+                font.family: root.displayFontFamily
+                font.pixelSize: 22
                 font.weight: Font.DemiBold
+                elide: Text.ElideRight
                 renderType: Text.NativeRendering
             }
 
             Text {
-                visible: parent.parent.subtitle.length > 0
-                text: parent.parent.subtitle
-                color: root.secondaryTextColor
+                Layout.fillWidth: true
+                text: sectionHeader.subtitle
+                color: root.mutedInkColor
                 font.family: root.bodyFontFamily
                 font.pixelSize: 12
+                wrapMode: Text.Wrap
                 renderType: Text.NativeRendering
             }
-        }
-    }
-
-    component MetricPill: Rectangle {
-        property string valueText: ""
-
-        radius: 12
-        color: root.accentColor
-        implicitWidth: 50
-        implicitHeight: 24
-
-        Text {
-            anchors.centerIn: parent
-            text: parent.valueText
-            color: "#ffffff"
-            font.family: root.textFontFamily
-            font.pixelSize: 12
-            font.weight: Font.DemiBold
-            renderType: Text.NativeRendering
         }
     }
 
@@ -258,44 +305,45 @@ Rectangle {
     }
 
     component SettingSwitchRow: Rectangle {
+        id: settingSwitchRow
         property string labelText: ""
         property string descriptionText: ""
         property bool checkedValue: false
         signal toggledValue(bool checked)
 
         width: parent ? parent.width : 0
-        height: 72
-        radius: 12
-        color: rowMouseArea.containsMouse ? "#f8fbff" : "transparent"
+        height: 70
+        radius: 16
+        color: rowMouseArea.containsMouse ? root.cardHoverColor : "transparent"
 
         Column {
             anchors.left: parent.left
-            anchors.verticalCenter: parent.verticalCenter
-            anchors.leftMargin: 2
             anchors.right: rowSwitch.left
-            anchors.rightMargin: 16
+            anchors.rightMargin: 18
+            anchors.verticalCenter: parent.verticalCenter
             spacing: 4
 
             Text {
                 width: parent.width
-                text: parent.parent.labelText
-                color: root.textColor
+                text: settingSwitchRow.labelText
+                color: root.inkColor
                 font.family: root.textFontFamily
-                font.pixelSize: 16
+                font.pixelSize: 15
                 font.weight: Font.DemiBold
-                renderType: Text.NativeRendering
                 elide: Text.ElideRight
+                renderType: Text.NativeRendering
             }
 
             Text {
                 width: parent.width
-                visible: parent.parent.descriptionText.length > 0
-                text: parent.parent.descriptionText
-                color: root.secondaryTextColor
+                text: settingSwitchRow.descriptionText
+                color: root.mutedInkColor
                 font.family: root.bodyFontFamily
                 font.pixelSize: 12
-                renderType: Text.NativeRendering
                 wrapMode: Text.Wrap
+                maximumLineCount: 2
+                elide: Text.ElideRight
+                renderType: Text.NativeRendering
             }
         }
 
@@ -308,32 +356,32 @@ Rectangle {
 
         Switch {
             id: rowSwitch
+            property bool settingsNoDrag: true
             anchors.right: parent.right
             anchors.verticalCenter: parent.verticalCenter
-            implicitWidth: 44
-            implicitHeight: 24
+            implicitWidth: 48
+            implicitHeight: 26
             hoverEnabled: true
             padding: 0
-            checked: parent.checkedValue
+            checked: settingSwitchRow.checkedValue
 
             indicator: Rectangle {
-                implicitWidth: 44
-                implicitHeight: 24
-                radius: 12
-                color: rowSwitch.checked ? root.accentColor : "#7d8795"
-                opacity: rowSwitch.enabled ? 1.0 : 0.45
+                implicitWidth: 48
+                implicitHeight: 26
+                radius: 13
+                color: rowSwitch.checked ? root.accentColor : "#a7b2bd"
 
                 Rectangle {
-                    width: 16
-                    height: 16
-                    radius: 8
-                    y: 4
-                    x: rowSwitch.checked ? 24 : 4
+                    width: 20
+                    height: 20
+                    radius: 10
+                    y: 3
+                    x: rowSwitch.checked ? 25 : 3
                     color: "#ffffff"
 
                     Behavior on x {
                         NumberAnimation {
-                            duration: 160
+                            duration: 170
                             easing.type: Easing.OutCubic
                         }
                     }
@@ -341,82 +389,77 @@ Rectangle {
             }
 
             contentItem: Item { }
-            onToggled: parent.toggledValue(checked)
+            onToggled: settingSwitchRow.toggledValue(checked)
         }
     }
 
     component ToolbarTile: Rectangle {
+        id: toolbarTile
         property string titleText: ""
         property string glyph: ""
         property bool checkedValue: false
         signal toggledValue(bool checked)
 
         Layout.fillWidth: true
-        Layout.preferredHeight: 136
-        radius: 16
-        color: tileMouseArea.containsMouse ? "#f7fbff" : "#fbfdff"
+        Layout.preferredHeight: 82
+        radius: 18
+        color: tileMouseArea.containsMouse ? root.cardHoverColor : "#fbfdfe"
         border.width: 1
-        border.color: "#e1eaf4"
+        border.color: toolbarTile.checkedValue ? "#a9d5db" : "#e1eaf0"
 
-        ColumnLayout {
+        RowLayout {
             anchors.fill: parent
             anchors.margins: 14
-            spacing: 10
+            spacing: 12
 
             Rectangle {
-                Layout.alignment: Qt.AlignHCenter
-                implicitWidth: 42
-                implicitHeight: 42
-                radius: 12
-                color: checkedValue ? root.accentSoftColor : "#f1f6fb"
+                Layout.preferredWidth: 38
+                Layout.preferredHeight: 38
+                radius: 13
+                color: toolbarTile.checkedValue ? root.accentSoftColor : "#f0f5f7"
 
                 Text {
                     anchors.centerIn: parent
-                    text: parent.parent.parent.glyph
-                    color: checkedValue ? root.accentColor : root.secondaryTextColor
+                    text: toolbarTile.glyph
+                    color: toolbarTile.checkedValue ? root.accentColor : root.mutedInkColor
                     font.family: root.iconFontFamily
-                    font.pixelSize: 18
+                    font.pixelSize: 17
                     renderType: Text.NativeRendering
                 }
             }
 
             Text {
-                Layout.alignment: Qt.AlignHCenter
-                text: parent.parent.titleText
-                color: root.textColor
+                Layout.fillWidth: true
+                text: toolbarTile.titleText
+                color: root.inkColor
                 font.family: root.textFontFamily
-                font.pixelSize: 12
-                font.weight: Font.Medium
+                font.pixelSize: 13
+                font.weight: Font.DemiBold
+                elide: Text.ElideRight
                 renderType: Text.NativeRendering
-            }
-
-            Item {
-                Layout.fillHeight: true
             }
 
             Switch {
                 id: tileSwitch
-                Layout.alignment: Qt.AlignHCenter
+                property bool settingsNoDrag: true
                 implicitWidth: 40
-                implicitHeight: 20
+                implicitHeight: 22
                 hoverEnabled: true
                 padding: 0
-                checked: parent.parent.checkedValue
-                scale: 0.82
+                checked: toolbarTile.checkedValue
 
                 indicator: Rectangle {
                     implicitWidth: 40
-                    implicitHeight: 20
-                    radius: 10
-                    color: tileSwitch.checked ? root.accentColor : "#7d8795"
-                    opacity: tileSwitch.enabled ? 1.0 : 0.45
+                    implicitHeight: 22
+                    radius: 11
+                    color: tileSwitch.checked ? root.accentColor : "#a7b2bd"
 
                     Rectangle {
-                        width: 14
-                        height: 14
-                        radius: 7
+                        width: 16
+                        height: 16
+                        radius: 8
                         y: 3
-                        x: tileSwitch.checked ? 23 : 3
+                        x: tileSwitch.checked ? 21 : 3
                         color: "#ffffff"
 
                         Behavior on x {
@@ -429,7 +472,7 @@ Rectangle {
                 }
 
                 contentItem: Item { }
-                onToggled: parent.parent.toggledValue(checked)
+                onToggled: toolbarTile.toggledValue(checked)
             }
         }
 
@@ -442,61 +485,88 @@ Rectangle {
     }
 
     component PlacementOptionButton: Button {
+        id: placementOptionButton
         property int placementValue: 0
         property string labelText: ""
+        property string glyph: ""
 
-        implicitHeight: 42
+        property bool settingsNoDrag: true
+        implicitHeight: 46
         hoverEnabled: true
+        padding: 0
 
         background: Rectangle {
-            radius: 12
-            color: resolvedUiSettings.menuPlacement === parent.placementValue
+            radius: 16
+            color: resolvedUiSettings.menuPlacement === placementOptionButton.placementValue
                    ? root.accentSoftColor
-                   : (parent.down ? "#eaf1f8" : (parent.hovered ? "#f5f9fd" : "#ffffff"))
+                   : (parent.down ? "#edf4f6" : (parent.hovered ? root.cardHoverColor : "#ffffff"))
             border.width: 1
-            border.color: resolvedUiSettings.menuPlacement === parent.placementValue
+            border.color: resolvedUiSettings.menuPlacement === placementOptionButton.placementValue
                           ? root.accentColor
-                          : root.outlineColor
+                          : root.borderColor
         }
 
-        contentItem: Text {
-            text: parent.labelText
-            color: resolvedUiSettings.menuPlacement === parent.placementValue ? root.accentColor : root.textColor
-            font.family: root.textFontFamily
-            font.pixelSize: 13
-            font.weight: resolvedUiSettings.menuPlacement === parent.placementValue ? Font.DemiBold : Font.Medium
-            horizontalAlignment: Text.AlignHCenter
-            verticalAlignment: Text.AlignVCenter
-            renderType: Text.NativeRendering
+        contentItem: RowLayout {
+            anchors.fill: parent
+            anchors.leftMargin: 14
+            anchors.rightMargin: 14
+            spacing: 8
+
+            Text {
+                text: placementOptionButton.glyph
+                color: resolvedUiSettings.menuPlacement === placementOptionButton.placementValue ? root.accentColor : root.mutedInkColor
+                font.family: root.iconFontFamily
+                font.pixelSize: 15
+                renderType: Text.NativeRendering
+            }
+
+            Text {
+                Layout.fillWidth: true
+                text: placementOptionButton.labelText
+                color: resolvedUiSettings.menuPlacement === placementOptionButton.placementValue ? root.accentColor : root.inkColor
+                font.family: root.textFontFamily
+                font.pixelSize: 13
+                font.weight: Font.DemiBold
+                horizontalAlignment: Text.AlignHCenter
+                verticalAlignment: Text.AlignVCenter
+                renderType: Text.NativeRendering
+            }
         }
 
         onClicked: resolvedUiSettings.menuPlacement = placementValue
     }
 
     gradient: Gradient {
-        GradientStop { position: 0.0; color: root.pageBackgroundTop }
-        GradientStop { position: 1.0; color: root.pageBackgroundBottom }
+        GradientStop {
+            position: 0.0
+            color: "#f2f7f8"
+        }
+        GradientStop {
+            position: 0.52
+            color: "#fbf7ef"
+        }
+        GradientStop {
+            position: 1.0
+            color: "#eaf3f6"
+        }
     }
 
     Rectangle {
         anchors.fill: parent
         anchors.margins: 1
-        radius: 16
-        color: "#0f1a280a"
+        radius: 20
+        color: "#0e25310b"
         border.width: 1
-        border.color: "#0f1a2814"
+        border.color: "#16323f18"
     }
 
     Rectangle {
         anchors.fill: parent
         anchors.margins: 2
-        radius: 16
-        gradient: Gradient {
-            GradientStop { position: 0.0; color: "#fcfdff" }
-            GradientStop { position: 1.0; color: root.shellColor }
-        }
+        radius: 20
+        color: root.shellColor
         border.width: 1
-        border.color: root.shellBorderColor
+        border.color: root.borderColor
     }
 
     ColumnLayout {
@@ -505,31 +575,50 @@ Rectangle {
 
         Rectangle {
             Layout.fillWidth: true
-            Layout.preferredHeight: 52
-            color: root.titleBarColor
+            Layout.preferredHeight: 56
+            color: "transparent"
 
             RowLayout {
                 anchors.fill: parent
-                anchors.leftMargin: 18
+                anchors.leftMargin: 22
                 anchors.rightMargin: 16
                 spacing: 12
 
-                RowLayout {
-                    spacing: 10
+                Rectangle {
+                    Layout.preferredWidth: 30
+                    Layout.preferredHeight: 30
+                    radius: 10
+                    color: "#ffffff"
+                    border.width: 1
+                    border.color: root.borderColor
 
-                    Rectangle {
-                        width: 14
-                        height: 14
-                        radius: 4
-                        color: root.accentColor
+                    Image {
+                        anchors.fill: parent
+                        anchors.margins: 4
+                        source: "qrc:/icons/icon.png"
+                        fillMode: Image.PreserveAspectFit
+                        smooth: true
+                        mipmap: true
+                    }
+                }
+
+                ColumnLayout {
+                    spacing: 0
+
+                    Text {
+                        text: "Settings"
+                        color: root.inkColor
+                        font.family: root.displayFontFamily
+                        font.pixelSize: 17
+                        font.weight: Font.DemiBold
+                        renderType: Text.NativeRendering
                     }
 
                     Text {
-                        text: "SpaceLook Settings"
-                        color: root.textColor
-                        font.family: root.textFontFamily
-                        font.pixelSize: 14
-                        font.weight: Font.DemiBold
+                        text: "SpaceLook preview preferences"
+                        color: root.mutedInkColor
+                        font.family: root.bodyFontFamily
+                        font.pixelSize: 11
                         renderType: Text.NativeRendering
                     }
                 }
@@ -538,273 +627,207 @@ Rectangle {
                     Layout.fillWidth: true
                 }
 
-                Row {
-                    spacing: 4
-
-                    WindowActionButton {
-                        glyph: "\uE8BB"
-                        destructive: true
-                        onClicked: {
-                            if (typeof settingsWindow !== "undefined" && settingsWindow) {
-                                settingsWindow.requestSettingsWindowClose()
-                            }
+                WindowActionButton {
+                    glyph: "\uE8BB"
+                    onClicked: {
+                        if (typeof settingsWindow !== "undefined" && settingsWindow) {
+                            settingsWindow.requestSettingsWindowClose()
                         }
                     }
                 }
             }
-
-            Rectangle {
-                anchors.bottom: parent.bottom
-                width: parent.width
-                height: 1
-                color: root.dividerColor
-            }
         }
 
-        Rectangle {
+        RowLayout {
             Layout.fillWidth: true
-            Layout.preferredHeight: 60
-            color: root.navBarColor
+            Layout.fillHeight: true
+            Layout.leftMargin: 14
+            Layout.rightMargin: 14
+            Layout.bottomMargin: 14
+            spacing: 14
 
             Rectangle {
-                anchors.bottom: parent.bottom
-                width: parent.width
-                height: 1
-                color: root.dividerColor
-            }
+                Layout.preferredWidth: 218
+                Layout.fillHeight: true
+                radius: 24
+                color: root.sidebarColor
+                border.width: 1
+                border.color: "#d5e3e8"
 
-            Item {
-                anchors.centerIn: parent
-                width: navRow.implicitWidth
-                height: parent.height
-
-                Row {
-                    id: navRow
-                    anchors.centerIn: parent
+                ColumnLayout {
+                    anchors.fill: parent
+                    anchors.margins: 14
                     spacing: 14
 
-                    NavButtonComponent {
+                    SidebarButton {
+                        Layout.fillWidth: true
                         navIndex: 0
                     }
 
-                    NavButtonComponent {
+                    SidebarButton {
+                        Layout.fillWidth: true
                         navIndex: 1
                     }
 
-                    Rectangle {
-                        id: navIndicator
-                        y: navRow.height - height
-                        height: 4
-                        radius: 2
-                        color: root.accentColor
-                        width: {
-                            var button = root.activeNavIndex === 0 ? navRow.children[0] : navRow.children[1]
-                            return button ? Math.max(24, button.width * 0.34) : 24
-                        }
-                        x: {
-                            var button = root.activeNavIndex === 0 ? navRow.children[0] : navRow.children[1]
-                            return button ? button.x + (button.width - width) / 2 : 0
-                        }
-
-                        Behavior on x {
-                            NumberAnimation {
-                                duration: 220
-                                easing.type: Easing.OutCubic
-                            }
-                        }
-
-                        Behavior on width {
-                            NumberAnimation {
-                                duration: 180
-                                easing.type: Easing.OutCubic
-                            }
-                        }
+                    Item {
+                        Layout.fillHeight: true
                     }
                 }
             }
-        }
 
-        Flickable {
-            id: contentFlickable
-            Layout.fillWidth: true
-            Layout.fillHeight: true
-            contentWidth: width
-            contentHeight: contentColumn.implicitHeight + 56
-            clip: true
-            boundsBehavior: Flickable.StopAtBounds
+            Flickable {
+                id: contentFlickable
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                contentWidth: width
+                contentHeight: contentColumn.implicitHeight + 28
+                clip: true
+                boundsBehavior: Flickable.StopAtBounds
 
-            onContentYChanged: root.syncActiveNavFromScroll()
+                onContentYChanged: root.syncActiveNavFromScroll()
 
-            NumberAnimation on contentY {
-                id: contentScrollAnimation
-                duration: 240
-                easing.type: Easing.OutCubic
-            }
-
-            ScrollBar.vertical: ScrollBar {
-                policy: ScrollBar.AsNeeded
-                width: 10
-                background: Item { }
-                contentItem: Rectangle {
-                    implicitWidth: 6
-                    radius: 3
-                    color: "#a7b6c8"
-                    opacity: 0.86
+                NumberAnimation on contentY {
+                    id: contentScrollAnimation
+                    duration: 240
+                    easing.type: Easing.OutCubic
                 }
-            }
 
-            Column {
-                id: contentColumn
-                width: Math.min(contentFlickable.width - 64, 800)
-                anchors.horizontalCenter: parent.horizontalCenter
-                anchors.top: parent.top
-                anchors.topMargin: 30
-                spacing: 18
+                ScrollBar.vertical: ScrollBar {
+                    policy: ScrollBar.AsNeeded
+                    width: 10
+                    background: Item { }
+                    contentItem: Rectangle {
+                        implicitWidth: 5
+                        radius: 3
+                        color: "#9aabb5"
+                        opacity: 0.74
+                    }
+                }
 
                 Column {
-                    width: parent.width
-                    spacing: 6
+                    id: contentColumn
+                    width: contentFlickable.width - 10
+                    anchors.top: parent.top
+                    spacing: 16
 
-                    Text {
-                        text: "SpaceLook Settings"
-                        color: root.textColor
-                        font.family: root.displayFontFamily
-                        font.pixelSize: 34
-                        font.weight: Font.DemiBold
-                        renderType: Text.NativeRendering
-                    }
-
-                    Text {
+                    CardShell {
+                        id: generalSection
                         width: parent.width
-                        text: "Adjust window behavior and choose which preview toolbar actions stay visible."
-                        color: root.secondaryTextColor
-                        font.family: root.bodyFontFamily
-                        font.pixelSize: 14
-                        renderType: Text.NativeRendering
-                        wrapMode: Text.Wrap
-                    }
-                }
+                        implicitHeight: generalContent.implicitHeight + 42
 
-                CardShell {
-                    id: generalSection
-                    width: parent.width
-                    implicitHeight: 552
-
-                    Column {
-                        anchors.fill: parent
-                        anchors.margins: 22
-                        spacing: 20
-
-                        RowLayout {
-                            width: parent.width
-                            spacing: 12
+                        Column {
+                            id: generalContent
+                            anchors.fill: parent
+                            anchors.margins: 22
+                            spacing: 18
 
                             SectionHeader {
-                                glyph: "\uE7C3"
+                                width: parent.width
+                                glyph: "\uE713"
                                 title: "General"
-                                subtitle: "Global behavior and toolbar sizing."
+                                subtitle: "Control startup behavior, tray presence, taskbar visibility, and preview menu size."
                             }
 
-                            Item {
-                                Layout.fillWidth: true
-                            }
-
-                            MetricPill {
-                                valueText: String(resolvedUiSettings.menuButtonSize)
-                            }
-                        }
-
-                        Column {
-                            width: parent.width
-                            spacing: 10
-
-                            Text {
-                                text: "Menu button size"
-                                color: root.textColor
-                                font.family: root.textFontFamily
-                                font.pixelSize: 15
-                                font.weight: Font.DemiBold
-                                renderType: Text.NativeRendering
-                            }
-
-                            Slider {
-                                id: menuSizeSlider
+                            Rectangle {
                                 width: parent.width
-                                from: 16
-                                to: 64
-                                stepSize: 1
-                                value: resolvedUiSettings.menuButtonSize
-                                onMoved: resolvedUiSettings.menuButtonSize = Math.round(value)
-                                onValueChanged: {
-                                    if (pressed) {
-                                        resolvedUiSettings.menuButtonSize = Math.round(value)
+                                height: 112
+                                radius: 18
+                                color: "#f8fbfc"
+                                border.width: 1
+                                border.color: "#e1ebf0"
+
+                                Column {
+                                    anchors.fill: parent
+                                    anchors.margins: 16
+                                    spacing: 12
+
+                                    RowLayout {
+                                        width: parent.width
+
+                                        Text {
+                                            text: "Menu button size"
+                                            color: root.inkColor
+                                            font.family: root.textFontFamily
+                                            font.pixelSize: 15
+                                            font.weight: Font.DemiBold
+                                            renderType: Text.NativeRendering
+                                        }
+
+                                        Item {
+                                            Layout.fillWidth: true
+                                        }
+                                    }
+
+                                    Slider {
+                                        id: menuSizeSlider
+                                        width: parent.width
+                                        from: 30
+                                        to: 72
+                                        stepSize: 1
+                                        value: resolvedUiSettings.menuButtonSize
+                                        leftPadding: 10
+                                        rightPadding: 10
+
+                                        onMoved: resolvedUiSettings.menuButtonSize = Math.round(value)
+                                        onValueChanged: {
+                                            if (pressed) {
+                                                resolvedUiSettings.menuButtonSize = Math.round(value)
+                                            }
+                                        }
+
+                                        background: Rectangle {
+                                            x: menuSizeSlider.leftPadding
+                                            y: menuSizeSlider.availableHeight / 2 - height / 2
+                                            width: menuSizeSlider.availableWidth
+                                            height: 5
+                                            radius: 3
+                                            color: "#d5e1e7"
+
+                                            Rectangle {
+                                                width: menuSizeSlider.visualPosition * parent.width
+                                                height: parent.height
+                                                radius: 3
+                                                color: root.accentColor
+                                            }
+                                        }
+
+                                        handle: Rectangle {
+                                            x: menuSizeSlider.leftPadding + menuSizeSlider.visualPosition * (menuSizeSlider.availableWidth - width)
+                                            y: menuSizeSlider.availableHeight / 2 - height / 2
+                                            width: 20
+                                            height: 20
+                                            radius: 10
+                                            color: "#ffffff"
+                                            border.width: 5
+                                            border.color: root.accentColor
+                                        }
+                                    }
+
+                                    RowLayout {
+                                        width: parent.width
+
+                                        Text {
+                                            text: "Small"
+                                            color: root.faintInkColor
+                                            font.family: root.bodyFontFamily
+                                            font.pixelSize: 11
+                                            renderType: Text.NativeRendering
+                                        }
+
+                                        Item {
+                                            Layout.fillWidth: true
+                                        }
+
+                                        Text {
+                                            text: "Large"
+                                            color: root.faintInkColor
+                                            font.family: root.bodyFontFamily
+                                            font.pixelSize: 11
+                                            renderType: Text.NativeRendering
+                                        }
                                     }
                                 }
-
-                                background: Rectangle {
-                                    x: 0
-                                    y: menuSizeSlider.availableHeight / 2 - height / 2
-                                    width: menuSizeSlider.availableWidth
-                                    height: 4
-                                    radius: 2
-                                    color: root.outlineColor
-
-                                    Rectangle {
-                                        width: menuSizeSlider.visualPosition * parent.width
-                                        height: parent.height
-                                        radius: 2
-                                        color: root.accentColor
-                                    }
-                                }
-
-                                handle: Rectangle {
-                                    x: menuSizeSlider.leftPadding + menuSizeSlider.visualPosition * (menuSizeSlider.availableWidth - width)
-                                    y: menuSizeSlider.availableHeight / 2 - height / 2
-                                    width: 18
-                                    height: 18
-                                    radius: 9
-                                    color: root.accentColor
-                                    border.width: 4
-                                    border.color: "#ffffff"
-                                }
                             }
-
-                            RowLayout {
-                                width: parent.width
-
-                                Text {
-                                    text: "Small"
-                                    color: root.secondaryTextColor
-                                    font.family: root.bodyFontFamily
-                                    font.pixelSize: 12
-                                    renderType: Text.NativeRendering
-                                }
-
-                                Item {
-                                    Layout.fillWidth: true
-                                }
-
-                                Text {
-                                    text: "Large"
-                                    color: root.secondaryTextColor
-                                    font.family: root.bodyFontFamily
-                                    font.pixelSize: 12
-                                    renderType: Text.NativeRendering
-                                }
-                            }
-                        }
-
-                        DividerLine { }
-
-                        SectionHeader {
-                            glyph: "\uE945"
-                            title: "Startup & Behavior"
-                            subtitle: "Tray, taskbar, performance, and launch behavior."
-                        }
-
-                        Column {
-                            width: parent.width
-                            spacing: 0
 
                             SettingSwitchRow {
                                 width: parent.width
@@ -828,8 +851,8 @@ Rectangle {
 
                             SettingSwitchRow {
                                 width: parent.width
-                                labelText: "Show in taskbar"
-                                descriptionText: "Use a taskbar window instead of a tool window."
+                                labelText: "Show preview in taskbar"
+                                descriptionText: "Only affects the preview window. The Settings window stays independent."
                                 checkedValue: resolvedUiSettings.showTaskbar
                                 onToggledValue: resolvedUiSettings.showTaskbar = checked
                             }
@@ -839,230 +862,163 @@ Rectangle {
                             SettingSwitchRow {
                                 width: parent.width
                                 labelText: "Performance mode"
-                                descriptionText: "Reduce heavy visual effects for smoother rendering."
+                                descriptionText: "Use the QML preview path when available for smoother rendering."
                                 checkedValue: resolvedUiSettings.performanceMode
                                 onToggledValue: resolvedUiSettings.performanceMode = checked
                             }
                         }
                     }
-                }
 
-                CardShell {
-                    id: toolbarSection
-                    width: parent.width
-                    implicitHeight: toolbarSectionContent.implicitHeight + 44
-
-                    Column {
-                        id: toolbarSectionContent
-                        anchors.fill: parent
-                        anchors.margins: 22
-                        spacing: 20
-
-                        SectionHeader {
-                            glyph: "\uE8FD"
-                            title: "Toolbar"
-                            subtitle: "Choose which preview actions appear in the title toolbar."
-                        }
-
-                        SettingSwitchRow {
-                            width: parent.width
-                            labelText: "Show menu border"
-                            descriptionText: "Display a border around the floating preview menu capsule."
-                            checkedValue: resolvedUiSettings.showMenuBorder
-                            onToggledValue: resolvedUiSettings.showMenuBorder = checked
-                        }
-
-                        DividerLine { }
+                    CardShell {
+                        id: toolbarSection
+                        width: parent.width
+                        implicitHeight: toolbarContent.implicitHeight + 42
 
                         Column {
-                            width: parent.width
-                            spacing: 10
+                            id: toolbarContent
+                            anchors.fill: parent
+                            anchors.margins: 22
+                            spacing: 18
+
+                            SectionHeader {
+                                width: parent.width
+                                glyph: "\uE8FD"
+                                title: "Toolbar"
+                                subtitle: "Tune the capsule menu, placement, border, and visible actions."
+                            }
+
+                            SettingSwitchRow {
+                                width: parent.width
+                                labelText: "Show menu border"
+                                descriptionText: "Draw a tight border around the preview capsule menu."
+                                checkedValue: resolvedUiSettings.showMenuBorder
+                                onToggledValue: resolvedUiSettings.showMenuBorder = checked
+                            }
+
+                            DividerLine { }
+
+                            Column {
+                                width: parent.width
+                                spacing: 12
+
+                                Text {
+                                    text: "Menu placement"
+                                    color: root.inkColor
+                                    font.family: root.textFontFamily
+                                    font.pixelSize: 15
+                                    font.weight: Font.DemiBold
+                                    renderType: Text.NativeRendering
+                                }
+
+                                GridLayout {
+                                    width: parent.width
+                                    columns: width >= 520 ? 4 : 2
+                                    columnSpacing: 10
+                                    rowSpacing: 10
+
+                                    PlacementOptionButton {
+                                        Layout.fillWidth: true
+                                        placementValue: 0
+                                        glyph: "\uE70E"
+                                        labelText: "Top"
+                                    }
+
+                                    PlacementOptionButton {
+                                        Layout.fillWidth: true
+                                        placementValue: 1
+                                        glyph: "\uE70D"
+                                        labelText: "Bottom"
+                                    }
+
+                                    PlacementOptionButton {
+                                        Layout.fillWidth: true
+                                        placementValue: 2
+                                        glyph: "\uE76B"
+                                        labelText: "Left"
+                                    }
+
+                                    PlacementOptionButton {
+                                        Layout.fillWidth: true
+                                        placementValue: 3
+                                        glyph: "\uE76C"
+                                        labelText: "Right"
+                                    }
+                                }
+                            }
+
+                            DividerLine { }
 
                             Text {
-                                text: "Menu placement"
-                                color: root.textColor
+                                text: "Visible actions"
+                                color: root.inkColor
                                 font.family: root.textFontFamily
                                 font.pixelSize: 15
                                 font.weight: Font.DemiBold
                                 renderType: Text.NativeRendering
                             }
 
-                            Text {
-                                width: parent.width
-                                text: "Choose whether the preview menu appears above, below, to the left, or to the right of the preview header content."
-                                color: root.secondaryTextColor
-                                font.family: root.bodyFontFamily
-                                font.pixelSize: 12
-                                renderType: Text.NativeRendering
-                                wrapMode: Text.Wrap
-                            }
-
                             GridLayout {
                                 width: parent.width
-                                columns: width >= 520 ? 4 : 2
-                                columnSpacing: 10
-                                rowSpacing: 10
+                                columns: width >= 620 ? 3 : 2
+                                columnSpacing: 12
+                                rowSpacing: 12
 
-                                PlacementOptionButton {
-                                    Layout.fillWidth: true
-                                    placementValue: 0
-                                    labelText: "Top"
+                                ToolbarTile {
+                                    titleText: "Pin"
+                                    glyph: "\uE840"
+                                    checkedValue: resolvedUiSettings.showMenuPin
+                                    onToggledValue: resolvedUiSettings.showMenuPin = checked
                                 }
 
-                                PlacementOptionButton {
-                                    Layout.fillWidth: true
-                                    placementValue: 1
-                                    labelText: "Bottom"
+                                ToolbarTile {
+                                    titleText: "Open"
+                                    glyph: "\uE8E5"
+                                    checkedValue: resolvedUiSettings.showMenuOpen
+                                    onToggledValue: resolvedUiSettings.showMenuOpen = checked
                                 }
 
-                                PlacementOptionButton {
-                                    Layout.fillWidth: true
-                                    placementValue: 2
-                                    labelText: "Left"
+                                ToolbarTile {
+                                    titleText: "Copy"
+                                    glyph: "\uE8C8"
+                                    checkedValue: resolvedUiSettings.showMenuCopy
+                                    onToggledValue: resolvedUiSettings.showMenuCopy = checked
                                 }
 
-                                PlacementOptionButton {
-                                    Layout.fillWidth: true
-                                    placementValue: 3
-                                    labelText: "Right"
+                                ToolbarTile {
+                                    titleText: "Refresh"
+                                    glyph: "\uE72C"
+                                    checkedValue: resolvedUiSettings.showMenuRefresh
+                                    onToggledValue: resolvedUiSettings.showMenuRefresh = checked
                                 }
-                            }
-                        }
 
-                        DividerLine { }
+                                ToolbarTile {
+                                    titleText: "Expand"
+                                    glyph: "\uE740"
+                                    checkedValue: resolvedUiSettings.showMenuExpand
+                                    onToggledValue: resolvedUiSettings.showMenuExpand = checked
+                                }
 
-                        GridLayout {
-                            width: parent.width
-                            columns: width >= 720 ? 4 : 3
-                            columnSpacing: 14
-                            rowSpacing: 14
+                                ToolbarTile {
+                                    titleText: "Close"
+                                    glyph: "\uE711"
+                                    checkedValue: resolvedUiSettings.showMenuClose
+                                    onToggledValue: resolvedUiSettings.showMenuClose = checked
+                                }
 
-                            ToolbarTile {
-                                titleText: "Pin"
-                                glyph: "\uE840"
-                                checkedValue: resolvedUiSettings.showMenuPin
-                                onToggledValue: resolvedUiSettings.showMenuPin = checked
-                            }
-
-                            ToolbarTile {
-                                titleText: "Open"
-                                glyph: "\uE8E5"
-                                checkedValue: resolvedUiSettings.showMenuOpen
-                                onToggledValue: resolvedUiSettings.showMenuOpen = checked
-                            }
-
-                            ToolbarTile {
-                                titleText: "Copy"
-                                glyph: "\uE8C8"
-                                checkedValue: resolvedUiSettings.showMenuCopy
-                                onToggledValue: resolvedUiSettings.showMenuCopy = checked
-                            }
-
-                            ToolbarTile {
-                                titleText: "Refresh"
-                                glyph: "\uE72C"
-                                checkedValue: resolvedUiSettings.showMenuRefresh
-                                onToggledValue: resolvedUiSettings.showMenuRefresh = checked
-                            }
-
-                            ToolbarTile {
-                                titleText: "Expand"
-                                glyph: "\uE740"
-                                checkedValue: resolvedUiSettings.showMenuExpand
-                                onToggledValue: resolvedUiSettings.showMenuExpand = checked
-                            }
-
-                            ToolbarTile {
-                                titleText: "Close"
-                                glyph: "\uE711"
-                                checkedValue: resolvedUiSettings.showMenuClose
-                                onToggledValue: resolvedUiSettings.showMenuClose = checked
-                            }
-
-                            ToolbarTile {
-                                titleText: "More"
-                                glyph: "\uE712"
-                                checkedValue: resolvedUiSettings.showMenuMore
-                                onToggledValue: resolvedUiSettings.showMenuMore = checked
+                                ToolbarTile {
+                                    titleText: "More"
+                                    glyph: "\uE712"
+                                    checkedValue: resolvedUiSettings.showMenuMore
+                                    onToggledValue: resolvedUiSettings.showMenuMore = checked
+                                }
                             }
                         }
                     }
-                }
-
-                RowLayout {
-                    width: parent.width
-                    spacing: 12
 
                     Item {
-                        Layout.fillWidth: true
+                        width: 1
+                        height: 20
                     }
-
-                    Button {
-                        property bool settingsNoDrag: true
-                        text: "Cancel"
-                        implicitWidth: 118
-                        implicitHeight: 40
-                        hoverEnabled: true
-
-                        background: Rectangle {
-                            radius: 12
-                            color: parent.down ? "#ecf1f7" : (parent.hovered ? "#f6f9fc" : "#ffffff")
-                            border.width: 1
-                            border.color: root.outlineColor
-                        }
-
-                        contentItem: Text {
-                            text: parent.text
-                            color: root.textColor
-                            font.family: root.textFontFamily
-                            font.pixelSize: 14
-                            font.weight: Font.Medium
-                            horizontalAlignment: Text.AlignHCenter
-                            verticalAlignment: Text.AlignVCenter
-                            renderType: Text.NativeRendering
-                        }
-
-                        onClicked: {
-                            if (typeof settingsWindow !== "undefined" && settingsWindow) {
-                                settingsWindow.requestSettingsWindowClose()
-                            }
-                        }
-                    }
-
-                    Button {
-                        property bool settingsNoDrag: true
-                        text: "Save Changes"
-                        implicitWidth: 140
-                        implicitHeight: 40
-                        hoverEnabled: true
-
-                        background: Rectangle {
-                            radius: 12
-                            color: parent.down ? "#0069bb" : (parent.hovered ? "#0a83e6" : root.accentColor)
-                        }
-
-                        contentItem: Text {
-                            text: parent.text
-                            color: "#ffffff"
-                            font.family: root.textFontFamily
-                            font.pixelSize: 14
-                            font.weight: Font.Medium
-                            horizontalAlignment: Text.AlignHCenter
-                            verticalAlignment: Text.AlignVCenter
-                            renderType: Text.NativeRendering
-                        }
-
-                        onClicked: {
-                            if (typeof settingsWindow !== "undefined" && settingsWindow) {
-                                settingsWindow.requestSettingsWindowClose()
-                            }
-                        }
-                    }
-                }
-
-                Item {
-                    width: 1
-                    height: 28
                 }
             }
         }

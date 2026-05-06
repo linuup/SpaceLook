@@ -1,4 +1,4 @@
-# SpaceLook
+﻿# SpaceLook
 
 ## Overview
 
@@ -24,20 +24,44 @@ The registry currently loads renderers in this order:
 
 The first renderer whose `canHandle()` returns `true` is used.
 
-## Supported Preview Types
+## Preview Type Coverage Matrix
 
-| Category | Renderer | Supported formats or behavior |
+`✅` marks formats currently routed by `core/RenderType.json` and active renderer `canHandle()` checks. Entries without `✅` are target coverage.
+
+| Category | Renderer | Supported formats or target behavior |
 | --- | --- | --- |
-| PDF | `PdfRenderer` | `pdf` |
-| Office Documents | `DocumentRenderer` | `doc`, `docx`, `xls`, `xlsx`, `ppt`, `pptx` |
-| Code Files | `CodeRenderer` | `c`, `cc`, `cpp`, `cxx`, `h`, `hpp`, `hh`, `hxx`, `cs`, `java`, `kt`, `kts`, `go`, `rs`, `swift`, `m`, `mm`, `py`, `rb`, `php`, `js`, `jsx`, `ts`, `tsx`, `qml`, `vue`, `svelte`, `css`, `scss`, `sass`, `less`, `html`, `htm`, `sql`, `sh`, `bash`, `zsh`, `fish`, `dockerfile`, `makefile`, `mk` |
-| Text Files | `TextRenderer` | `txt`, `md`, `log`, `json`, `ini`, `xml`, `yaml`, `yml`, `toml`, `conf`, `config`, `cfg`, `props`, `targets`, `bat`, `cmd`, `ps1`, `reg`, `env`, `gitignore`, `gitattributes`, `editorconfig`, `gradle`, `cmake`, `qrc`, `qss`, `ui`, `pri`, `pro` |
-| Images | `ImageRenderer` | `png`, `jpg`, `jpeg`, `bmp`, `gif`, `webp`, `heic`, `heif`, `svg`, `ico`, `psd` |
-| Audio | `MediaRenderer` | `mp3`, `wav`, `flac`, `aac`, `m4a`, `ogg`, `wma`, `opus` |
-| Video | `MediaRenderer` | `mp4`, `mkv`, `avi`, `mov`, `wmv`, `webm`, `m4v`, `mpg`, `mpeg`, `ts` |
-| Archives | `SummaryRenderer` | `zip`, `7z`, `rar`, `tar`, `gz`, `tgz`, `bz2`, `tbz`, `tbz2`, `xz`, `txz`, `cab` |
-| Shortcuts and Shell Items | `SummaryRenderer` | `lnk`, `url`, `appref-ms` |
-| Folders and Generic Files | `SummaryRenderer` | Folders, shell folders, desktop items, unknown file types, and generic fallback preview |
+| PDF and Page Documents | `PdfRenderer` | ✅ `pdf`, `xps`, `oxps` |
+| Office Documents | `DocumentRenderer` | ✅ `doc`, ✅ `docx`, `docm`, `dot`, `dotx`, `rtf`, ✅ `xls`, ✅ `xlsx`, `xlsm`, `xlsb`, `xlt`, `xltx`, ✅ `ppt`, ✅ `pptx`, `pptm`, `pps`, `ppsx`, `vsd`, `vsdx` |
+| OpenDocument Files | `DocumentRenderer` | `odt`, `ott`, `ods`, `ots`, `odp`, `otp`, `odg`, `otg`, `odf` |
+| Markup Documents | `RenderedPageRenderer` | ✅ `md`, ✅ `markdown`, ✅ `mdown`, ✅ `mkd`, ✅ `html`, ✅ `htm`, ✅ `xhtml`, ✅ `mhtml` |
+| Code Files, C Family | `CodeRenderer` | ✅ `c`, ✅ `cc`, ✅ `cpp`, ✅ `cxx`, ✅ `h`, ✅ `hpp`, ✅ `hh`, ✅ `hxx`, ✅ `m`, ✅ `mm`, ✅ `cs`, ✅ `java`, ✅ `kt`, ✅ `kts`, ✅ `swift` |
+| Code Files, Web and UI | `CodeRenderer` | ✅ `js`, ✅ `mjs`, ✅ `cjs`, ✅ `jsx`, ✅ `ts`, ✅ `tsx`, ✅ `qml`, ✅ `vue`, ✅ `svelte`, ✅ `astro`, ✅ `css`, ✅ `scss`, ✅ `sass`, ✅ `less` |
+| Code Files, Scripting | `CodeRenderer` | ✅ `py`, ✅ `pyw`, ✅ `ipynb`, ✅ `rb`, ✅ `php`, ✅ `sh`, ✅ `bash`, ✅ `zsh`, ✅ `fish`, ✅ `ps1`, ✅ `psm1`, ✅ `psd1`, ✅ `bat`, ✅ `cmd`, ✅ `lua`, ✅ `dart`, ✅ `pl`, ✅ `pm`, ✅ `t` |
+| Code Files, Data and Query | `CodeRenderer` | ✅ `sql`, ✅ `r`, ✅ `rmd`, ✅ `jl`, ✅ `do`, ✅ `ado`, ✅ `sas` |
+| Code Files, JVM and BEAM | `CodeRenderer` | ✅ `scala`, ✅ `sc`, ✅ `groovy`, ✅ `gradle`, ✅ `ex`, ✅ `exs`, ✅ `erl`, ✅ `hrl`, ✅ `clj`, ✅ `cljs`, ✅ `cljc` |
+| Code Files, Systems and Shaders | `CodeRenderer` | ✅ `go`, ✅ `rs`, ✅ `zig`, ✅ `nim`, ✅ `v`, ✅ `asm`, ✅ `s`, ✅ `glsl`, ✅ `vert`, ✅ `frag`, ✅ `hlsl`, ✅ `fx`, ✅ `wgsl`, ✅ `metal` |
+| Code Files, Build and Project | `CodeRenderer` | ✅ `dockerfile`, ✅ `containerfile`, ✅ `makefile`, ✅ `mk`, ✅ `ninja`, ✅ `bazel`, ✅ `bzl`, ✅ `BUILD`, ✅ `sln`, ✅ `vcxproj`, ✅ `csproj`, ✅ `fsproj` |
+| Text and Structured Data | `TextRenderer` | ✅ `txt`, ✅ `log`, ✅ `json`, ✅ `jsonc`, ✅ `xml`, ✅ `yaml`, ✅ `yml`, ✅ `toml`, ✅ `ini`, ✅ `conf`, ✅ `config`, ✅ `cfg`, ✅ `env`, ✅ `csv`, ✅ `tsv`, ✅ `properties`, ✅ `editorconfig`, ✅ `gitignore`, ✅ `gitattributes`, ✅ `reg`, ✅ `props`, ✅ `targets`, ✅ `cmake`, ✅ `qrc`, ✅ `qss`, ✅ `ui`, ✅ `pri`, ✅ `pro`, ✅ `tsbuildinfo` |
+| Images, Raster and Vector | `ImageRenderer` | ✅ `png`, ✅ `jpg`, ✅ `jpeg`, `jpe`, ✅ `bmp`, `dib`, ✅ `gif`, ✅ `webp`, ✅ `heic`, ✅ `heif`, `avif`, `tif`, `tiff`, ✅ `svg`, ✅ `ico`, `icns`, `dds`, `tga`, ✅ `psd` |
+| Camera RAW Images | `ImageRenderer` | `raw`, `dng`, `cr2`, `cr3`, `nef`, `arw`, `orf`, `rw2`, `raf`, `pef`, `srw`  |
+| Audio | `MediaRenderer` | ✅ `mp3`, ✅ `wav`, ✅ `flac`, ✅ `aac`, ✅ `m4a`, ✅ `ogg`, ✅ `oga`, ✅ `wma`, ✅ `opus`, ✅ `aiff`, ✅ `aif`, ✅ `alac`, ✅ `ape`, ✅ `mid`, ✅ `midi` |
+| Video | `MediaRenderer` | ✅ `mp4`, ✅ `mkv`, ✅ `avi`, ✅ `mov`, ✅ `wmv`, ✅ `webm`, ✅ `m4v`, ✅ `mpg`, ✅ `mpeg`, ✅ `mts`, ✅ `m2ts`, `3gp`, `flv`, `ogv`, `ts` |
+| Subtitles and Captions | `TextRenderer` | `srt`, `vtt`, `ass`, `ssa`, `sub`, `idx` |
+| Archives and Packages | `ArchiveRenderer` | ✅ `zip`, ✅ `7z`, ✅ `rar`, ✅ `tar`, ✅ `gz`, ✅ `tgz`, ✅ `bz2`, ✅ `tbz`, ✅ `tbz2`, ✅ `xz`, ✅ `txz`, ✅ `cab`, `iso`, `jar`, `war`, `ear`, `apk`, `ipa`, `nupkg`, `vsix`, `crx`, `appx`, `msix` |
+| Design Files | `SummaryRenderer` | `psd`, `ai`, `eps`, `sketch`, `fig`, `xd`, `indd`, `idml`, `cdr`, `afdesign`, `afphoto`, `aseprite`  |
+| CAD and Engineering | `SummaryRenderer` | `dwg`, `dxf`, `step`, `stp`, `iges`, `igs`, `stl`, `sat`, `sldprt`, `sldasm`, `ipt`, `iam`, `f3d`, `fcstd`  |
+| 3D Models | `SummaryRenderer` | `obj`, `fbx`, `glb`, `gltf`, `dae`, `3ds`, `ply`, `usd`, `usdz`, `blend`, `abc`, `ifc`  |
+| GIS Files | `SummaryRenderer` | `shp`, `shx`, `dbf`, `prj`, `geojson`, `kml`, `kmz`, `tif`, `tiff`, `geotiff`, `gpkg`, `gdb`, `mbtiles`, `osm`, `pbf`  |
+| eBook and Comic Files | `SummaryRenderer` | `epub`, `mobi`, `azw`, `azw3`, `azw4`, `fb2`, `djvu`, `djv`, `cbz`, `cbr`, `cb7`, `cbt`  |
+| Medical Imaging | `SummaryRenderer` | `dcm`, `dicom`, `nii`, `nii.gz`, `nrrd`, `mha`, `mhd`, `img`, `hdr`  |
+| Scientific and Analytics Data | `SummaryRenderer` | `h5`, `hdf5`, `nc`, `netcdf`, `mat`, `parquet`, `feather`, `arrow`, `fits`, `fit`, `sav`, `dta`, `por`  |
+| Finance, Calendar, and Contacts | `SummaryRenderer` | `ofx`, `qif`, `qfx`, `xbrl`, `ixbrl`, `ics`, `ical`, `vcf`, `vcard`  |
+| Database Files | `SummaryRenderer` | `sqlite`, `sqlite3`, `db`, `db3`, `mdb`, `accdb`, `frm`, `ibd`, `bak`, `dump`, `sqlitedb`  |
+| Fonts | `SummaryRenderer` | `ttf`, `otf`, `woff`, `woff2`, `eot`, `ttc`, `fon`  |
+| Certificates and Keys | `SummaryRenderer` | `cer`, `crt`, `pem`, `der`, `pfx`, `p12`, `key`, `pub`, `asc`, `gpg`  |
+| Executables and Installers | `SummaryRenderer` | `exe`, `dll`, `msi`, `msix`, `appx`, `com`, `scr`, `sys` |
+| Shortcuts and Shell Items | `SummaryRenderer` | ✅ `lnk`, ✅ `url`, ✅ `appref-ms` |
+| Folders and Generic Files | `FolderRenderer`, `SummaryRenderer` | ✅ File system folders, ✅ shell folders, ✅ desktop items, ✅ unknown file types, ✅ generic fallback preview |
 
 ### PDF
 
@@ -73,8 +97,19 @@ Behavior:
 
 1. Uses `KSyntaxHighlighting`.
 2. Uses the current GitHub style theme path.
-3. Shows read only code preview.
+3. Shows read only code preview with line numbers.
 4. Truncates very large files at 2 MB for responsiveness.
+
+Planned format coverage:
+
+1. C family: `c`, `cc`, `cpp`, `cxx`, `h`, `hpp`, `hh`, `hxx`, `m`, `mm`, `cs`, `java`, `kt`, `kts`, `swift`.
+2. Web and UI: `js`, `mjs`, `cjs`, `jsx`, `ts`, `tsx`, `qml`, `vue`, `svelte`, `astro`, `css`, `scss`, `sass`, `less`, `html`, `htm`.
+3. Scripting: `py`, `pyw`, `ipynb`, `rb`, `php`, `sh`, `bash`, `zsh`, `fish`, `ps1`, `psm1`, `psd1`, `bat`, `cmd`, `lua`, `pl`, `pm`, `t`.
+4. Data and query code: `sql`, `r`, `rmd`, `jl`.
+5. JVM and BEAM: `scala`, `sc`, `groovy`, `gradle`, `ex`, `exs`, `erl`, `hrl`, `clj`, `cljs`, `cljc`.
+6. .NET and legacy languages: `fs`, `fsi`, `fsx`, `vb`, `vbs`, `pas`, `pp`.
+7. Systems and emerging languages: `go`, `rs`, `zig`, `nim`, `v`, `asm`, `s`.
+8. Build and project files: `dockerfile`, `makefile`, `mk`.
 
 ### Text Files
 

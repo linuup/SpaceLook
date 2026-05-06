@@ -1,15 +1,19 @@
 cmake_minimum_required(VERSION 3.31)
 
-project(SpaceLook LANGUAGES CXX)
+project(SpaceLook LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+if(MSVC)
+    add_compile_options(/FS)
+endif()
 
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 set(CMAKE_AUTOUIC ON)
 
-find_package(Qt5 COMPONENTS Core Gui Network Widgets WinExtras Qml Quick QuickWidgets Multimedia MultimediaWidgets Concurrent REQUIRED)
+find_package(Qt5 COMPONENTS Core Gui Network Widgets WinExtras Qml Quick QuickWidgets Multimedia MultimediaWidgets Concurrent Xml REQUIRED)
 
 file(GLOB_RECURSE SPACELOOK_SOURCES CONFIGURE_DEPENDS
     "*.cpp"
@@ -26,17 +30,33 @@ list(APPEND SPACELOOK_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/renderers/PreviewHeaderBar.h"
     "${CMAKE_CURRENT_SOURCE_DIR}/renderers/summary/SummaryRenderer.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/renderers/summary/SummaryRenderer.h"
+    "${CMAKE_CURRENT_SOURCE_DIR}/resources/spacelook.rc"
 )
 
 list(FILTER SPACELOOK_SOURCES EXCLUDE REGEX ".*/third_party/tmp_probe/.*")
 list(FILTER SPACELOOK_SOURCES EXCLUDE REGEX ".*/build/.*")
+list(FILTER SPACELOOK_SOURCES EXCLUDE REGEX ".*/third_party/cmark/.*")
+list(FILTER SPACELOOK_SOURCES EXCLUDE REGEX ".*/third_party/litehtml/.*")
 list(FILTER SPACELOOK_SOURCES EXCLUDE REGEX ".*/third_party/ksyntaxhighlighting/src/lib/ansihighlighter\\.(cpp|h)$")
 list(FILTER SPACELOOK_SOURCES EXCLUDE REGEX ".*/third_party/ksyntaxhighlighting/src/lib/definitiondownloader\\.(cpp|h)$")
 list(FILTER SPACELOOK_SOURCES EXCLUDE REGEX ".*/third_party/ksyntaxhighlighting/src/lib/htmlhighlighter\\.(cpp|h)$")
 
+set(BUILD_SHARED_LIBS OFF CACHE BOOL "Build vendor libraries as static" FORCE)
+set(BUILD_TESTING OFF CACHE BOOL "Disable vendor tests" FORCE)
+set(CMARK_LIB_FUZZER OFF CACHE BOOL "Disable cmark fuzz targets" FORCE)
+set(LITEHTML_BUILD_TESTING OFF CACHE BOOL "Disable litehtml tests" FORCE)
+set(EXTERNAL_GUMBO OFF CACHE BOOL "Use bundled gumbo" FORCE)
+
+add_subdirectory(third_party/cmark EXCLUDE_FROM_ALL)
+add_subdirectory(third_party/litehtml EXCLUDE_FROM_ALL)
+
 add_executable(SpaceLook ${SPACELOOK_SOURCES})
 
 target_sources(SpaceLook PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/renderers/document/PreviewHandlerHost.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/renderers/document/PreviewHandlerHost.h"
+    "${CMAKE_CURRENT_SOURCE_DIR}/renderers/markup/WebView2HtmlView.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/renderers/markup/WebView2HtmlView.h"
     "${CMAKE_CURRENT_SOURCE_DIR}/renderers/summary/ArchiveRenderer.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/renderers/FluentIconFont.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/renderers/PreviewHeaderBar.cpp"
@@ -63,6 +83,7 @@ target_link_libraries(SpaceLook
         OleAut32
         Uuid
         Uiautomationcore
+        gdiplus
         Qt5::Core
         Qt5::Gui
         Qt5::Network
@@ -74,10 +95,14 @@ target_link_libraries(SpaceLook
         Qt5::Multimedia
         Qt5::MultimediaWidgets
         Qt5::Concurrent
+        Qt5::Xml
+        cmark
+        litehtml
 )
 
 target_compile_definitions(SpaceLook
     PRIVATE
+        SPACELOOK_PROJECT_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
         "$<$<NOT:$<CONFIG:Debug>>:SPACELOOK_ENABLE_LIBHEIF>"
 )
 
@@ -87,6 +112,7 @@ target_include_directories(SpaceLook
         ${CMAKE_CURRENT_SOURCE_DIR}/widgets
         ${CMAKE_CURRENT_SOURCE_DIR}/viewers
         ${CMAKE_CURRENT_SOURCE_DIR}/third_party/ksyntaxhighlighting/src/lib
+        ${CMAKE_CURRENT_SOURCE_DIR}/third_party/webview2/include
         ${CMAKE_CURRENT_SOURCE_DIR}/third_party/pdfium/include
         ${CMAKE_CURRENT_SOURCE_DIR}/third_party/libheif/include
         ${CMAKE_CURRENT_SOURCE_DIR}/third_party/libde265/include
@@ -120,6 +146,7 @@ endif()
 
 target_link_libraries(SpaceLook
     PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/third_party/webview2/x64/WebView2Loader.dll.lib"
         "${CMAKE_CURRENT_SOURCE_DIR}/third_party/pdfium/lib/pdfium.dll.lib"
         "$<$<NOT:$<CONFIG:Debug>>:${CMAKE_CURRENT_SOURCE_DIR}/third_party/libheif/lib/heif.lib>"
         "$<$<NOT:$<CONFIG:Debug>>:${CMAKE_CURRENT_SOURCE_DIR}/third_party/libde265/lib/libde265.lib>"
@@ -225,6 +252,9 @@ if(WIN32)
         COMMAND ${CMAKE_COMMAND} -E copy_directory
             "${CMAKE_CURRENT_SOURCE_DIR}/third_party/ksyntaxhighlighting/data/themes"
             "$<TARGET_FILE_DIR:SpaceLook>/ksyntaxhighlighting/themes"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${CMAKE_CURRENT_SOURCE_DIR}/third_party/webview2/x64/WebView2Loader.dll"
+            "$<TARGET_FILE_DIR:SpaceLook>"
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "${CMAKE_CURRENT_SOURCE_DIR}/third_party/pdfium/bin/pdfium.dll"
             "$<TARGET_FILE_DIR:SpaceLook>"

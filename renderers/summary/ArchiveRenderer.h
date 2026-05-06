@@ -5,6 +5,7 @@
 
 #include "core/hovered_item_info.h"
 #include "renderers/IPreviewRenderer.h"
+#include "renderers/PreviewLoadGuard.h"
 
 class QLabel;
 class OpenWithButton;
@@ -24,6 +25,8 @@ public:
     QWidget* widget() override;
     void load(const HoveredItemInfo& info) override;
     void unload() override;
+    bool reportsLoadingState() const override;
+    void setLoadingStateCallback(std::function<void(bool)> callback) override;
 
 private:
     struct ArchiveEntry
@@ -46,9 +49,11 @@ private:
                                       QTreeWidgetItem* parentItem,
                                       const QString& folderName);
     ArchiveLoadResult loadArchiveEntries(const QString& filePath) const;
+    void notifyLoadingState(bool loading);
 
     HoveredItemInfo m_info;
-    quint64 m_loadRequestId = 0;
+    PreviewLoadGuard m_loadGuard;
+    std::function<void(bool)> m_loadingStateCallback;
     QWidget* m_headerRow = nullptr;
     QLabel* m_iconLabel = nullptr;
     SelectableTitleLabel* m_titleLabel = nullptr;

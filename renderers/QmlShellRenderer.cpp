@@ -17,10 +17,9 @@ QVariantMap previewDataForInfo(const HoveredItemInfo& info)
     QVariantMap data;
     data.insert(QStringLiteral("title"), info.title);
     data.insert(QStringLiteral("typeKey"), info.typeKey);
-    data.insert(QStringLiteral("typeLabel"), info.typeLabel);
     data.insert(QStringLiteral("typeDetails"), info.typeDetails);
+    data.insert(QStringLiteral("rendererName"), info.rendererName);
     data.insert(QStringLiteral("sourceKind"), info.sourceKind);
-    data.insert(QStringLiteral("itemKind"), info.itemKind);
     data.insert(QStringLiteral("filePath"), info.filePath);
     data.insert(QStringLiteral("fileName"), info.fileName);
     data.insert(QStringLiteral("folderPath"), info.folderPath);

@@ -7,6 +7,7 @@
 
 #include "core/hovered_item_info.h"
 #include "renderers/IPreviewRenderer.h"
+#include "renderers/PreviewLoadGuard.h"
 
 namespace KSyntaxHighlighting
 {
@@ -15,18 +16,22 @@ class SyntaxHighlighter;
 }
 
 class QLabel;
+class ModeSwitchButton;
 class OpenWithButton;
 class QPlainTextEdit;
 class QStackedWidget;
+class QTreeWidget;
+class QTreeWidgetItem;
 class SelectableTitleLabel;
 class QWidget;
+class PreviewState;
 
 class CodeRenderer : public QWidget, public IPreviewRenderer
 {
     Q_OBJECT
 
 public:
-    explicit CodeRenderer(QWidget* parent = nullptr);
+    explicit CodeRenderer(PreviewState* previewState, QWidget* parent = nullptr);
     ~CodeRenderer() override;
 
     QString rendererId() const override;
@@ -34,15 +39,28 @@ public:
     QWidget* widget() override;
     void load(const HoveredItemInfo& info) override;
     void unload() override;
+    bool reportsLoadingState() const override;
+    void setLoadingStateCallback(std::function<void(bool)> callback) override;
 
 private:
     void applyChrome();
     void showStatusMessage(const QString& message);
     void ensureRepository();
     void applyDefinitionForPath(const QString& filePath);
+    void toggleStructuredItem(QTreeWidgetItem* item);
+    void showStructuredContextMenu(const QPoint& position);
+    void updateModeSelector(const QString& filePath);
+    void showStructuredPreview(const QString& filePath, const QString& text);
+    void clearStructuredPreview();
+    bool tryLoadJsonPreview(const QString& text);
+    bool tryLoadXmlPreview(const QString& text);
+    bool tryLoadYamlPreview(const QString& text);
+    void notifyLoadingState(bool loading);
+    static bool isStructuredPreviewPath(const QString& filePath);
 
     HoveredItemInfo m_info;
-    quint64 m_loadRequestId = 0;
+    PreviewLoadGuard m_loadGuard;
+    std::function<void(bool)> m_loadingStateCallback;
     QWidget* m_headerRow = nullptr;
     QLabel* m_iconLabel = nullptr;
     SelectableTitleLabel* m_titleLabel = nullptr;
@@ -51,12 +69,17 @@ private:
     QLabel* m_pathTitleLabel = nullptr;
     QLabel* m_pathValueLabel = nullptr;
     OpenWithButton* m_openWithButton = nullptr;
+    QWidget* m_contentSection = nullptr;
+    QWidget* m_statusRow = nullptr;
     QLabel* m_statusLabel = nullptr;
+    ModeSwitchButton* m_modeSwitchButton = nullptr;
     QStackedWidget* m_contentStack = nullptr;
     QWidget* m_loadingCard = nullptr;
     QLabel* m_loadingTitleLabel = nullptr;
     QLabel* m_loadingMessageLabel = nullptr;
     QPlainTextEdit* m_textEdit = nullptr;
+    QTreeWidget* m_treeView = nullptr;
+    PreviewState* m_previewState = nullptr;
     std::unique_ptr<KSyntaxHighlighting::Repository> m_repository;
     KSyntaxHighlighting::SyntaxHighlighter* m_highlighter = nullptr;
 };

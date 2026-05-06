@@ -7,16 +7,14 @@
 struct DetectedTypeInfo
 {
     QString typeKey;
-    QString typeLabel;
     QString typeDetails;
-    QString itemKind;
+    QString rendererName;
     bool isDirectory = false;
 };
 
 class FileTypeDetector
 {
 public:
-    QString detectTypeLabel(const QString& filePath) const;
     HoveredItemInfo inspectPath(const QString& filePath,
                                 const QString& sourceLabel = QStringLiteral("Command Line"),
                                 const QString& windowClassName = QStringLiteral("SpaceLook")) const;

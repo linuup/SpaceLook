@@ -1,20 +1,23 @@
 #include "renderers/RendererRegistry.h"
 
 #include <QDebug>
+#include <QHash>
 
 #include "core/preview_state.h"
 #include "renderers/summary/ArchiveRenderer.h"
 #include "renderers/code/CodeRenderer.h"
 #include "renderers/document/DocumentRenderer.h"
 #include "renderers/image/ImageRenderer.h"
+#include "renderers/folder/FolderRenderer.h"
+#include "renderers/markup/RenderedPageRenderer.h"
 #include "renderers/media/MediaRenderer.h"
 #include "renderers/pdf/PdfRenderer.h"
 #include "renderers/summary/SummaryRenderer.h"
 #include "renderers/text/TextRenderer.h"
+#include "renderers/welcome/WelcomeRenderer.h"
 
 RendererRegistry::RendererRegistry(PreviewState* previewState)
 {
-    Q_UNUSED(previewState);
     auto registerRenderer = [this](std::unique_ptr<IPreviewRenderer> renderer) {
         if (!renderer) {
             qDebug().noquote() << QStringLiteral("[SpaceLookRender] Startup renderer registration failed because renderer is null");
@@ -29,16 +32,48 @@ RendererRegistry::RendererRegistry(PreviewState* previewState)
     };
 
     registerRenderer(std::make_unique<PdfRenderer>());
+    registerRenderer(std::make_unique<WelcomeRenderer>());
     registerRenderer(std::make_unique<DocumentRenderer>());
     registerRenderer(std::make_unique<ArchiveRenderer>());
-    registerRenderer(std::make_unique<CodeRenderer>());
-    registerRenderer(std::make_unique<TextRenderer>());
+    registerRenderer(std::make_unique<FolderRenderer>());
+    registerRenderer(std::make_unique<RenderedPageRenderer>());
+    registerRenderer(std::make_unique<CodeRenderer>(previewState));
+    registerRenderer(std::make_unique<TextRenderer>(previewState));
     registerRenderer(std::make_unique<ImageRenderer>());
     registerRenderer(std::make_unique<MediaRenderer>());
     registerRenderer(std::make_unique<SummaryRenderer>(previewState));
 }
 
 RendererRegistry::~RendererRegistry() = default;
+
+namespace {
+
+QString normalizeRendererLookupKey(const QString& rendererId)
+{
+    QString normalized = rendererId.trimmed().toLower();
+    if (normalized.endsWith(QStringLiteral("renderer"))) {
+        normalized.chop(QStringLiteral("renderer").size());
+    } else if (normalized.endsWith(QStringLiteral("render"))) {
+        normalized.chop(QStringLiteral("render").size());
+    }
+
+    static const QHash<QString, QString> aliases = {
+        { QStringLiteral("renderedpage"), QStringLiteral("rendered_page") },
+        { QStringLiteral("summary"), QStringLiteral("summary") },
+        { QStringLiteral("image"), QStringLiteral("image") },
+        { QStringLiteral("media"), QStringLiteral("media") },
+        { QStringLiteral("pdf"), QStringLiteral("pdf") },
+        { QStringLiteral("text"), QStringLiteral("text") },
+        { QStringLiteral("code"), QStringLiteral("code") },
+        { QStringLiteral("document"), QStringLiteral("document") },
+        { QStringLiteral("archive"), QStringLiteral("archive") },
+        { QStringLiteral("folder"), QStringLiteral("folder") }
+    };
+
+    return aliases.value(normalized, normalized);
+}
+
+}
 
 QList<IPreviewRenderer*> RendererRegistry::renderers() const
 {
@@ -49,8 +84,28 @@ QList<IPreviewRenderer*> RendererRegistry::renderers() const
     return result;
 }
 
+IPreviewRenderer* RendererRegistry::rendererById(const QString& rendererId) const
+{
+    const QString normalizedRendererId = normalizeRendererLookupKey(rendererId);
+    if (normalizedRendererId.isEmpty()) {
+        return nullptr;
+    }
+
+    for (const std::unique_ptr<IPreviewRenderer>& renderer : m_renderers) {
+        if (renderer && normalizeRendererLookupKey(renderer->rendererId()) == normalizedRendererId) {
+            return renderer.get();
+        }
+    }
+
+    return nullptr;
+}
+
 IPreviewRenderer* RendererRegistry::rendererFor(const HoveredItemInfo& info) const
 {
+    if (IPreviewRenderer* configuredRenderer = rendererById(info.rendererName)) {
+        return configuredRenderer;
+    }
+
     for (const std::unique_ptr<IPreviewRenderer>& renderer : m_renderers) {
         if (renderer && renderer->canHandle(info)) {
             return renderer.get();

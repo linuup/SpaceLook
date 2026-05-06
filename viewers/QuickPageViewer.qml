@@ -1,7 +1,7 @@
 // 在根元素添加
 property var previewData: ({
     "typeKey": "text",
-    "typeLabel": "Text File",
+    "rendererName": "text",
     "sourceKind": "Local File",
     "title": "example.txt",
     "statusMessage": "Ready to preview",
