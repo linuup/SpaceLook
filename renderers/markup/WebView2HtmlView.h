@@ -1,6 +1,7 @@
 ﻿#pragma once
 
 #include <QWidget>
+#include <memory>
 
 #include "renderers/PreviewLoadGuard.h"
 
@@ -45,6 +46,7 @@ private:
     QString m_pendingHtml;
     QString m_pendingFilePath;
     QString m_lastError;
+    std::shared_ptr<bool> m_alive;
     bool m_initializing = false;
     bool m_ready = false;
     bool m_comInitialized = false;

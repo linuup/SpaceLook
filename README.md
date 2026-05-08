@@ -1,63 +1,48 @@
-﻿# SpaceLook
+﻿<p align="center">
+    <picture>
+      <img src="resources/IntroduceImage/Welcome.png" />
+  </picture>
+</p>
+<h3 align="center">
+  <a href="README.md">English</a>
+  <span> · </span>
+  <a href="README.zh-CN.md">简体中文</a>
+</h3>
 
-## Overview
 
-SpaceLook inspects the item under the mouse cursor on the Windows desktop or in File Explorer, converts that result into a shared data model, and routes it to the correct preview renderer.
+# SpaceLook
 
-The current implementation is optimized for fast local preview with native Qt widgets and lightweight parsing where possible.
+SpaceLook is a fast Windows preview tool inspired by the simple idea that files should open just enough before you fully open them.
+
+Hover a file, folder, shortcut, or desktop item. Press `Space`. SpaceLook opens a lightweight preview window near your workflow, then closes just as quickly when you are done.
+
+## Highlights
+
+1. Instant preview from the desktop and File Explorer.
+2. Clean floating preview window with a compact capsule menu.
+3. Image preview with zoom, pan, copy, and animated image support.
+4. PDF preview with page thumbnails, lazy loading, page input, and smooth navigation.
+5. Code preview with syntax highlighting and line numbers.
+6. JSON, XML, YAML, and YML structure view with collapsible nodes.
+7. Markdown and HTML rendered preview.
+8. Folder preview with filtering, nested preview stack, and default app actions.
+9. Audio and video preview that starts paused, so playback stays under user control.
+10. Summary fallback for shortcuts, executables, shell items, and unknown files.
 
 ## How to Use
 1. Hover over a file, folder, shortcut, or shell item on the desktop or in File Explorer.
-2. Press the `Space` key to toggle the preview window for the currently hovered item.
+2. Press `Space` to open the preview window.
+3. Press `Space` again to close the current preview.
+4. Press `Esc` to close the preview immediately.
+5. Use the capsule menu for pin, open, copy path, refresh, expand, and close actions.
 
-## Current Renderer Order
+## Practical Features
 
-The registry currently loads renderers in this order:
-
-1. `pdf`
-2. `welcome`
-3. `document`
-4. `archive`
-5. `certificate`
-6. `folder`
-7. `rendered_page`
-8. `code`
-9. `text`
-10. `image`
-11. `media`
-12. `summary`
-
-If `core/RenderType.json` provides a renderer name, the registry resolves that renderer first. Otherwise, the first renderer whose `canHandle()` returns `true` is used.
-
-## Renderer Directory
-
-The current renderer modules under `renderers/` are:
-
-| Path | Main renderer or helper | Responsibility |
-| --- | --- | --- |
-| `renderers/certificate/` | `CertificateRenderer` | Previews certificate and key metadata, including password unlock flow for PKCS#12 containers. |
-| `renderers/code/` | `CodeRenderer` | Shows syntax highlighted source code and structured code files with line numbers. |
-| `renderers/document/` | `DocumentRenderer`, `PreviewHandlerHost` | Previews Office documents and hosts Windows Preview Handler based document views. |
-| `renderers/folder/` | `FolderRenderer` | Shows folder contents, shell folder entries, item actions, and inline rename UI. |
-| `renderers/image/` | `ImageRenderer` | Previews raster and vector images with zoom, pan, animated image handling, and special decoders. |
-| `renderers/markup/` | `RenderedPageRenderer`, `WebView2HtmlView`, `LiteHtmlView` | Previews Markdown and HTML through rendered page views, with WebView2 preferred for HTML. |
-| `renderers/media/` | `MediaRenderer` | Previews audio and video with modern playback controls, Windows first for common formats, MPV enhanced runtime for Opus and Vorbis audio. |
-| `renderers/pdf/` | `PdfRenderer`, `PdfDocument`, `PdfViewWidget` | Previews PDF through PDFium and routes XPS or OXPS through Windows Preview Handler fallback. |
-| `renderers/summary/` | `SummaryRenderer`, `ArchiveRenderer` | Shows fallback metadata and archive contents. |
-| `renderers/text/` | `TextRenderer` | Shows plain text and structured text formats with formatting, wrapping, and line numbers. |
-| `renderers/welcome/` | `WelcomeRenderer` | Shows the welcome screen and supported preview entry points. |
-| `renderers/RendererRegistry.*` | `RendererRegistry` | Registers renderers, resolves configured renderer names, and selects a fallback renderer. |
-| `renderers/PreviewHost.*` | `PreviewHost` | Hosts renderer widgets, switches active renderer, and applies summary fallback requests. |
-| `renderers/FileTypeIconResolver.*` | `FileTypeIconResolver` | Resolves file type, shell, shortcut, and welcome icon assets. |
-| `renderers/OpenWithButton.*` | `OpenWithButton` | Provides the shared Open with control and handler menu. |
-| `renderers/PreviewHeaderBar.*` | `PreviewHeaderBar` | Provides shared title, path, action, and close chrome used by renderers. |
-| `renderers/SelectableTitleLabel.*` | `SelectableTitleLabel` | Provides title copy interactions used in renderer headers. |
-| `renderers/ModeSwitchButton.*` | `ModeSwitchButton` | Provides shared mode selection UI for text and code views. |
-| `renderers/FluentIconFont.*` | `FluentIconFont` | Loads the embedded Segoe Fluent Icons font and exposes glyph helpers. |
-| `renderers/CodeThemeManager.*` | `CodeThemeManager` | Provides syntax highlighting theme selection for code preview. |
-| `renderers/QmlShellRenderer.*` | `QmlShellRenderer` | Hosts QML based renderer surfaces where needed. |
-| `renderers/IPreviewRenderer.h` | `IPreviewRenderer` | Defines the common renderer interface. |
-| `renderers/PreviewLoadGuard.h` | `PreviewLoadGuard` | Helps guard async renderer loads from stale preview state. |
+1. Preview nested folder contents and open inner items from the folder preview.
+2. Search inside text, code, PDF, and structured data previews.
+3. Switch JSON, XML, YAML, and YML between text and structure views.
+4. Use the settings page to control menu placement, visibility, startup behavior, tray behavior, and file type mappings.
+5. Use the OCR entry point when you need to capture text from an image area.
 
 ## Preview Type Coverage Matrix
 
@@ -98,126 +83,45 @@ The current renderer modules under `renderers/` are:
 | Shortcuts and Shell Items | `SummaryRenderer` | ✅ `lnk`, ✅ `url`, ✅ `appref-ms` |
 | Folders and Generic Files | `FolderRenderer`, `SummaryRenderer` | ✅ File system folders, ✅ shell folders, ✅ desktop items, ✅ unknown file types, ✅ generic fallback preview |
 
-### PDF
+## Screenshots
 
-Renderer: `PdfRenderer`
+<p>
+  <img src="resources/IntroduceImage/Image.png" alt="Image preview" width="720">
+</p>
 
-Behavior:
+<p>
+  <img src="resources/IntroduceImage/Code.png" alt="Code preview" width="720">
+</p>
 
-1. Uses PDFium through a dynamic DLL.
-2. Uses a native PDF preview widget.
-3. Supports scrolling.
-4. Supports `Ctrl + mouse wheel` zoom.
-5. Uses a larger default preview window size for document style content.
+<p>
+  <img src="resources/IntroduceImage/Code1.png" alt="Structured code preview" width="720">
+</p>
 
-Current note:
+<p>
+  <img src="resources/IntroduceImage/Folder.png" alt="Folder preview" width="720">
+</p>
 
-1. The current native PDF preview path is focused on speed and stability.
+<p>
+  <img src="resources/IntroduceImage/Summery.png" alt="Summary preview" width="720">
+</p>
 
-### Office Documents
+## Requirements
 
-Renderer: `DocumentRenderer`
+1. Windows 10 or later.
+2. Qt 5.12.2 based desktop runtime.
+3. Optional Microsoft Office installation for better legacy Office preview behavior.
+4. Optional MPV runtime for enhanced audio format support.
 
-Behavior:
+## Build
 
-1. `docx`, `xlsx`, and `pptx` are parsed with Qt side logic and rendered into lightweight HTML.
-2. Legacy binary formats `doc`, `xls`, and `ppt` are converted through local Microsoft Office automation into modern Open XML formats when Microsoft Office is installed.
-3. The converted result is cached under the local temp directory and then previewed through the existing Qt parser path.
+```powershell
+cmake --build build --config Debug --target SpaceLook
+```
 
-### Code Files
-
-Renderer: `CodeRenderer`
-
-Behavior:
-
-1. Uses `KSyntaxHighlighting`.
-2. Uses the current GitHub style theme path.
-3. Shows read only code preview with line numbers.
-4. Truncates very large files at 2 MB for responsiveness.
-
-Planned format coverage:
-
-1. C family: `c`, `cc`, `cpp`, `cxx`, `h`, `hpp`, `hh`, `hxx`, `m`, `mm`, `cs`, `java`, `kt`, `kts`, `swift`.
-2. Web and UI: `js`, `mjs`, `cjs`, `jsx`, `ts`, `tsx`, `qml`, `vue`, `svelte`, `astro`, `css`, `scss`, `sass`, `less`, `html`, `htm`.
-3. Scripting: `py`, `pyw`, `ipynb`, `rb`, `php`, `sh`, `bash`, `zsh`, `fish`, `ps1`, `psm1`, `psd1`, `bat`, `cmd`, `lua`, `pl`, `pm`, `t`.
-4. Data and query code: `sql`, `r`, `rmd`, `jl`.
-5. JVM and BEAM: `scala`, `sc`, `groovy`, `gradle`, `ex`, `exs`, `erl`, `hrl`, `clj`, `cljs`, `cljc`.
-6. .NET and legacy languages: `fs`, `fsi`, `fsx`, `vb`, `vbs`, `pas`, `pp`.
-7. Systems and emerging languages: `go`, `rs`, `zig`, `nim`, `v`, `asm`, `s`.
-8. Build and project files: `dockerfile`, `makefile`, `mk`.
-
-### Text Files
-
-Renderer: `TextRenderer`
-
-Behavior:
-
-1. Uses `QPlainTextEdit`.
-2. Shows line numbers.
-3. Uses custom modern scroll bar styling.
-4. Truncates very large files at 2 MB for responsiveness.
-
-### Images
-
-Renderer: `ImageRenderer`
-
-Behavior:
-
-1. Supports zoom with `Ctrl + mouse wheel`.
-2. Supports drag to pan when zoomed in.
-3. Supports double click to reset zoom.
-4. Supports copying the image to the clipboard.
-
-### Audio and Video
-
-Renderer: `MediaRenderer`
-
-Behavior:
-
-1. Uses Windows playback first for common audio and video formats.
-2. Opens preview in paused state.
-3. Uses default volume `50`.
-4. Supports click to play or pause.
-5. Supports click seek on the progress slider.
-6. Supports mute toggle and direct volume slider control.
-7. Requires the MPV enhanced runtime for `Opus audio` and `Vorbis audio`, including `.ogg`, `.oga`, and `.opus` files.
-8. Falls back to MPV when Windows playback cannot parse supported fallback formats.
-
-### Summary and Fallback
-
-Renderer: `SummaryRenderer`
-
-Common routed types:
-
-1. `welcome`
-2. `folder`
-3. `shortcut`
-4. `shell_folder`
-5. `archive`
-6. generic file types
-7. unsupported objects
-
-Behavior:
-
-1. Shows normalized item metadata.
-2. Shows path, resolved target, and basic file system flags.
-3. Shows status text for missing, unsupported, or unresolved objects.
-## Core Modules
-
-1. `file_type_detector.*`
-   Detects the hovered object, resolves its real path, and assigns a normalized `typeKey`.
-
-2. `preview_manager.*`
-   Controls preview show and hide flow and handles the `Space` toggle behavior.
-
-3. `preview_state.*`
-   Stores the current preview item state used by the rendering layer.
-
-4. `renderers/RendererRegistry.*`
-   Registers all renderers and selects the first one that can handle the current item.
-
-5. `renderers/PreviewHost.*`
-   Hosts renderer widgets and switches between them.
-
-6. `widgets/SpaceLookWindow.*`
-   Provides the frameless preview window, close button, and manual resize from window edges and corners.
+## Support
+if SpaceLook helps you, you can support the project with the WeChat appreciation code below.
+#### Thanks♪(･ω･)ﾉ 
+<p>
+  <img src="PreView-Files/Image/微信图片_20260509033906_69_28.jpg" alt="WeChat appreciation code" width="260">
+</p>
+WeChat QR Code

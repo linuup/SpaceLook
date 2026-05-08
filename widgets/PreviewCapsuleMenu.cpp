@@ -306,6 +306,7 @@ PreviewCapsuleMenu::PreviewCapsuleMenu(QWidget* parent)
         { MenuAction::Pin, QStringLiteral("PreviewPinButton"), FluentIconFont::glyph(0xE840), QStringLiteral("Pin preview"), true, true },
         { MenuAction::Open, QStringLiteral("PreviewOpenFolderButton"), FluentIconFont::glyph(0xE8A7), QStringLiteral("Open item") },
         { MenuAction::Copy, QStringLiteral("PreviewCopyButton"), FluentIconFont::glyph(0xE8C8), QStringLiteral("Copy path") },
+        { MenuAction::Ocr, QStringLiteral("PreviewOcrButton"), FluentIconFont::glyph(0xE722), QStringLiteral("OCR screen area") },
         { MenuAction::Refresh, QStringLiteral("PreviewRefreshButton"), FluentIconFont::glyph(0xE72C), QStringLiteral("Refresh preview") },
         { MenuAction::Expand, QStringLiteral("PreviewExpandButton"), collapsedPreviewGlyph(), QStringLiteral("Expand preview") },
         { MenuAction::Close, QStringLiteral("PreviewCloseButton"), FluentIconFont::glyph(0xE711), QStringLiteral("Close preview") },
@@ -344,7 +345,7 @@ PreviewCapsuleMenu::PreviewCapsuleMenu(QWidget* parent)
         "#PreviewActionSeparator {"
         "  background: transparent;"
         "}"
-        "#PreviewPinButton, #PreviewOpenFolderButton, #PreviewCopyButton, #PreviewRefreshButton,"
+        "#PreviewPinButton, #PreviewOpenFolderButton, #PreviewCopyButton, #PreviewOcrButton, #PreviewRefreshButton,"
         "#PreviewExpandButton, #PreviewCloseButton, #PreviewMoreButton {"
         "  background: transparent;"
         "  border: none;"
@@ -355,11 +356,11 @@ PreviewCapsuleMenu::PreviewCapsuleMenu(QWidget* parent)
         "  border-radius: 14px;"
         "  padding: 0px;"
         "}"
-        "#PreviewOpenFolderButton:hover, #PreviewCopyButton:hover, #PreviewRefreshButton:hover,"
+        "#PreviewOpenFolderButton:hover, #PreviewCopyButton:hover, #PreviewOcrButton:hover, #PreviewRefreshButton:hover,"
         "#PreviewExpandButton:hover, #PreviewCloseButton:hover, #PreviewMoreButton:hover {"
         "  background: rgba(237, 243, 250, 0.98);"
         "}"
-        "#PreviewOpenFolderButton:pressed, #PreviewCopyButton:pressed, #PreviewRefreshButton:pressed,"
+        "#PreviewOpenFolderButton:pressed, #PreviewCopyButton:pressed, #PreviewOcrButton:pressed, #PreviewRefreshButton:pressed,"
         "#PreviewExpandButton:pressed, #PreviewCloseButton:pressed, #PreviewMoreButton:pressed {"
         "  background: rgba(226, 235, 246, 1.0);"
         "}"
@@ -466,6 +467,9 @@ void PreviewCapsuleMenu::triggerMenuAction(MenuAction action)
         return;
     case MenuAction::Copy:
         previewWindow->copyCurrentPath();
+        return;
+    case MenuAction::Ocr:
+        previewWindow->startOcrCapture();
         return;
     case MenuAction::Refresh:
         previewWindow->refreshCurrentPreview();
@@ -601,6 +605,9 @@ void PreviewCapsuleMenu::applyMenuVisibility()
     }
     if (QAbstractButton* button = menuButton(MenuAction::Copy)) {
         button->setVisible(settings.showMenuCopy());
+    }
+    if (QAbstractButton* button = menuButton(MenuAction::Ocr)) {
+        button->setVisible(settings.showMenuOcr());
     }
     if (QAbstractButton* button = menuButton(MenuAction::Refresh)) {
         button->setVisible(settings.showMenuRefresh());

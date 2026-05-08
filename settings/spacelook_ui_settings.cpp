@@ -3,9 +3,20 @@
 #include <QCoreApplication>
 #include <QDir>
 #include <QFileInfo>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QNetworkAccessManager>
+#include <QNetworkReply>
+#include <QNetworkRequest>
 #include <QSettings>
+#include <QTimer>
+#include <QUrl>
+#include <QUrlQuery>
+#include <QVariant>
 
 namespace {
+
+constexpr int kBaiduCredentialTestTimeoutMs = 20000;
 
 QString settingsFilePath()
 {
@@ -22,6 +33,31 @@ QString autoStartValueName()
     return QStringLiteral("LinDeskSpaceLook");
 }
 
+QString baiduJsonErrorMessage(const QJsonObject& object)
+{
+    const QString errorDescription = object.value(QStringLiteral("error_description")).toString().trimmed();
+    if (!errorDescription.isEmpty()) {
+        return errorDescription;
+    }
+
+    const QString error = object.value(QStringLiteral("error")).toString().trimmed();
+    if (!error.isEmpty()) {
+        return error;
+    }
+
+    const QString errorMessage = object.value(QStringLiteral("error_msg")).toString().trimmed();
+    if (!errorMessage.isEmpty()) {
+        return errorMessage;
+    }
+
+    const int errorCode = object.value(QStringLiteral("error_code")).toInt();
+    if (errorCode != 0) {
+        return QCoreApplication::translate("SpaceLook", "Baidu OCR error %1.").arg(errorCode);
+    }
+
+    return QString();
+}
+
 }
 
 SpaceLookUiSettings& SpaceLookUiSettings::instance()
@@ -32,6 +68,8 @@ SpaceLookUiSettings& SpaceLookUiSettings::instance()
 
 SpaceLookUiSettings::SpaceLookUiSettings()
 {
+    m_networkAccessManager = new QNetworkAccessManager(this);
+
     QSettings settings(settingsFilePath(), QSettings::IniFormat);
     m_menuButtonSize = qBound(30, settings.value(QStringLiteral("ui/menu_button_size"), 38).toInt(), 72);
     m_showMenuBorder = settings.value(QStringLiteral("ui/menu/show_border"), false).toBool();
@@ -42,11 +80,15 @@ SpaceLookUiSettings::SpaceLookUiSettings()
     m_showMenuPin = settings.value(QStringLiteral("ui/menu/show_pin"), true).toBool();
     m_showMenuOpen = settings.value(QStringLiteral("ui/menu/show_open"), true).toBool();
     m_showMenuCopy = settings.value(QStringLiteral("ui/menu/show_copy"), true).toBool();
+    m_showMenuOcr = settings.value(QStringLiteral("ui/menu/show_ocr"), true).toBool();
     m_showMenuRefresh = settings.value(QStringLiteral("ui/menu/show_refresh"), true).toBool();
     m_showMenuExpand = settings.value(QStringLiteral("ui/menu/show_expand"), true).toBool();
     m_showMenuClose = settings.value(QStringLiteral("ui/menu/show_close"), true).toBool();
     m_showMenuMore = settings.value(QStringLiteral("ui/menu/show_more"), true).toBool();
     m_language = normalizedLanguage(settings.value(QStringLiteral("ui/language"), QStringLiteral("en")).toString());
+    m_ocrEngine = normalizedOcrEngine(settings.value(QStringLiteral("ui/ocr/engine"), QStringLiteral("windows")).toString());
+    m_baiduOcrApiKey = settings.value(QStringLiteral("ui/ocr/baidu_api_key")).toString();
+    m_baiduOcrSecretKey = settings.value(QStringLiteral("ui/ocr/baidu_secret_key")).toString();
     m_autoStart = loadAutoStart();
 }
 
@@ -206,6 +248,20 @@ void SpaceLookUiSettings::setShowMenuCopy(bool show)
     emit menuVisibilityChanged();
 }
 
+bool SpaceLookUiSettings::showMenuOcr() const
+{
+    return m_showMenuOcr;
+}
+
+void SpaceLookUiSettings::setShowMenuOcr(bool show)
+{
+    if (!updateBoolSetting(m_showMenuOcr, show, QStringLiteral("ui/menu/show_ocr"))) {
+        return;
+    }
+
+    emit menuVisibilityChanged();
+}
+
 bool SpaceLookUiSettings::showMenuRefresh() const
 {
     return m_showMenuRefresh;
@@ -281,7 +337,144 @@ void SpaceLookUiSettings::setLanguage(const QString& language)
     emit languageChanged();
 }
 
+QString SpaceLookUiSettings::ocrEngine() const
+{
+    return m_ocrEngine;
+}
+
+void SpaceLookUiSettings::setOcrEngine(const QString& engine)
+{
+    const QString nextEngine = normalizedOcrEngine(engine);
+    if (!updateStringSetting(m_ocrEngine, nextEngine, QStringLiteral("ui/ocr/engine"))) {
+        return;
+    }
+
+    emit ocrSettingsChanged();
+}
+
+QString SpaceLookUiSettings::baiduOcrApiKey() const
+{
+    return m_baiduOcrApiKey;
+}
+
+void SpaceLookUiSettings::setBaiduOcrApiKey(const QString& apiKey)
+{
+    if (!updateStringSetting(m_baiduOcrApiKey, apiKey.trimmed(), QStringLiteral("ui/ocr/baidu_api_key"))) {
+        return;
+    }
+
+    m_baiduOcrCredentialTestMessage.clear();
+    emit ocrSettingsChanged();
+}
+
+QString SpaceLookUiSettings::baiduOcrSecretKey() const
+{
+    return m_baiduOcrSecretKey;
+}
+
+void SpaceLookUiSettings::setBaiduOcrSecretKey(const QString& secretKey)
+{
+    if (!updateStringSetting(m_baiduOcrSecretKey, secretKey.trimmed(), QStringLiteral("ui/ocr/baidu_secret_key"))) {
+        return;
+    }
+
+    m_baiduOcrCredentialTestMessage.clear();
+    emit ocrSettingsChanged();
+}
+
+bool SpaceLookUiSettings::baiduOcrCredentialTestBusy() const
+{
+    return m_baiduOcrCredentialTestBusy;
+}
+
+QString SpaceLookUiSettings::baiduOcrCredentialTestMessage() const
+{
+    return m_baiduOcrCredentialTestMessage;
+}
+
+void SpaceLookUiSettings::testBaiduOcrCredentials()
+{
+    if (m_baiduOcrCredentialTestBusy) {
+        return;
+    }
+
+    const QString apiKey = m_baiduOcrApiKey.trimmed();
+    const QString secretKey = m_baiduOcrSecretKey.trimmed();
+    if (apiKey.isEmpty() || secretKey.isEmpty()) {
+        setBaiduOcrCredentialTestState(false, QCoreApplication::translate("SpaceLook", "Baidu OCR requires API_KEY and SECRET_KEY."));
+        return;
+    }
+
+    QUrlQuery form;
+    form.addQueryItem(QStringLiteral("grant_type"), QStringLiteral("client_credentials"));
+    form.addQueryItem(QStringLiteral("client_id"), apiKey);
+    form.addQueryItem(QStringLiteral("client_secret"), secretKey);
+
+    QNetworkRequest request{ QUrl(QStringLiteral("https://aip.baidubce.com/oauth/2.0/token")) };
+    request.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/x-www-form-urlencoded"));
+
+    setBaiduOcrCredentialTestState(true, QCoreApplication::translate("SpaceLook", "Testing Baidu OCR credentials..."));
+    m_baiduOcrCredentialTestReply = m_networkAccessManager->post(request, form.toString(QUrl::FullyEncoded).toUtf8());
+
+    QTimer* timeoutTimer = new QTimer(m_baiduOcrCredentialTestReply);
+    timeoutTimer->setSingleShot(true);
+    connect(timeoutTimer, &QTimer::timeout, m_baiduOcrCredentialTestReply, [this]() {
+        if (m_baiduOcrCredentialTestReply) {
+            m_baiduOcrCredentialTestReply->abort();
+        }
+    });
+    timeoutTimer->start(kBaiduCredentialTestTimeoutMs);
+
+    connect(m_baiduOcrCredentialTestReply, &QNetworkReply::finished, this, [this, timeoutTimer]() {
+        QNetworkReply* reply = m_baiduOcrCredentialTestReply;
+        m_baiduOcrCredentialTestReply = nullptr;
+        if (!reply) {
+            setBaiduOcrCredentialTestState(false, QCoreApplication::translate("SpaceLook", "Baidu credential test failed."));
+            return;
+        }
+
+        timeoutTimer->stop();
+        const QByteArray body = reply->readAll();
+        const QNetworkReply::NetworkError networkError = reply->error();
+        const QString networkErrorText = reply->errorString();
+        reply->deleteLater();
+
+        if (networkError != QNetworkReply::NoError) {
+            const QString message = networkError == QNetworkReply::OperationCanceledError
+                ? QCoreApplication::translate("SpaceLook", "Baidu credential test timed out.")
+                : networkErrorText;
+            setBaiduOcrCredentialTestState(false, message);
+            return;
+        }
+
+        const QJsonDocument document = QJsonDocument::fromJson(body);
+        if (!document.isObject()) {
+            setBaiduOcrCredentialTestState(false, QCoreApplication::translate("SpaceLook", "Baidu token response is invalid."));
+            return;
+        }
+
+        const QJsonObject object = document.object();
+        const QString token = object.value(QStringLiteral("access_token")).toString().trimmed();
+        if (!token.isEmpty()) {
+            setBaiduOcrCredentialTestState(false, QCoreApplication::translate("SpaceLook", "Baidu OCR credentials are valid."));
+            return;
+        }
+
+        const QString error = baiduJsonErrorMessage(object);
+        setBaiduOcrCredentialTestState(false, error.isEmpty()
+            ? QCoreApplication::translate("SpaceLook", "Baidu credential test failed.")
+            : error);
+    });
+}
+
 void SpaceLookUiSettings::writeBoolSetting(const QString& key, bool value)
+{
+    QSettings settings(settingsFilePath(), QSettings::IniFormat);
+    settings.setValue(key, value);
+    settings.sync();
+}
+
+void SpaceLookUiSettings::writeStringSetting(const QString& key, const QString& value)
 {
     QSettings settings(settingsFilePath(), QSettings::IniFormat);
     settings.setValue(key, value);
@@ -296,6 +489,17 @@ bool SpaceLookUiSettings::updateBoolSetting(bool& field, bool value, const QStri
 
     field = value;
     writeBoolSetting(key, value);
+    return true;
+}
+
+bool SpaceLookUiSettings::updateStringSetting(QString& field, const QString& value, const QString& key)
+{
+    if (field == value) {
+        return false;
+    }
+
+    field = value;
+    writeStringSetting(key, value);
     return true;
 }
 
@@ -328,4 +532,24 @@ QString SpaceLookUiSettings::normalizedLanguage(const QString& language) const
         return QStringLiteral("zh");
     }
     return QStringLiteral("en");
+}
+
+QString SpaceLookUiSettings::normalizedOcrEngine(const QString& engine) const
+{
+    const QString normalized = engine.trimmed().toLower();
+    if (normalized == QStringLiteral("baidu")) {
+        return QStringLiteral("baidu");
+    }
+    return QStringLiteral("windows");
+}
+
+void SpaceLookUiSettings::setBaiduOcrCredentialTestState(bool busy, const QString& message)
+{
+    if (m_baiduOcrCredentialTestBusy == busy && m_baiduOcrCredentialTestMessage == message) {
+        return;
+    }
+
+    m_baiduOcrCredentialTestBusy = busy;
+    m_baiduOcrCredentialTestMessage = message;
+    emit ocrSettingsChanged();
 }

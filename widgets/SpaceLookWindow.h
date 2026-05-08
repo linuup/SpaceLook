@@ -10,6 +10,7 @@ class PreviewState;
 class PreviewHost;
 class PreviewCapsuleMenu;
 class QBoxLayout;
+class QImage;
 class QSystemTrayIcon;
 class QMenu;
 
@@ -32,6 +33,7 @@ public:
     void copyCurrentPath();
     void refreshCurrentPreview();
     void openCurrentWithDefaultApp();
+    void startOcrCapture();
     void showOpenWithMenuAt(const QPoint& globalPos);
     void showSettingsWindow();
     void toggleExpandedPreview();
@@ -76,8 +78,10 @@ private:
     void uninstallSpaceHook();
     Qt::Edges resizeEdgesForPosition(const QPoint& localPos) const;
     void updateCursorForPosition(const QPoint& localPos);
+    bool shouldStartDragFromMenuBackground(const QPoint& localPos) const;
     bool shouldStartDragFromActiveHeader(const QPoint& localPos) const;
     QString currentPreviewPath() const;
+    void runOcrForCapturedImage(const QImage& image);
 
     QWidget* m_container = nullptr;
     QWidget* m_menuRegion = nullptr;

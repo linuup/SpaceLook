@@ -18,8 +18,9 @@
 #include "renderers/text/TextRenderer.h"
 #include "renderers/welcome/WelcomeRenderer.h"
 
-RendererRegistry::RendererRegistry(PreviewState* previewState)
-    : m_previewState(previewState)
+RendererRegistry::RendererRegistry(PreviewState* previewState, QObject* parent)
+    : QObject(parent)
+    , m_previewState(previewState)
 {
     auto registerRenderer = [this](std::unique_ptr<IPreviewRenderer> renderer) {
         if (!renderer) {
@@ -199,7 +200,7 @@ void RendererRegistry::warmUpHeavyRenderers() const
             continue;
         }
 
-        QTimer::singleShot(delayMs, [renderer, rendererId]() {
+        QTimer::singleShot(delayMs, this, [renderer, rendererId]() {
             qDebug().noquote() << QStringLiteral("[SpaceLookRender] Warmup renderer=%1").arg(rendererId);
             renderer->warmUp();
         });

@@ -69,10 +69,10 @@ private:
     QTreeWidgetItem* ensureFolderItem(const QString& folderPath,
                                       QTreeWidgetItem* parentItem,
                                       const QString& folderName);
-    ArchiveLoadResult loadArchiveEntries(const QString& filePath, const PreviewCancellationToken& cancelToken) const;
-    EntryPreviewResult loadEntryPreview(const QString& archivePath,
-                                        const ArchiveEntry& entry,
-                                        const PreviewCancellationToken& cancelToken) const;
+    static ArchiveLoadResult loadArchiveEntries(const QString& filePath, const PreviewCancellationToken& cancelToken);
+    static EntryPreviewResult loadEntryPreview(const QString& archivePath,
+                                               const ArchiveEntry& entry,
+                                               const PreviewCancellationToken& cancelToken);
     void notifyLoadingState(bool loading);
 
     HoveredItemInfo m_info;

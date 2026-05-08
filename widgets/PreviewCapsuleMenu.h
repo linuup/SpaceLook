@@ -30,6 +30,7 @@ private:
         Pin,
         Open,
         Copy,
+        Ocr,
         Refresh,
         Expand,
         Close,

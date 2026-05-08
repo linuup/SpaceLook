@@ -4,8 +4,11 @@
 #include "settings/app_translator.h"
 #include "settings/render_type_settings.h"
 #include "settings/spacelook_ui_settings.h"
+#include "renderers/image/OcrRunner.h"
 #include "renderers/OpenWithButton.h"
 #include "renderers/PreviewHost.h"
+#include "widgets/OcrCaptureOverlay.h"
+#include "widgets/OcrResultWindow.h"
 #include "widgets/PreviewCapsuleMenu.h"
 
 #include <QAbstractButton>
@@ -19,12 +22,14 @@
 #include <QHBoxLayout>
 #include <QGuiApplication>
 #include <QFileInfo>
+#include <QFutureWatcher>
 #include <QIcon>
 #include <QMetaObject>
 #include <QMouseEvent>
 #include <QKeyEvent>
 #include <QPainterPath>
 #include <QPoint>
+#include <QPointer>
 #include <QProcess>
 #include <QRegion>
 #include <QQmlContext>
@@ -42,6 +47,7 @@
 #include <QVariantMap>
 #include <QVBoxLayout>
 #include <QWindow>
+#include <QtConcurrent/QtConcurrent>
 
 #include <Windows.h>
 #include <shellapi.h>
@@ -56,6 +62,26 @@ bool g_spaceKeyPressed = false;
 constexpr int kTooltipDurationMs = 2000;
 constexpr int kResizeGripMargin = 10;
 constexpr qreal kWindowCornerRadius = 22.0;
+
+bool supportsRendererModeOverride(const QString& filePath)
+{
+    const QString suffix = QFileInfo(filePath).suffix().trimmed().toLower();
+    return suffix == QStringLiteral("json") ||
+        suffix == QStringLiteral("jsonc") ||
+        suffix == QStringLiteral("xml") ||
+        suffix == QStringLiteral("yaml") ||
+        suffix == QStringLiteral("yml");
+}
+
+QString normalizedRendererModeOverride(const QString& rendererOverride)
+{
+    const QString normalized = rendererOverride.trimmed().toLower();
+    if (normalized == QStringLiteral("text") || normalized == QStringLiteral("code")) {
+        return normalized;
+    }
+
+    return QString();
+}
 
 QIcon SPACELOOKAppIcon()
 {
@@ -837,9 +863,14 @@ void SpaceLookWindow::refreshCurrentPreview()
         return;
     }
 
-    const HoveredItemInfo info = m_previewState->hoveredItem();
+    HoveredItemInfo info = m_previewState->hoveredItem();
     if (!info.valid) {
         return;
+    }
+
+    const QString rendererOverride = normalizedRendererModeOverride(m_previewState->rendererOverride());
+    if (!rendererOverride.isEmpty() && supportsRendererModeOverride(info.filePath)) {
+        info.rendererName = rendererOverride;
     }
 
     m_previewHost->showPreview(info);
@@ -869,6 +900,39 @@ void SpaceLookWindow::openCurrentWithDefaultApp()
     hidePreview();
 }
 
+void SpaceLookWindow::startOcrCapture()
+{
+    QPointer<QScreen> targetScreen = QGuiApplication::screenAt(QCursor::pos());
+    if (!targetScreen) {
+        targetScreen = QGuiApplication::primaryScreen();
+    }
+    if (!targetScreen) {
+        QToolTip::showText(QCursor::pos(), QStringLiteral("No screen is available for OCR capture"), this, QRect(), kTooltipDurationMs);
+        return;
+    }
+
+    QTimer::singleShot(0, this, [this, targetScreen]() {
+        QScreen* screen = targetScreen ? targetScreen.data() : QGuiApplication::primaryScreen();
+        if (!screen) {
+            QToolTip::showText(QCursor::pos(), QStringLiteral("No screen is available for OCR capture"), this, QRect(), kTooltipDurationMs);
+            return;
+        }
+
+        auto* overlay = new OcrCaptureOverlay(screen);
+        connect(overlay, &OcrCaptureOverlay::captureCanceled, this, [this](const QString& message) {
+            if (!message.trimmed().isEmpty()) {
+                QToolTip::showText(QCursor::pos(), message, this, QRect(), kTooltipDurationMs);
+            }
+        });
+        connect(overlay, &OcrCaptureOverlay::captureSelected, this, [this](const QImage& image) {
+            runOcrForCapturedImage(image);
+        });
+        overlay->showFullScreen();
+        overlay->raise();
+        overlay->activateWindow();
+    });
+}
+
 void SpaceLookWindow::toggleExpandedPreview()
 {
     if (!m_previewState) {
@@ -889,6 +953,46 @@ void SpaceLookWindow::toggleExpandedPreview()
     if (m_menuBar) {
         m_menuBar->syncToWindowState();
     }
+}
+
+void SpaceLookWindow::runOcrForCapturedImage(const QImage& image)
+{
+    if (image.isNull()) {
+        QToolTip::showText(QCursor::pos(), QStringLiteral("Failed to capture OCR area"), this, QRect(), kTooltipDurationMs);
+        return;
+    }
+
+    auto* resultWindow = new OcrResultWindow(image);
+    resultWindow->setWindowIcon(SPACELOOKAppIcon());
+    resultWindow->show();
+    resultWindow->raise();
+    resultWindow->activateWindow();
+
+    const SpaceLookUiSettings& settings = SpaceLookUiSettings::instance();
+    const OcrRunner::Config ocrConfig {
+        settings.ocrEngine(),
+        settings.baiduOcrApiKey(),
+        settings.baiduOcrSecretKey()
+    };
+
+    QPointer<OcrResultWindow> resultWindowPointer(resultWindow);
+    auto* watcher = new QFutureWatcher<OcrResult>(this);
+    connect(watcher, &QFutureWatcher<OcrResult>::finished, this, [watcher, resultWindowPointer]() {
+        watcher->deleteLater();
+        if (!resultWindowPointer) {
+            return;
+        }
+
+        const OcrResult result = watcher->result();
+        if (!result.success) {
+            resultWindowPointer->setError(result.errorMessage);
+            return;
+        }
+        resultWindowPointer->setResult(result);
+    });
+    watcher->setFuture(QtConcurrent::run([image, ocrConfig]() {
+        return OcrRunner::recognize(image, ocrConfig);
+    }));
 }
 
 void SpaceLookWindow::applySummaryPreviewSize(const HoveredItemInfo& info)
@@ -1048,6 +1152,13 @@ void SpaceLookWindow::mousePressEvent(QMouseEvent* event)
         return;
     }
 
+    if (shouldStartDragFromMenuBackground(event->pos())) {
+        m_draggingWindow = true;
+        m_dragOffset = event->globalPos() - frameGeometry().topLeft();
+        event->accept();
+        return;
+    }
+
     if (shouldStartDragFromActiveHeader(event->pos())) {
         m_draggingWindow = true;
         m_dragOffset = event->globalPos() - frameGeometry().topLeft();
@@ -1141,19 +1252,30 @@ bool SpaceLookWindow::nativeEvent(const QByteArray& eventType, void* message, lo
         return QWidget::nativeEvent(eventType, message, result);
     }
 
-    if (!canManuallyResizeCurrentPreview()) {
-        return QWidget::nativeEvent(eventType, message, result);
-    }
-
     const QPoint globalPos(GET_X_LPARAM(msg->lParam), GET_Y_LPARAM(msg->lParam));
-    const Qt::Edges edges = resizeEdgesForPosition(mapFromGlobal(globalPos));
-    const long hitTest = hitTestForResizeEdges(edges);
-    if (hitTest == HTNOWHERE) {
+    const QPoint localPos = mapFromGlobal(globalPos);
+
+    if (!canManuallyResizeCurrentPreview()) {
+        if (shouldStartDragFromMenuBackground(localPos)) {
+            *result = HTCAPTION;
+            return true;
+        }
         return QWidget::nativeEvent(eventType, message, result);
     }
 
-    *result = hitTest;
-    return true;
+    const Qt::Edges edges = resizeEdgesForPosition(localPos);
+    const long hitTest = hitTestForResizeEdges(edges);
+    if (hitTest != HTNOWHERE) {
+        *result = hitTest;
+        return true;
+    }
+
+    if (shouldStartDragFromMenuBackground(localPos)) {
+        *result = HTCAPTION;
+        return true;
+    }
+
+    return QWidget::nativeEvent(eventType, message, result);
 }
 
 QString SpaceLookWindow::currentPreviewPath() const
@@ -1242,6 +1364,42 @@ void SpaceLookWindow::updateCursorForPosition(const QPoint& localPos)
     } else {
         unsetCursor();
     }
+}
+
+bool SpaceLookWindow::shouldStartDragFromMenuBackground(const QPoint& localPos) const
+{
+    if (!m_container || !m_menuBar || !m_menuBar->isVisible()) {
+        return false;
+    }
+
+    const QRect containerRect(m_container->mapTo(const_cast<SpaceLookWindow*>(this), QPoint(0, 0)), m_container->size());
+    if (!containerRect.contains(localPos)) {
+        return false;
+    }
+
+    const QRect menuRect(m_menuBar->mapTo(const_cast<SpaceLookWindow*>(this), QPoint(0, 0)), m_menuBar->size());
+    if (menuRect.contains(localPos)) {
+        return false;
+    }
+
+    const int contentGap = 10;
+    const int placement = SpaceLookUiSettings::instance().menuPlacement();
+    QRect dragRect;
+    if (placement == 1) {
+        const int top = qMax(containerRect.top(), menuRect.top() - contentGap);
+        dragRect = QRect(containerRect.left(), top, containerRect.width(), containerRect.bottom() - top + 1);
+    } else if (placement == 2) {
+        const int right = qMin(containerRect.right(), menuRect.right() + contentGap);
+        dragRect = QRect(containerRect.left(), containerRect.top(), right - containerRect.left() + 1, containerRect.height());
+    } else if (placement == 3) {
+        const int left = qMax(containerRect.left(), menuRect.left() - contentGap);
+        dragRect = QRect(left, containerRect.top(), containerRect.right() - left + 1, containerRect.height());
+    } else {
+        const int bottom = qMin(containerRect.bottom(), menuRect.bottom() + contentGap);
+        dragRect = QRect(containerRect.left(), containerRect.top(), containerRect.width(), bottom - containerRect.top() + 1);
+    }
+
+    return dragRect.contains(localPos);
 }
 
 bool SpaceLookWindow::shouldStartDragFromActiveHeader(const QPoint& localPos) const

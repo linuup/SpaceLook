@@ -74,6 +74,12 @@ target_sources(SpaceLook PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/renderers/document/PreviewHandlerHost.h"
     "${CMAKE_CURRENT_SOURCE_DIR}/renderers/markup/WebView2HtmlView.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/renderers/markup/WebView2HtmlView.h"
+    "${CMAKE_CURRENT_SOURCE_DIR}/renderers/image/OcrRunner.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/renderers/image/OcrRunner.h"
+    "${CMAKE_CURRENT_SOURCE_DIR}/widgets/OcrCaptureOverlay.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/widgets/OcrCaptureOverlay.h"
+    "${CMAKE_CURRENT_SOURCE_DIR}/widgets/OcrResultWindow.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/widgets/OcrResultWindow.h"
     "${CMAKE_CURRENT_SOURCE_DIR}/renderers/summary/ArchiveRenderer.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/renderers/FluentIconFont.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/renderers/PreviewHeaderBar.cpp"
@@ -323,6 +329,10 @@ if(WIN32)
             "$<TARGET_FILE_DIR:SpaceLook>"
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "${CMAKE_CURRENT_SOURCE_DIR}/third_party/libavif/bin/avifdec.exe"
+            "$<TARGET_FILE_DIR:SpaceLook>"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${CMAKE_CURRENT_SOURCE_DIR}/third_party/openssl/bin/libcrypto-1_1-x64.dll"
+            "${CMAKE_CURRENT_SOURCE_DIR}/third_party/openssl/bin/libssl-1_1-x64.dll"
             "$<TARGET_FILE_DIR:SpaceLook>"
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             ${SPACELOOK_QM_FILES}

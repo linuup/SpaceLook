@@ -373,7 +373,7 @@ void ArchiveRenderer::load(const HoveredItemInfo& info)
         notifyLoadingState(false);
     });
 
-    watcher->setFuture(QtConcurrent::run([this, filePath = info.filePath, cancelToken]() {
+    watcher->setFuture(QtConcurrent::run([filePath = info.filePath, cancelToken]() {
         return loadArchiveEntries(filePath, cancelToken);
     }));
 }
@@ -739,7 +739,7 @@ void ArchiveRenderer::previewArchiveEntry(QTreeWidgetItem* item)
         clearEntryPreview(QCoreApplication::translate("SpaceLook", "Preview is available for text and image files inside the archive."));
     });
 
-    watcher->setFuture(QtConcurrent::run([this, archivePath = m_info.filePath, entry, cancelToken]() {
+    watcher->setFuture(QtConcurrent::run([archivePath = m_info.filePath, entry, cancelToken]() {
         return loadEntryPreview(archivePath, entry, cancelToken);
     }));
 }
@@ -774,7 +774,7 @@ QTreeWidgetItem* ArchiveRenderer::ensureFolderItem(const QString& folderPath,
 }
 
 ArchiveRenderer::ArchiveLoadResult ArchiveRenderer::loadArchiveEntries(const QString& filePath,
-                                                                       const PreviewCancellationToken& cancelToken) const
+                                                                       const PreviewCancellationToken& cancelToken)
 {
     ArchiveLoadResult result;
     if (previewCancellationRequested(cancelToken)) {
@@ -963,7 +963,7 @@ ArchiveRenderer::ArchiveLoadResult ArchiveRenderer::loadArchiveEntries(const QSt
 
 ArchiveRenderer::EntryPreviewResult ArchiveRenderer::loadEntryPreview(const QString& archivePath,
                                                                       const ArchiveEntry& entry,
-                                                                      const PreviewCancellationToken& cancelToken) const
+                                                                      const PreviewCancellationToken& cancelToken)
 {
     EntryPreviewResult result;
     result.entryPath = entry.path;

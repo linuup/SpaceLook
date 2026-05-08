@@ -57,11 +57,20 @@ Rectangle {
         property bool showMenuPin: true
         property bool showMenuOpen: true
         property bool showMenuCopy: true
+        property bool showMenuOcr: true
         property bool showMenuRefresh: true
         property bool showMenuExpand: true
         property bool showMenuClose: true
         property bool showMenuMore: true
         property string language: "en"
+        property string ocrEngine: "windows"
+        property string baiduOcrApiKey: ""
+        property string baiduOcrSecretKey: ""
+        property bool baiduOcrCredentialTestBusy: false
+        property string baiduOcrCredentialTestMessage: ""
+        function testBaiduOcrCredentials() {
+            baiduOcrCredentialTestMessage = qsTr("Baidu credential test is unavailable.")
+        }
     }
 
     QtObject {
@@ -89,6 +98,9 @@ Rectangle {
         if (index === 1) {
             return qsTr("Toolbar")
         }
+        if (index === 2) {
+            return qsTr("OCR")
+        }
         return qsTr("File Types")
     }
 
@@ -98,6 +110,9 @@ Rectangle {
         }
         if (index === 1) {
             return qsTr("Preview menu appearance")
+        }
+        if (index === 2) {
+            return qsTr("Text recognition model")
         }
         return qsTr("Renderer mapping rules")
     }
@@ -109,6 +124,9 @@ Rectangle {
         if (index === 1) {
             return "\uE8FD"
         }
+        if (index === 2) {
+            return "\uE8C8"
+        }
         return "\uE8B7"
     }
 
@@ -118,6 +136,9 @@ Rectangle {
         }
         if (index === 1) {
             return toolbarSection
+        }
+        if (index === 2) {
+            return ocrSection
         }
         return renderTypeSection
     }
@@ -141,6 +162,10 @@ Rectangle {
 
     function syncActiveNavFromScroll() {
         if (contentFlickable.contentY + 80 >= renderTypeSection.y) {
+            activeNavIndex = 3
+            return
+        }
+        if (contentFlickable.contentY + 80 >= ocrSection.y) {
             activeNavIndex = 2
             return
         }
@@ -819,6 +844,58 @@ Rectangle {
         onClicked: resolvedUiSettings.menuPlacement = placementValue
     }
 
+    component OcrEngineOptionButton: Button {
+        id: ocrEngineOptionButton
+        property string engineValue: "windows"
+        property string labelText: ""
+        property string glyph: ""
+
+        property bool settingsNoDrag: true
+        implicitHeight: 46
+        hoverEnabled: true
+        padding: 0
+
+        background: Rectangle {
+            radius: 16
+            color: resolvedUiSettings.ocrEngine === ocrEngineOptionButton.engineValue
+                   ? root.accentSoftColor
+                   : (parent.down ? "#edf4f6" : (parent.hovered ? root.cardHoverColor : "#ffffff"))
+            border.width: 1
+            border.color: resolvedUiSettings.ocrEngine === ocrEngineOptionButton.engineValue
+                          ? root.accentColor
+                          : root.borderColor
+        }
+
+        contentItem: RowLayout {
+            anchors.fill: parent
+            anchors.leftMargin: 14
+            anchors.rightMargin: 14
+            spacing: 8
+
+            Text {
+                text: ocrEngineOptionButton.glyph
+                color: resolvedUiSettings.ocrEngine === ocrEngineOptionButton.engineValue ? root.accentColor : root.mutedInkColor
+                font.family: root.iconFontFamily
+                font.pixelSize: 15
+                renderType: Text.NativeRendering
+            }
+
+            Text {
+                Layout.fillWidth: true
+                text: ocrEngineOptionButton.labelText
+                color: resolvedUiSettings.ocrEngine === ocrEngineOptionButton.engineValue ? root.accentColor : root.inkColor
+                font.family: root.textFontFamily
+                font.pixelSize: 13
+                font.weight: root.labelFontWeight
+                horizontalAlignment: Text.AlignHCenter
+                verticalAlignment: Text.AlignVCenter
+                renderType: Text.NativeRendering
+            }
+        }
+
+        onClicked: resolvedUiSettings.ocrEngine = engineValue
+    }
+
     gradient: Gradient {
         GradientStop {
             position: 0.0
@@ -958,6 +1035,11 @@ Rectangle {
                         Layout.fillWidth: true
                         navIndex: 2
                     }
+
+                    SidebarButton {
+                        Layout.fillWidth: true
+                        navIndex: 3
+                    }
                 }
             }
 
@@ -993,6 +1075,11 @@ Rectangle {
                         SidebarButton {
                             Layout.fillWidth: true
                             navIndex: 2
+                        }
+
+                        SidebarButton {
+                            Layout.fillWidth: true
+                            navIndex: 3
                         }
 
                         Item {
@@ -1385,6 +1472,13 @@ Rectangle {
                                 }
 
                                 ToolbarTile {
+                                    titleText: qsTr("OCR")
+                                    glyph: "\uE722"
+                                    checkedValue: resolvedUiSettings.showMenuOcr
+                                    onToggledValue: resolvedUiSettings.showMenuOcr = checked
+                                }
+
+                                ToolbarTile {
                                     titleText: qsTr("Refresh")
                                     glyph: "\uE72C"
                                     checkedValue: resolvedUiSettings.showMenuRefresh
@@ -1410,6 +1504,234 @@ Rectangle {
                                     glyph: "\uE712"
                                     checkedValue: resolvedUiSettings.showMenuMore
                                     onToggledValue: resolvedUiSettings.showMenuMore = checked
+                                }
+                            }
+                        }
+                    }
+
+                    CardShell {
+                        id: ocrSection
+                        width: parent.width
+                        implicitHeight: ocrContent.implicitHeight + 42
+
+                        Column {
+                            id: ocrContent
+                            anchors.fill: parent
+                            anchors.margins: 22
+                            spacing: 18
+
+                            SectionHeader {
+                                width: parent.width
+                                glyph: "\uE8C8"
+                                title: qsTr("OCR")
+                                subtitle: qsTr("Configure the text recognition model used by image previews.")
+                            }
+
+                            Rectangle {
+                                width: parent.width
+                                implicitHeight: ocrEnginePanel.implicitHeight + 32
+                                radius: 18
+                                color: "#f8fbfc"
+                                border.width: 1
+                                border.color: "#e1ebf0"
+
+                                Column {
+                                    id: ocrEnginePanel
+                                    anchors.fill: parent
+                                    anchors.margins: 16
+                                    spacing: 14
+
+                                    Text {
+                                        width: parent.width
+                                        text: qsTr("OCR engine")
+                                        color: root.inkColor
+                                        font.family: root.textFontFamily
+                                        font.pixelSize: 15
+                                        font.weight: root.labelFontWeight
+                                        renderType: Text.NativeRendering
+                                    }
+
+                                    GridLayout {
+                                        width: parent.width
+                                        columns: root.wideLayout ? 2 : 1
+                                        columnSpacing: 10
+                                        rowSpacing: 10
+
+                                        OcrEngineOptionButton {
+                                            Layout.fillWidth: true
+                                            engineValue: "windows"
+                                            labelText: qsTr("Windows OCR")
+                                            glyph: "\uE8C8"
+                                        }
+
+                                        OcrEngineOptionButton {
+                                            Layout.fillWidth: true
+                                            engineValue: "baidu"
+                                            labelText: qsTr("Baidu OCR")
+                                            glyph: "\uE8D4"
+                                        }
+                                    }
+
+                                    Rectangle {
+                                        width: parent.width
+                                        height: 38
+                                        radius: 12
+                                        visible: resolvedUiSettings.ocrEngine === "baidu" &&
+                                                 (resolvedUiSettings.baiduOcrApiKey.length === 0 ||
+                                                  resolvedUiSettings.baiduOcrSecretKey.length === 0)
+                                        color: "#fff6e8"
+                                        border.width: 1
+                                        border.color: "#f1cf8f"
+
+                                        Text {
+                                            anchors.fill: parent
+                                            anchors.leftMargin: 12
+                                            anchors.rightMargin: 12
+                                            text: qsTr("Baidu OCR requires API_KEY and SECRET_KEY.")
+                                            color: "#7c5608"
+                                            font.family: root.bodyFontFamily
+                                            font.pixelSize: 12
+                                            font.weight: root.labelFontWeight
+                                            verticalAlignment: Text.AlignVCenter
+                                            elide: Text.ElideRight
+                                            renderType: Text.NativeRendering
+                                        }
+                                    }
+
+                                    Column {
+                                        width: parent.width
+                                        visible: resolvedUiSettings.ocrEngine === "baidu"
+                                        spacing: 10
+
+                                        Text {
+                                            width: parent.width
+                                            text: qsTr("API_KEY")
+                                            color: root.inkColor
+                                            font.family: root.textFontFamily
+                                            font.pixelSize: 12
+                                            font.weight: root.labelFontWeight
+                                            renderType: Text.NativeRendering
+                                        }
+
+                                        TextField {
+                                            width: parent.width
+                                            text: resolvedUiSettings.baiduOcrApiKey
+                                            placeholderText: qsTr("Enter API_KEY")
+                                            selectByMouse: true
+                                            color: root.inkColor
+                                            font.family: root.bodyFontFamily
+                                            font.pixelSize: 13
+                                            background: Rectangle {
+                                                radius: 12
+                                                color: "#ffffff"
+                                                border.width: 1
+                                                border.color: parent.activeFocus ? root.accentColor : root.borderColor
+                                            }
+                                            onTextChanged: {
+                                                if (activeFocus && resolvedUiSettings.baiduOcrApiKey !== text) {
+                                                    resolvedUiSettings.baiduOcrApiKey = text
+                                                }
+                                            }
+                                        }
+
+                                        Text {
+                                            width: parent.width
+                                            text: qsTr("SECRET_KEY")
+                                            color: root.inkColor
+                                            font.family: root.textFontFamily
+                                            font.pixelSize: 12
+                                            font.weight: root.labelFontWeight
+                                            renderType: Text.NativeRendering
+                                        }
+
+                                        TextField {
+                                            width: parent.width
+                                            text: resolvedUiSettings.baiduOcrSecretKey
+                                            placeholderText: qsTr("Enter SECRET_KEY")
+                                            echoMode: TextInput.Password
+                                            selectByMouse: true
+                                            color: root.inkColor
+                                            font.family: root.bodyFontFamily
+                                            font.pixelSize: 13
+                                            background: Rectangle {
+                                                radius: 12
+                                                color: "#ffffff"
+                                                border.width: 1
+                                                border.color: parent.activeFocus ? root.accentColor : root.borderColor
+                                            }
+                                            onTextChanged: {
+                                                if (activeFocus && resolvedUiSettings.baiduOcrSecretKey !== text) {
+                                                    resolvedUiSettings.baiduOcrSecretKey = text
+                                                }
+                                            }
+                                        }
+
+                                        RowLayout {
+                                            width: parent.width
+                                            spacing: 10
+
+                                            Button {
+                                                id: baiduCredentialTestButton
+                                                property bool settingsNoDrag: true
+                                                Layout.preferredWidth: 150
+                                                Layout.preferredHeight: 38
+                                                enabled: !resolvedUiSettings.baiduOcrCredentialTestBusy &&
+                                                         resolvedUiSettings.baiduOcrApiKey.length > 0 &&
+                                                         resolvedUiSettings.baiduOcrSecretKey.length > 0
+                                                hoverEnabled: true
+                                                padding: 0
+                                                background: Rectangle {
+                                                    radius: 12
+                                                    color: baiduCredentialTestButton.enabled
+                                                           ? (baiduCredentialTestButton.down ? root.accentHoverColor : (baiduCredentialTestButton.hovered ? root.accentHoverColor : root.accentColor))
+                                                           : "#d4dee5"
+                                                    border.width: 1
+                                                    border.color: baiduCredentialTestButton.enabled ? root.accentColor : root.borderColor
+                                                }
+                                                contentItem: RowLayout {
+                                                    anchors.fill: parent
+                                                    anchors.leftMargin: 12
+                                                    anchors.rightMargin: 12
+                                                    spacing: 7
+
+                                                    Text {
+                                                        text: "\uE9D9"
+                                                        color: "#ffffff"
+                                                        font.family: root.iconFontFamily
+                                                        font.pixelSize: 13
+                                                        renderType: Text.NativeRendering
+                                                    }
+
+                                                    Text {
+                                                        Layout.fillWidth: true
+                                                        text: resolvedUiSettings.baiduOcrCredentialTestBusy ? qsTr("Testing...") : qsTr("Test API Key")
+                                                        color: "#ffffff"
+                                                        font.family: root.textFontFamily
+                                                        font.pixelSize: 12
+                                                        font.weight: root.labelFontWeight
+                                                        horizontalAlignment: Text.AlignHCenter
+                                                        verticalAlignment: Text.AlignVCenter
+                                                        elide: Text.ElideRight
+                                                        renderType: Text.NativeRendering
+                                                    }
+                                                }
+                                                onClicked: resolvedUiSettings.testBaiduOcrCredentials()
+                                            }
+
+                                            Text {
+                                                Layout.fillWidth: true
+                                                text: resolvedUiSettings.baiduOcrCredentialTestMessage
+                                                visible: text.length > 0
+                                                color: text === qsTr("Baidu OCR credentials are valid.") ? root.accentColor : root.mutedInkColor
+                                                font.family: root.bodyFontFamily
+                                                font.pixelSize: 12
+                                                font.weight: root.bodyFontWeight
+                                                verticalAlignment: Text.AlignVCenter
+                                                elide: Text.ElideRight
+                                                renderType: Text.NativeRendering
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }

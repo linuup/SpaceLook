@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QList>
+#include <QObject>
 #include <memory>
 #include <vector>
 
@@ -8,10 +9,12 @@
 
 class PreviewState;
 
-class RendererRegistry
+class RendererRegistry : public QObject
 {
+    Q_OBJECT
+
 public:
-    explicit RendererRegistry(PreviewState* previewState);
+    explicit RendererRegistry(PreviewState* previewState, QObject* parent = nullptr);
     ~RendererRegistry();
 
     QList<IPreviewRenderer*> renderers() const;

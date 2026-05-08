@@ -31,7 +31,7 @@ PreviewHost::PreviewHost(PreviewState* previewState, QWidget* parent)
     , m_routeLabel(new QLabel(m_routeBar))
     , m_stack(new QStackedWidget(this))
     , m_previewState(previewState)
-    , m_registry(new RendererRegistry(previewState))
+    , m_registry(new RendererRegistry(previewState, this))
 {
     setAttribute(Qt::WA_StyledBackground, true);
     setObjectName(QStringLiteral("SpaceLookPreviewHost"));
@@ -85,7 +85,6 @@ PreviewHost::PreviewHost(PreviewState* previewState, QWidget* parent)
 PreviewHost::~PreviewHost()
 {
     clearPreviewStack();
-    delete m_registry;
 }
 
 void PreviewHost::showPreview(const HoveredItemInfo& info)

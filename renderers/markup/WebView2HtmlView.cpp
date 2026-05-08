@@ -73,6 +73,7 @@ void releaseComObject(T*& object)
 
 WebView2HtmlView::WebView2HtmlView(QWidget* parent)
     : QWidget(parent)
+    , m_alive(std::make_shared<bool>(true))
 {
     setAttribute(Qt::WA_NativeWindow, true);
     setAttribute(Qt::WA_DontCreateNativeAncestors, true);
@@ -89,6 +90,9 @@ WebView2HtmlView::WebView2HtmlView(QWidget* parent)
 
 WebView2HtmlView::~WebView2HtmlView()
 {
+    if (m_alive) {
+        *m_alive = false;
+    }
     clearDocument();
     if (m_comInitialized) {
         CoUninitialize();
@@ -212,12 +216,17 @@ bool WebView2HtmlView::ensureInitializing(QString* errorMessage)
 
     m_initializing = true;
     const QString userDataFolder = webViewUserDataFolder();
+    const std::weak_ptr<bool> alive = m_alive;
     const HRESULT hr = CreateCoreWebView2EnvironmentWithOptions(
         nullptr,
         reinterpret_cast<LPCWSTR>(userDataFolder.utf16()),
         nullptr,
         Callback<ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler>(
-            [this](HRESULT result, ICoreWebView2Environment* environment) -> HRESULT {
+            [this, alive](HRESULT result, ICoreWebView2Environment* environment) -> HRESULT {
+                const std::shared_ptr<bool> aliveState = alive.lock();
+                if (!aliveState || !*aliveState) {
+                    return S_OK;
+                }
                 if (m_pendingHtml.isEmpty()) {
                     m_initializing = false;
                     return S_OK;
@@ -236,10 +245,18 @@ bool WebView2HtmlView::ensureInitializing(QString* errorMessage)
                 m_environment = environment;
                 m_environment->AddRef();
                 const HWND parentWindow = reinterpret_cast<HWND>(winId());
+                const std::weak_ptr<bool> controllerAlive = alive;
                 const HRESULT controllerHr = m_environment->CreateCoreWebView2Controller(
                     parentWindow,
                     Callback<ICoreWebView2CreateCoreWebView2ControllerCompletedHandler>(
-                        [this](HRESULT controllerResult, ICoreWebView2Controller* controller) -> HRESULT {
+                        [this, controllerAlive](HRESULT controllerResult, ICoreWebView2Controller* controller) -> HRESULT {
+                            const std::shared_ptr<bool> aliveState = controllerAlive.lock();
+                            if (!aliveState || !*aliveState) {
+                                if (controller) {
+                                    controller->Close();
+                                }
+                                return S_OK;
+                            }
                             m_initializing = false;
                             if (m_pendingHtml.isEmpty()) {
                                 if (controller) {

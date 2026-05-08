@@ -104,11 +104,9 @@ QString textFromOcrResult(const winrt::Windows::Media::Ocr::OcrResult& ocrResult
 
 }
 
-WindowsOcrResult WindowsOcrService::recognizeText(const QImage& sourceImage)
+OcrResult WindowsOcrService::recognizeText(const QImage& sourceImage)
 {
-    using namespace winrt::Windows::Media::Ocr;
-
-    WindowsOcrResult result;
+    ::OcrResult result;
     if (sourceImage.isNull()) {
         result.errorMessage = QCoreApplication::translate("SpaceLook", "Image is unavailable for OCR.");
         return result;
@@ -117,9 +115,9 @@ WindowsOcrResult WindowsOcrService::recognizeText(const QImage& sourceImage)
     try {
         winrt::init_apartment(winrt::apartment_type::multi_threaded);
 
-        const OcrEngine engine = OcrEngine::TryCreateFromUserProfileLanguages();
+        const winrt::Windows::Media::Ocr::OcrEngine engine =
+            winrt::Windows::Media::Ocr::OcrEngine::TryCreateFromUserProfileLanguages();
         if (!engine) {
-            result.unavailable = true;
             result.errorMessage = QCoreApplication::translate("SpaceLook", "No Windows OCR language is available.");
             return result;
         }
@@ -130,12 +128,11 @@ WindowsOcrResult WindowsOcrService::recognizeText(const QImage& sourceImage)
             return result;
         }
 
-        const OcrResult ocrResult = engine.RecognizeAsync(bitmap).get();
+        const winrt::Windows::Media::Ocr::OcrResult ocrResult = engine.RecognizeAsync(bitmap).get();
         result.text = textFromOcrResult(ocrResult).trimmed();
         result.success = true;
         return result;
     } catch (const winrt::hresult_error& error) {
-        result.unavailable = true;
         result.errorMessage = unavailableMessage() + QStringLiteral(" 0x%1")
             .arg(static_cast<quint32>(error.code()), 8, 16, QLatin1Char('0'));
         return result;

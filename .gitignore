@@ -42,3 +42,7 @@ PreView-Files/
 !third_party/7zip/private/
 !third_party/7zip/private/7z.exe
 !third_party/7zip/private/7z.dll
+!third_party/openssl/
+!third_party/openssl/bin/
+!third_party/openssl/bin/libcrypto-1_1-x64.dll
+!third_party/openssl/bin/libssl-1_1-x64.dll

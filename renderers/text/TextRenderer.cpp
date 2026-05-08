@@ -58,6 +58,7 @@ bool isStructuredOverrideSuffix(const QString& filePath)
 {
     const QString suffix = QFileInfo(filePath).suffix().trimmed().toLower();
     return suffix == QStringLiteral("json")
+        || suffix == QStringLiteral("jsonc")
         || suffix == QStringLiteral("xml")
         || suffix == QStringLiteral("yaml")
         || suffix == QStringLiteral("yml");

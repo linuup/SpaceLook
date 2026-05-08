@@ -3,6 +3,7 @@
 #include <QDateTime>
 #include <QCoreApplication>
 #include <QDebug>
+#include <QFileIconProvider>
 #include <QFileInfo>
 #include <QFrame>
 #include <QGridLayout>
@@ -87,6 +88,47 @@ QString displayFileSize(qint64 size, bool isDirectory)
 
     const int precision = unit == QStringLiteral("B") ? 0 : 2;
     return QStringLiteral("%1 %2").arg(QString::number(currentSize, 'f', precision), unit);
+}
+
+QPixmap actualExePixmapForSummary(const HoveredItemInfo& info, const QSize& displaySize)
+{
+    const QString displayPath = info.filePath.trimmed().isEmpty()
+        ? info.resolvedPath.trimmed()
+        : info.filePath.trimmed();
+    const QFileInfo fileInfo(displayPath);
+    if (!fileInfo.exists() || !fileInfo.isFile()) {
+        return QPixmap();
+    }
+
+    const bool executableType = info.typeKey == QStringLiteral("executable");
+    const bool executableSuffix = fileInfo.suffix().compare(QStringLiteral("exe"), Qt::CaseInsensitive) == 0;
+    if (!executableType && !executableSuffix) {
+        return QPixmap();
+    }
+
+    static QFileIconProvider iconProvider;
+    const QIcon icon = iconProvider.icon(fileInfo);
+    if (icon.isNull()) {
+        return QPixmap();
+    }
+
+    const QSize targetSize = displaySize.isValid() && !displaySize.isEmpty()
+        ? displaySize
+        : QSize(72, 72);
+    QPixmap pixmap = icon.pixmap(targetSize);
+    if (pixmap.isNull()) {
+        return pixmap;
+    }
+
+    const qreal devicePixelRatio = pixmap.devicePixelRatio();
+    const QSize logicalSize = devicePixelRatio > 0.0
+        ? pixmap.size() / devicePixelRatio
+        : pixmap.size();
+    if (logicalSize == targetSize) {
+        return pixmap;
+    }
+
+    return pixmap.scaled(targetSize, Qt::KeepAspectRatio, Qt::SmoothTransformation);
 }
 
 }
@@ -367,7 +409,11 @@ void SummaryRenderer::applyInfo(const HoveredItemInfo& info)
     m_titleLabel->setText(info.title.isEmpty() ? QCoreApplication::translate("SpaceLook", "Summary Preview") : info.title);
     m_titleLabel->setCopyText(m_titleLabel->text());
 
-    m_iconLabel->setPixmap(FileTypeIconResolver::pixmapForInfo(info, m_iconLabel->contentsRect().size()));
+    const QSize iconSize = m_iconLabel->contentsRect().size();
+    const QPixmap actualExePixmap = actualExePixmapForSummary(info, iconSize);
+    m_iconLabel->setPixmap(actualExePixmap.isNull()
+        ? FileTypeIconResolver::pixmapForInfo(info, iconSize)
+        : actualExePixmap);
 
     const QString displayPath = info.filePath.trimmed().isEmpty()
         ? info.resolvedPath.trimmed()

@@ -1,18 +1,11 @@
 #pragma once
 
 #include <QImage>
-#include <QString>
 
-struct WindowsOcrResult
-{
-    bool success = false;
-    bool unavailable = false;
-    QString text;
-    QString errorMessage;
-};
+#include "renderers/image/OcrTypes.h"
 
 class WindowsOcrService
 {
 public:
-    static WindowsOcrResult recognizeText(const QImage& sourceImage);
+    static OcrResult recognizeText(const QImage& sourceImage);
 };

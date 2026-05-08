@@ -3,6 +3,9 @@
 #include <QObject>
 #include <QString>
 
+class QNetworkAccessManager;
+class QNetworkReply;
+
 class SpaceLookUiSettings : public QObject
 {
     Q_OBJECT
@@ -16,11 +19,17 @@ class SpaceLookUiSettings : public QObject
     Q_PROPERTY(bool showMenuPin READ showMenuPin WRITE setShowMenuPin NOTIFY menuVisibilityChanged)
     Q_PROPERTY(bool showMenuOpen READ showMenuOpen WRITE setShowMenuOpen NOTIFY menuVisibilityChanged)
     Q_PROPERTY(bool showMenuCopy READ showMenuCopy WRITE setShowMenuCopy NOTIFY menuVisibilityChanged)
+    Q_PROPERTY(bool showMenuOcr READ showMenuOcr WRITE setShowMenuOcr NOTIFY menuVisibilityChanged)
     Q_PROPERTY(bool showMenuRefresh READ showMenuRefresh WRITE setShowMenuRefresh NOTIFY menuVisibilityChanged)
     Q_PROPERTY(bool showMenuExpand READ showMenuExpand WRITE setShowMenuExpand NOTIFY menuVisibilityChanged)
     Q_PROPERTY(bool showMenuClose READ showMenuClose WRITE setShowMenuClose NOTIFY menuVisibilityChanged)
     Q_PROPERTY(bool showMenuMore READ showMenuMore WRITE setShowMenuMore NOTIFY menuVisibilityChanged)
     Q_PROPERTY(QString language READ language WRITE setLanguage NOTIFY languageChanged)
+    Q_PROPERTY(QString ocrEngine READ ocrEngine WRITE setOcrEngine NOTIFY ocrSettingsChanged)
+    Q_PROPERTY(QString baiduOcrApiKey READ baiduOcrApiKey WRITE setBaiduOcrApiKey NOTIFY ocrSettingsChanged)
+    Q_PROPERTY(QString baiduOcrSecretKey READ baiduOcrSecretKey WRITE setBaiduOcrSecretKey NOTIFY ocrSettingsChanged)
+    Q_PROPERTY(bool baiduOcrCredentialTestBusy READ baiduOcrCredentialTestBusy NOTIFY ocrSettingsChanged)
+    Q_PROPERTY(QString baiduOcrCredentialTestMessage READ baiduOcrCredentialTestMessage NOTIFY ocrSettingsChanged)
 
 public:
     static SpaceLookUiSettings& instance();
@@ -45,6 +54,8 @@ public:
     void setShowMenuOpen(bool show);
     bool showMenuCopy() const;
     void setShowMenuCopy(bool show);
+    bool showMenuOcr() const;
+    void setShowMenuOcr(bool show);
     bool showMenuRefresh() const;
     void setShowMenuRefresh(bool show);
     bool showMenuExpand() const;
@@ -55,6 +66,15 @@ public:
     void setShowMenuMore(bool show);
     QString language() const;
     void setLanguage(const QString& language);
+    QString ocrEngine() const;
+    void setOcrEngine(const QString& engine);
+    QString baiduOcrApiKey() const;
+    void setBaiduOcrApiKey(const QString& apiKey);
+    QString baiduOcrSecretKey() const;
+    void setBaiduOcrSecretKey(const QString& secretKey);
+    bool baiduOcrCredentialTestBusy() const;
+    QString baiduOcrCredentialTestMessage() const;
+    Q_INVOKABLE void testBaiduOcrCredentials();
 
 signals:
     void menuButtonSizeChanged();
@@ -65,14 +85,19 @@ signals:
     void autoStartChanged();
     void menuVisibilityChanged();
     void languageChanged();
+    void ocrSettingsChanged();
 
 private:
     SpaceLookUiSettings();
     void writeBoolSetting(const QString& key, bool value);
+    void writeStringSetting(const QString& key, const QString& value);
     bool updateBoolSetting(bool& field, bool value, const QString& key);
+    bool updateStringSetting(QString& field, const QString& value, const QString& key);
     bool loadAutoStart() const;
     void applyAutoStart(bool enabled);
     QString normalizedLanguage(const QString& language) const;
+    QString normalizedOcrEngine(const QString& engine) const;
+    void setBaiduOcrCredentialTestState(bool busy, const QString& message);
 
     int m_menuButtonSize = 38;
     bool m_showMenuBorder = true;
@@ -84,9 +109,17 @@ private:
     bool m_showMenuPin = true;
     bool m_showMenuOpen = true;
     bool m_showMenuCopy = true;
+    bool m_showMenuOcr = true;
     bool m_showMenuRefresh = true;
     bool m_showMenuExpand = true;
     bool m_showMenuClose = true;
     bool m_showMenuMore = true;
     QString m_language = QStringLiteral("en");
+    QString m_ocrEngine = QStringLiteral("windows");
+    QString m_baiduOcrApiKey;
+    QString m_baiduOcrSecretKey;
+    bool m_baiduOcrCredentialTestBusy = false;
+    QString m_baiduOcrCredentialTestMessage;
+    QNetworkAccessManager* m_networkAccessManager = nullptr;
+    QNetworkReply* m_baiduOcrCredentialTestReply = nullptr;
 };

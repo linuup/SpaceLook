@@ -15,7 +15,6 @@ class QMovie;
 class OpenWithButton;
 class QScrollArea;
 class SelectableTitleLabel;
-class QToolButton;
 class QWidget;
 
 class ImageRenderer : public QWidget, public IPreviewRenderer
@@ -39,13 +38,13 @@ protected:
 
 private:
     void applyChrome();
-    QImage loadImageForPath(const QString& filePath, const PreviewCancellationToken& cancelToken) const;
-    QImage loadThumbnailImageForPath(const QString& filePath, const PreviewCancellationToken& cancelToken) const;
-    QImage loadAvifImageForPath(const QString& filePath, const PreviewCancellationToken& cancelToken) const;
-    QImage loadDdsImageForPath(const QString& filePath) const;
-    QImage loadHeifImageForPath(const QString& filePath) const;
-    QImage imageFromHeifImage(struct heif_image* image) const;
-    QImage loadShellThumbnailForPath(const QString& filePath, int edgeLength) const;
+    static QImage loadImageForPath(const QString& filePath, const PreviewCancellationToken& cancelToken);
+    static QImage loadThumbnailImageForPath(const QString& filePath, const PreviewCancellationToken& cancelToken);
+    static QImage loadAvifImageForPath(const QString& filePath, const PreviewCancellationToken& cancelToken);
+    static QImage loadDdsImageForPath(const QString& filePath);
+    static QImage loadHeifImageForPath(const QString& filePath);
+    static QImage imageFromHeifImage(struct heif_image* image);
+    static QImage loadShellThumbnailForPath(const QString& filePath, int edgeLength);
     bool tryLoadAnimatedImage(const QString& filePath);
     void clearAnimatedImage();
     void showStatusMessage(const QString& message);
@@ -53,9 +52,6 @@ private:
     void updateMovieView();
     void adjustZoom(double zoomStep, const QPoint& viewportPos);
     void resetZoom();
-    void copyImageText();
-    void setOcrBusy(bool busy);
-    void resetOcrState();
     QSize currentSourceSize() const;
     QSize scaledVisualSize(const QSize& sourceSize, double zoomFactor) const;
     bool canPanImage() const;
@@ -78,7 +74,6 @@ private:
     QWidget* m_pathRow = nullptr;
     QLabel* m_pathTitleLabel = nullptr;
     QLabel* m_pathValueLabel = nullptr;
-    QToolButton* m_copyTextButton = nullptr;
     OpenWithButton* m_openWithButton = nullptr;
     QLabel* m_statusLabel = nullptr;
     QLabel* m_imageLabel = nullptr;
@@ -86,6 +81,4 @@ private:
     QMovie* m_movie = nullptr;
     QBuffer* m_movieBuffer = nullptr;
     QSize m_movieFrameSize;
-    QString m_cachedOcrText;
-    bool m_ocrBusy = false;
 };
