@@ -130,7 +130,7 @@ cmake --build build --config Debug --target SpaceLook
 #### Thanks♪(･ω･)ﾉ 
 
 <p>
-  <img src="PreView-Files/Image/微信图片_20260509033906_69_28.jpg" alt="WeChat appreciation code" width="260">
+  <img src="resources/IntroduceImage/WX_QRCode.jpg" alt="WeChat appreciation code" width="260">
   
 </p>
 微信赞赏码
