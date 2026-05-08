@@ -1,5 +1,7 @@
 ﻿#include "renderers/image/ImageRenderer.h"
 
+#include <QApplication>
+#include <QClipboard>
 #include <QDebug>
 #include <QCoreApplication>
 #include <QDir>
@@ -46,6 +48,7 @@
 #include "renderers/PreviewHeaderBar.h"
 #include "renderers/PreviewStateVisuals.h"
 #include "renderers/SelectableTitleLabel.h"
+#include "renderers/image/WindowsOcrService.h"
 #include "widgets/SpaceLookWindow.h"
 
 namespace {
@@ -445,6 +448,7 @@ ImageRenderer::ImageRenderer(QWidget* parent)
     , m_pathRow(new QWidget(this))
     , m_pathTitleLabel(new QLabel(this))
     , m_pathValueLabel(new QLabel(this))
+    , m_copyTextButton(new QToolButton(this))
     , m_openWithButton(new OpenWithButton(this))
     , m_statusLabel(new QLabel(this))
     , m_imageLabel(new QLabel(this))
@@ -459,6 +463,7 @@ ImageRenderer::ImageRenderer(QWidget* parent)
     m_pathRow->setObjectName(QStringLiteral("ImagePathRow"));
     m_pathTitleLabel->setObjectName(QStringLiteral("ImagePathTitle"));
     m_pathValueLabel->setObjectName(QStringLiteral("ImagePathValue"));
+    m_copyTextButton->setObjectName(QStringLiteral("ImageCopyTextButton"));
     m_openWithButton->setObjectName(QStringLiteral("ImageOpenWithButton"));
     m_statusLabel->setObjectName(QStringLiteral("ImageStatus"));
     m_scrollArea->setObjectName(QStringLiteral("ImageStage"));
@@ -481,6 +486,7 @@ ImageRenderer::ImageRenderer(QWidget* parent)
     pathLayout->setContentsMargins(0, 0, 0, 0);
     pathLayout->setSpacing(8);
     pathLayout->addWidget(m_pathValueLabel, 1);
+    pathLayout->addWidget(m_copyTextButton, 0, Qt::AlignVCenter);
 
     m_imageLabel->setAlignment(Qt::AlignCenter);
     m_scrollArea->setWidget(m_imageLabel);
@@ -499,6 +505,12 @@ ImageRenderer::ImageRenderer(QWidget* parent)
     m_pathValueLabel->setWordWrap(true);
     m_pathValueLabel->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
     m_pathRow->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+    m_copyTextButton->setText(QCoreApplication::translate("SpaceLook", "Copy Text"));
+    m_copyTextButton->setToolTip(QCoreApplication::translate("SpaceLook", "Copy text recognized from this image"));
+    m_copyTextButton->setEnabled(false);
+    connect(m_copyTextButton, &QToolButton::clicked, this, [this]() {
+        copyImageText();
+    });
     m_openWithButton->setStatusCallback([this](const QString& message) {
         showStatusMessage(message);
     });
@@ -568,6 +580,7 @@ void ImageRenderer::load(const HoveredItemInfo& info)
     m_zoomFactor = 1.0;
     m_isDragging = false;
     m_movieFrameSize = QSize();
+    resetOcrState();
     m_imageLabel->setText(QCoreApplication::translate("SpaceLook", "Loading image preview..."));
     PreviewStateVisuals::showStatus(m_statusLabel, QCoreApplication::translate("SpaceLook", "Loading image preview..."), PreviewStateVisuals::Kind::Loading);
     updateDragCursor();
@@ -597,6 +610,7 @@ void ImageRenderer::load(const HoveredItemInfo& info)
             return;
         }
 
+        m_copyTextButton->setEnabled(true);
         PreviewStateVisuals::showStatus(m_statusLabel, QCoreApplication::translate("SpaceLook", "Thumbnail ready. Loading full image..."), PreviewStateVisuals::Kind::Loading);
         updatePixmapView();
         qDebug().noquote() << QStringLiteral("[SpaceLookRender] ImageRenderer thumbnail loaded size=%1x%2 path=\"%3\"")
@@ -644,6 +658,8 @@ void ImageRenderer::load(const HoveredItemInfo& info)
         }
 
         m_hasHighResolutionImage = true;
+        m_cachedOcrText.clear();
+        m_copyTextButton->setEnabled(true);
         PreviewStateVisuals::clearStatus(m_statusLabel);
         updatePixmapView();
         qDebug().noquote() << QStringLiteral("[SpaceLookRender] ImageRenderer full image loaded size=%1x%2 path=\"%3\"")
@@ -1182,6 +1198,7 @@ void ImageRenderer::unload()
     m_zoomFactor = 1.0;
     m_isDragging = false;
     m_movieFrameSize = QSize();
+    resetOcrState();
     m_pathValueLabel->clear();
     m_openWithButton->setTargetContext(QString(), QString());
     m_imageLabel->clear();
@@ -1210,6 +1227,86 @@ void ImageRenderer::showStatusMessage(const QString& message)
             PreviewStateVisuals::clearStatus(label);
         }
     });
+}
+
+void ImageRenderer::resetOcrState()
+{
+    m_cachedOcrText.clear();
+    m_ocrBusy = false;
+    if (!m_copyTextButton) {
+        return;
+    }
+
+    m_copyTextButton->setText(QCoreApplication::translate("SpaceLook", "Copy Text"));
+    m_copyTextButton->setEnabled(false);
+}
+
+void ImageRenderer::setOcrBusy(bool busy)
+{
+    m_ocrBusy = busy;
+    if (!m_copyTextButton) {
+        return;
+    }
+
+    m_copyTextButton->setEnabled(!busy && !m_originalPixmap.isNull());
+    m_copyTextButton->setText(busy
+        ? QCoreApplication::translate("SpaceLook", "Recognizing...")
+        : QCoreApplication::translate("SpaceLook", "Copy Text"));
+}
+
+void ImageRenderer::copyImageText()
+{
+    if (m_ocrBusy) {
+        return;
+    }
+
+    if (!m_cachedOcrText.trimmed().isEmpty()) {
+        QApplication::clipboard()->setText(m_cachedOcrText);
+        showStatusMessage(QCoreApplication::translate("SpaceLook", "Image text copied."));
+        return;
+    }
+
+    if (m_originalPixmap.isNull()) {
+        showStatusMessage(QCoreApplication::translate("SpaceLook", "Image is not ready yet."));
+        return;
+    }
+
+    const PreviewLoadGuard::Token loadToken = m_loadGuard.observe(m_info.filePath);
+    const QImage ocrImage = m_originalPixmap.toImage();
+    setOcrBusy(true);
+    PreviewStateVisuals::showStatus(m_statusLabel, QCoreApplication::translate("SpaceLook", "Recognizing image text..."), PreviewStateVisuals::Kind::Loading);
+
+    auto* watcher = new QFutureWatcher<WindowsOcrResult>(this);
+    connect(watcher, &QFutureWatcher<WindowsOcrResult>::finished, this, [this, watcher, loadToken]() {
+        watcher->deleteLater();
+
+        if (!m_loadGuard.isCurrent(loadToken, m_info.filePath)) {
+            return;
+        }
+
+        setOcrBusy(false);
+        const WindowsOcrResult result = watcher->result();
+        if (!result.success) {
+            PreviewStateVisuals::showStatus(m_statusLabel,
+                                            result.errorMessage.trimmed().isEmpty()
+                                                ? QCoreApplication::translate("SpaceLook", "Image text recognition failed.")
+                                                : result.errorMessage,
+                                            PreviewStateVisuals::Kind::Error);
+            return;
+        }
+
+        m_cachedOcrText = result.text.trimmed();
+        if (m_cachedOcrText.isEmpty()) {
+            PreviewStateVisuals::showStatus(m_statusLabel, QCoreApplication::translate("SpaceLook", "No text was found in this image."), PreviewStateVisuals::Kind::Info);
+            return;
+        }
+
+        QApplication::clipboard()->setText(m_cachedOcrText);
+        PreviewStateVisuals::showStatus(m_statusLabel, QCoreApplication::translate("SpaceLook", "Image text copied."), PreviewStateVisuals::Kind::Success);
+    });
+    watcher->setFuture(QtConcurrent::run([ocrImage]() {
+        return WindowsOcrService::recognizeText(ocrImage);
+    }));
 }
 
 bool ImageRenderer::eventFilter(QObject* watched, QEvent* event)
@@ -1326,6 +1423,24 @@ void ImageRenderer::applyChrome()
         "}"
         "#ImageOpenWithButton QToolButton:pressed {"
         "  background: rgba(224, 234, 246, 1.0);"
+        "}"
+        "#ImageCopyTextButton {"
+        "  background: rgba(238, 244, 252, 0.96);"
+        "  color: #17324b;"
+        "  border: 1px solid rgba(193, 208, 224, 0.95);"
+        "  border-radius: 10px;"
+        "  padding: 3px 8px;"
+        "  min-height: 24px;"
+        "}"
+        "#ImageCopyTextButton:hover {"
+        "  background: rgba(245, 249, 255, 1.0);"
+        "}"
+        "#ImageCopyTextButton:pressed {"
+        "  background: rgba(224, 234, 246, 1.0);"
+        "}"
+        "#ImageCopyTextButton:disabled {"
+        "  color: rgba(91, 109, 128, 0.65);"
+        "  background: rgba(233, 238, 244, 0.72);"
         "}"
         "#ImageOpenWithButton #OpenWithPrimaryButton {"
         "  border-top-left-radius: 10px;"

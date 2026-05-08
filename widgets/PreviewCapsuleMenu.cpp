@@ -260,6 +260,7 @@ PreviewCapsuleMenu::PreviewCapsuleMenu(QWidget* parent)
     , m_actionCapsule(new QWidget(m_toolbar))
     , m_toolbarLayout(new QGridLayout(m_toolbar))
     , m_actionLayout(new QBoxLayout(QBoxLayout::LeftToRight, m_actionCapsule))
+    , m_capsuleShadow(new QGraphicsDropShadowEffect(this))
 {
     setObjectName(QStringLiteral("PreviewCapsuleMenu"));
     setSizePolicy(QSizePolicy::Maximum, QSizePolicy::Fixed);
@@ -280,11 +281,10 @@ PreviewCapsuleMenu::PreviewCapsuleMenu(QWidget* parent)
     m_actionLayout->setContentsMargins(8, 0, 8, 0);
     m_actionLayout->setSpacing(0);
 
-    auto* capsuleShadow = new QGraphicsDropShadowEffect(this);
-    capsuleShadow->setBlurRadius(20.0);
-    capsuleShadow->setOffset(0.0, 6.0);
-    capsuleShadow->setColor(QColor(26, 50, 84, 18));
-    m_actionCapsule->setGraphicsEffect(capsuleShadow);
+    m_capsuleShadow->setBlurRadius(20.0);
+    m_capsuleShadow->setOffset(0.0, 6.0);
+    m_capsuleShadow->setColor(QColor(26, 50, 84, 18));
+    m_actionCapsule->setGraphicsEffect(m_capsuleShadow);
 
     auto addSeparator = [this]() {
         auto* separator = new DockSeparator(m_actionCapsule);
@@ -397,6 +397,11 @@ void PreviewCapsuleMenu::showEvent(QShowEvent* event)
 void PreviewCapsuleMenu::syncToWindowState()
 {
     refreshWindowState();
+}
+
+void PreviewCapsuleMenu::refreshPlacement()
+{
+    applyMenuPlacement();
 }
 
 QToolButton* PreviewCapsuleMenu::createActionButton(const QString& objectName,

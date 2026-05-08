@@ -609,7 +609,7 @@ SpaceLookWindow::SpaceLookWindow(PreviewState* previewState, QWidget* parent)
     , m_menuRegion(new QWidget(m_container))
     , m_surface(new QWidget(m_container))
     , m_previewHost(new PreviewHost(previewState, m_surface))
-    , m_menuBar(new PreviewCapsuleMenu(m_menuRegion))
+    , m_menuBar(new PreviewCapsuleMenu(m_container))
 {
     setWindowTitle(QStringLiteral("Space Look"));
     setWindowFlags(Qt::Window | Qt::FramelessWindowHint);
@@ -628,19 +628,13 @@ SpaceLookWindow::SpaceLookWindow(PreviewState* previewState, QWidget* parent)
     m_container->setAttribute(Qt::WA_StyledBackground, true);
     m_menuRegion->setObjectName(QStringLiteral("SpaceLookMenuRegion"));
     m_menuRegion->setAttribute(Qt::WA_StyledBackground, true);
-    m_menuRegion->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Minimum);
+    m_menuRegion->hide();
     m_surface->setObjectName(QStringLiteral("SpaceLookSurface"));
 
     m_containerLayout = new QBoxLayout(QBoxLayout::TopToBottom, m_container);
     m_containerLayout->setContentsMargins(1, 1, 1, 1);
     m_containerLayout->setSpacing(0);
-    m_containerLayout->addWidget(m_menuRegion);
     m_containerLayout->addWidget(m_surface, 1);
-
-    m_menuLayout = new QBoxLayout(QBoxLayout::TopToBottom, m_menuRegion);
-    m_menuLayout->setContentsMargins(14, 8, 14, 8);
-    m_menuLayout->setSpacing(0);
-    m_menuLayout->addWidget(m_menuBar, 0, Qt::AlignHCenter | Qt::AlignTop);
 
     auto* surfaceLayout = new QVBoxLayout(m_surface);
     surfaceLayout->setContentsMargins(1, 1, 1, 1);
@@ -658,6 +652,16 @@ SpaceLookWindow::SpaceLookWindow(PreviewState* previewState, QWidget* parent)
     connect(&SpaceLookUiSettings::instance(), &SpaceLookUiSettings::menuAppearanceChanged, this, [this]() {
         applyMenuPlacement();
         applyWindowChromeStyle();
+    });
+    connect(&SpaceLookUiSettings::instance(), &SpaceLookUiSettings::menuButtonSizeChanged, this, [this]() {
+        QTimer::singleShot(0, this, [this]() {
+            updateOverlayMenuGeometry();
+        });
+    });
+    connect(&SpaceLookUiSettings::instance(), &SpaceLookUiSettings::menuVisibilityChanged, this, [this]() {
+        QTimer::singleShot(0, this, [this]() {
+            updateOverlayMenuGeometry();
+        });
     });
     connect(&SpaceLookUiSettings::instance(), &SpaceLookUiSettings::performanceModeChanged, this, [this]() {
         applyPerformanceMode();
@@ -692,13 +696,9 @@ void SpaceLookWindow::showPreview(const HoveredItemInfo& info)
     if (m_menuBar) {
         m_menuBar->syncToWindowState();
     }
-    if (m_menuRegion) {
-        m_menuRegion->show();
-        m_menuRegion->raise();
-    }
     if (m_menuBar) {
         m_menuBar->show();
-        m_menuBar->raise();
+        applyMenuPlacement();
     }
     if (compactSummaryPreview) {
         m_expandedPreview = false;
@@ -718,13 +718,9 @@ void SpaceLookWindow::showPreview(const HoveredItemInfo& info)
     }
 
     show();
-    if (m_menuRegion) {
-        m_menuRegion->show();
-        m_menuRegion->raise();
-    }
     if (m_menuBar) {
         m_menuBar->show();
-        m_menuBar->raise();
+        applyMenuPlacement();
     }
     raise();
     activateWindow();
@@ -1052,17 +1048,6 @@ void SpaceLookWindow::mousePressEvent(QMouseEvent* event)
         return;
     }
 
-    if (m_menuRegion && m_menuRegion->geometry().contains(event->pos())) {
-        const QPoint menuLocalPos = event->pos() - m_menuRegion->geometry().topLeft();
-        const bool hitMenuBlankArea = !m_menuBar || !m_menuBar->geometry().contains(menuLocalPos);
-        if (hitMenuBlankArea) {
-            m_draggingWindow = true;
-            m_dragOffset = event->globalPos() - frameGeometry().topLeft();
-            event->accept();
-            return;
-        }
-    }
-
     if (shouldStartDragFromActiveHeader(event->pos())) {
         m_draggingWindow = true;
         m_dragOffset = event->globalPos() - frameGeometry().topLeft();
@@ -1140,6 +1125,7 @@ void SpaceLookWindow::resizeEvent(QResizeEvent* event)
 {
     QWidget::resizeEvent(event);
     applyRoundedWindowMask();
+    updateOverlayMenuGeometry();
 }
 
 bool SpaceLookWindow::nativeEvent(const QByteArray& eventType, void* message, long* result)
@@ -1297,117 +1283,74 @@ bool SpaceLookWindow::shouldStartDragFromActiveHeader(const QPoint& localPos) co
 
 void SpaceLookWindow::applyMenuPlacement()
 {
-    if (!m_containerLayout || !m_menuLayout || !m_menuRegion || !m_surface || !m_menuBar) {
+    if (!m_containerLayout || !m_surface || !m_menuBar) {
         return;
     }
 
-    const int placement = SpaceLookUiSettings::instance().menuPlacement();
-    const bool menuOnBottom = placement == 1;
-    const bool menuOnLeft = placement == 2;
-    const bool menuOnRight = placement == 3;
-    const bool verticalSection = menuOnLeft || menuOnRight;
-
-    m_containerLayout->setDirection(verticalSection ? QBoxLayout::LeftToRight : QBoxLayout::TopToBottom);
-    m_menuLayout->setDirection(verticalSection ? QBoxLayout::LeftToRight : QBoxLayout::TopToBottom);
-
-    if (verticalSection) {
-        m_menuRegion->setSizePolicy(QSizePolicy::Minimum, QSizePolicy::Expanding);
-        m_menuRegion->setMinimumWidth(58);
-        m_menuRegion->setMinimumHeight(0);
-        m_menuLayout->setContentsMargins(8, 14, 8, 14);
-    } else {
-        m_menuRegion->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Minimum);
-        m_menuRegion->setMinimumWidth(0);
-        m_menuRegion->setMinimumHeight(58);
-        m_menuLayout->setContentsMargins(14, 8, 14, 8);
-    }
-
-    m_containerLayout->removeWidget(m_menuRegion);
-    m_containerLayout->removeWidget(m_surface);
-    m_menuLayout->removeWidget(m_menuBar);
-
-    if (menuOnRight || menuOnBottom) {
-        m_containerLayout->addWidget(m_surface, 1);
-        m_containerLayout->addWidget(m_menuRegion, 0);
-    } else {
-        m_containerLayout->addWidget(m_menuRegion, 0);
-        m_containerLayout->addWidget(m_surface, 1);
-    }
-
-    Qt::Alignment menuAlignment = Qt::AlignHCenter | Qt::AlignTop;
-    if (menuOnBottom) {
-        menuAlignment = Qt::AlignHCenter | Qt::AlignBottom;
-    } else if (menuOnLeft) {
-        menuAlignment = Qt::AlignHCenter | Qt::AlignVCenter;
-    } else if (menuOnRight) {
-        menuAlignment = Qt::AlignHCenter | Qt::AlignVCenter;
-    }
-    m_menuLayout->addWidget(m_menuBar, 0, menuAlignment);
-
-    m_menuRegion->updateGeometry();
+    m_containerLayout->setDirection(QBoxLayout::TopToBottom);
     m_surface->updateGeometry();
     m_container->updateGeometry();
-    m_menuRegion->show();
     m_menuBar->show();
-    m_menuRegion->raise();
+    m_menuBar->refreshPlacement();
+    updateOverlayMenuGeometry();
+}
+
+void SpaceLookWindow::updateOverlayMenuGeometry()
+{
+    if (!m_container || !m_menuBar) {
+        return;
+    }
+
+    m_menuBar->adjustSize();
+
+    const QRect contentRect = m_container->contentsRect();
+    const QSize menuSize = m_menuBar->sizeHint().expandedTo(m_menuBar->minimumSizeHint());
+    const int margin = 12;
+    const int contentGap = 10;
+    const int placement = SpaceLookUiSettings::instance().menuPlacement();
+
+    int x = contentRect.left() + (contentRect.width() - menuSize.width()) / 2;
+    int y = contentRect.top() + margin;
+
+    if (placement == 1) {
+        y = contentRect.bottom() - menuSize.height() - margin + 1;
+    } else if (placement == 2) {
+        x = contentRect.left() + margin;
+        y = contentRect.top() + (contentRect.height() - menuSize.height()) / 2;
+    } else if (placement == 3) {
+        x = contentRect.right() - menuSize.width() - margin + 1;
+        y = contentRect.top() + (contentRect.height() - menuSize.height()) / 2;
+    }
+
+    x = qMax(contentRect.left(), x);
+    y = qMax(contentRect.top(), y);
+    if (menuSize.width() < contentRect.width()) {
+        x = qMin(contentRect.right() - menuSize.width() + 1, x);
+    }
+    if (menuSize.height() < contentRect.height()) {
+        y = qMin(contentRect.bottom() - menuSize.height() + 1, y);
+    }
+
+    if (QLayout* surfaceLayout = m_surface ? m_surface->layout() : nullptr) {
+        QMargins margins(1, 1, 1, 1);
+        if (placement == 1) {
+            margins.setBottom(menuSize.height() + margin + contentGap);
+        } else if (placement == 2) {
+            margins.setLeft(menuSize.width() + margin + contentGap);
+        } else if (placement == 3) {
+            margins.setRight(menuSize.width() + margin + contentGap);
+        } else {
+            margins.setTop(menuSize.height() + margin + contentGap);
+        }
+        surfaceLayout->setContentsMargins(margins);
+    }
+
+    m_menuBar->setGeometry(QRect(QPoint(x, y), menuSize));
     m_menuBar->raise();
 }
 
 void SpaceLookWindow::applyWindowChromeStyle()
 {
-    const int placement = SpaceLookUiSettings::instance().menuPlacement();
-    const bool menuOnBottom = placement == 1;
-    const bool menuOnLeft = placement == 2;
-    const bool menuOnRight = placement == 3;
-
-    QString menuRadius;
-    QString surfaceRadius;
-    if (menuOnLeft) {
-        menuRadius = QStringLiteral(
-            "  border-top-left-radius: 22px;"
-            "  border-top-right-radius: 0px;"
-            "  border-bottom-left-radius: 22px;"
-            "  border-bottom-right-radius: 0px;");
-        surfaceRadius = QStringLiteral(
-            "  border-top-left-radius: 0px;"
-            "  border-top-right-radius: 22px;"
-            "  border-bottom-left-radius: 0px;"
-            "  border-bottom-right-radius: 22px;");
-    } else if (menuOnRight) {
-        menuRadius = QStringLiteral(
-            "  border-top-left-radius: 0px;"
-            "  border-top-right-radius: 22px;"
-            "  border-bottom-left-radius: 0px;"
-            "  border-bottom-right-radius: 22px;");
-        surfaceRadius = QStringLiteral(
-            "  border-top-left-radius: 22px;"
-            "  border-top-right-radius: 0px;"
-            "  border-bottom-left-radius: 22px;"
-            "  border-bottom-right-radius: 0px;");
-    } else if (menuOnBottom) {
-        menuRadius = QStringLiteral(
-            "  border-top-left-radius: 0px;"
-            "  border-top-right-radius: 0px;"
-            "  border-bottom-left-radius: 22px;"
-            "  border-bottom-right-radius: 22px;");
-        surfaceRadius = QStringLiteral(
-            "  border-top-left-radius: 22px;"
-            "  border-top-right-radius: 22px;"
-            "  border-bottom-left-radius: 0px;"
-            "  border-bottom-right-radius: 0px;");
-    } else {
-        menuRadius = QStringLiteral(
-            "  border-top-left-radius: 22px;"
-            "  border-top-right-radius: 22px;"
-            "  border-bottom-left-radius: 0px;"
-            "  border-bottom-right-radius: 0px;");
-        surfaceRadius = QStringLiteral(
-            "  border-top-left-radius: 0px;"
-            "  border-top-right-radius: 0px;"
-            "  border-bottom-left-radius: 22px;"
-            "  border-bottom-right-radius: 22px;");
-    }
-
     setStyleSheet(QStringLiteral(
         "SpaceLookWindow {"
         "  background: #445a70;"
@@ -1418,16 +1361,15 @@ void SpaceLookWindow::applyWindowChromeStyle()
         "  border-radius: 22px;"
         "}"
         "#SpaceLookMenuRegion {"
-        "  background: rgba(236, 243, 251, 245);"
+        "  background: transparent;"
         "  border: none;"
-        "%1"
         "}"
         "#SpaceLookSurface {"
         "  background: rgba(244, 248, 252, 252);"
         "  border: none;"
-        "%2"
+        "  border-radius: 21px;"
         "}"
-    ).arg(menuRadius, surfaceRadius));
+    ));
 }
 
 void SpaceLookWindow::applyRoundedWindowMask()

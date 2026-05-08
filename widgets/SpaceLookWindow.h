@@ -56,6 +56,7 @@ protected:
 
 private:
     void applyMenuPlacement();
+    void updateOverlayMenuGeometry();
     void applyWindowChromeStyle();
     void applyTaskbarVisibility();
     void applyPerformanceMode();
@@ -82,7 +83,6 @@ private:
     QWidget* m_menuRegion = nullptr;
     QWidget* m_surface = nullptr;
     QBoxLayout* m_containerLayout = nullptr;
-    QBoxLayout* m_menuLayout = nullptr;
     PreviewHost* m_previewHost = nullptr;
     PreviewCapsuleMenu* m_menuBar = nullptr;
     PreviewState* m_previewState = nullptr;
