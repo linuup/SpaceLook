@@ -33,6 +33,7 @@ public:
     void unload() override;
     bool reportsLoadingState() const override;
     void setLoadingStateCallback(std::function<void(bool)> callback) override;
+    bool previewHoveredOrCurrentItem();
 
     struct FolderEntry
     {
@@ -50,6 +51,9 @@ public:
         QString statusMessage;
         bool success = false;
     };
+
+signals:
+    void previewRequested(const QString& path);
 
 protected:
     bool eventFilter(QObject* watched, QEvent* event) override;
@@ -79,6 +83,7 @@ private:
     void cancelInlineRename();
     void handleInlineRename(QTreeWidgetItem* item, int column);
     void updateTreeItemPathPrefix(QTreeWidgetItem* item, const QString& oldPath, const QString& newPath);
+    bool previewTreeItem(QTreeWidgetItem* item);
     void notifyLoadingState(bool loading);
     void toggleSearchPanel();
     void setSearchPanelVisible(bool visible);

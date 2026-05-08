@@ -380,7 +380,8 @@ FolderRenderer::FolderRenderer(QWidget* parent)
     m_treeWidget->setUniformRowHeights(true);
     m_treeWidget->setAlternatingRowColors(false);
     m_treeWidget->setAnimated(true);
-    m_treeWidget->setIndentation(20);
+    m_treeWidget->setIconSize(QSize(22, 22));
+    m_treeWidget->setIndentation(24);
     m_treeWidget->setEditTriggers(QAbstractItemView::NoEditTriggers);
     m_treeWidget->setContextMenuPolicy(Qt::CustomContextMenu);
     m_treeWidget->installEventFilter(this);
@@ -584,6 +585,12 @@ bool FolderRenderer::eventFilter(QObject* watched, QEvent* event)
             return true;
         }
 
+        if ((watched == m_treeWidget || watched == m_treeWidget->viewport()) &&
+            keyEvent->key() == Qt::Key_Space &&
+            keyEvent->modifiers() == Qt::NoModifier) {
+            return previewHoveredOrCurrentItem();
+        }
+
         if ((watched == m_treeWidget || watched == m_treeWidget->viewport()) && keyEvent->key() == Qt::Key_F2) {
             renameTreeItem(m_treeWidget ? m_treeWidget->currentItem() : nullptr);
             return true;
@@ -608,6 +615,23 @@ void FolderRenderer::notifyLoadingState(bool loading)
     if (m_loadingStateCallback) {
         m_loadingStateCallback(loading);
     }
+}
+
+bool FolderRenderer::previewHoveredOrCurrentItem()
+{
+    if (m_nameSearchEdit && m_nameSearchEdit->hasFocus()) {
+        return false;
+    }
+    if (m_renameEditor && m_renameEditor->hasFocus()) {
+        return false;
+    }
+
+    QTreeWidgetItem* item = nullptr;
+    if (m_treeWidget) {
+        item = m_treeWidget->itemAt(m_treeWidget->viewport()->mapFromGlobal(QCursor::pos()));
+    }
+
+    return previewTreeItem(item);
 }
 
 void FolderRenderer::applyChrome()
@@ -675,14 +699,19 @@ void FolderRenderer::applyChrome()
         "  border: 1px solid #ccd6e2;"
         "  border-radius: 18px;"
         "  color: #18324a;"
-        "  padding: 8px;"
+        "  padding: 10px 8px;"
         "  outline: none;"
         "}"
         "#FolderTree::item {"
-        "  min-height: 28px;"
+        "  min-height: 32px;"
+        "  padding: 3px 8px;"
+        "  border-radius: 9px;"
+        "}"
+        "#FolderTree::item:hover {"
+        "  background: rgba(222, 235, 250, 0.92);"
         "}"
         "#FolderTree::item:selected {"
-        "  background: rgba(126, 188, 255, 0.28);"
+        "  background: rgba(126, 188, 255, 0.30);"
         "  color: #08233b;"
         "}"
         "#FolderRenameWidget {"
@@ -714,7 +743,7 @@ void FolderRenderer::applyChrome()
         "  border: none;"
         "  border-bottom: 1px solid rgba(204, 214, 226, 0.95);"
         "  padding: 8px 10px;"
-        "  font-family: 'Segoe UI Rounded';"
+        "  font-family: 'Segoe UI Variable Text', 'Segoe UI';"
         "}"
         "#FolderTree QScrollBar:vertical {"
         "  background: rgba(232, 238, 245, 0.8);"
@@ -770,7 +799,7 @@ void FolderRenderer::applyChrome()
         "  background: rgba(255, 255, 255, 0.95);"
         "  border: 1px solid rgba(190, 210, 230, 0.95);"
         "  border-radius: 9px;"
-        "  padding: 5px 8px;"
+        "  padding: 6px 10px;"
         "  color: #18324a;"
         "}"
         "#FolderSearchPanel QLineEdit:focus {"
@@ -789,22 +818,22 @@ void FolderRenderer::applyChrome()
     );
 
     QFont titleFont;
-    titleFont.setFamily(QStringLiteral("Segoe UI Rounded"));
-    titleFont.setPixelSize(20);
-    titleFont.setWeight(QFont::Bold);
+    titleFont.setFamilies({ QStringLiteral("Segoe UI Variable Display"), QStringLiteral("Segoe UI") });
+    titleFont.setPixelSize(21);
+    titleFont.setWeight(QFont::DemiBold);
     m_titleLabel->setFont(titleFont);
 
     QFont metaFont;
-    metaFont.setFamily(QStringLiteral("Segoe UI Rounded"));
-    metaFont.setPixelSize(13);
+    metaFont.setFamilies({ QStringLiteral("Segoe UI Variable Text"), QStringLiteral("Segoe UI") });
+    metaFont.setPixelSize(12);
     m_metaLabel->setFont(metaFont);
     m_pathTitleLabel->setFont(metaFont);
     m_pathValueLabel->setFont(metaFont);
     m_statusLabel->setFont(metaFont);
 
     QFont treeFont;
-    treeFont.setFamily(QStringLiteral("Segoe UI Rounded"));
-    treeFont.setPixelSize(13);
+    treeFont.setFamilies({ QStringLiteral("Segoe UI Variable Text"), QStringLiteral("Segoe UI") });
+    treeFont.setPixelSize(14);
     m_treeWidget->setFont(treeFont);
     m_nameSearchEdit->setFont(treeFont);
     m_clearFiltersButton->setFont(treeFont);
@@ -1507,4 +1536,22 @@ void FolderRenderer::updateTreeItemPathPrefix(QTreeWidgetItem* item, const QStri
     for (int index = 0; index < item->childCount(); ++index) {
         updateTreeItemPathPrefix(item->child(index), normalizedOldPath, normalizedNewPath);
     }
+}
+
+bool FolderRenderer::previewTreeItem(QTreeWidgetItem* item)
+{
+    if (!item || item->data(0, kPlaceholderRole).toBool()) {
+        return false;
+    }
+    if (isFolderItemLoading(item)) {
+        return false;
+    }
+
+    const QString targetPath = item->data(0, kItemPathRole).toString().trimmed();
+    if (targetPath.isEmpty()) {
+        return false;
+    }
+
+    emit previewRequested(targetPath);
+    return true;
 }

@@ -611,7 +611,6 @@ void RenderedPageRenderer::warmUp()
     if (!m_webView->warmUp(&errorMessage) && !errorMessage.trimmed().isEmpty()) {
         qDebug().noquote() << QStringLiteral("[SpaceLookRender] RenderedPageRenderer warmup skipped: %1").arg(errorMessage);
     }
-    m_fallbackHtmlView->setDocumentHtml(QStringLiteral("<!doctype html><html><body></body></html>"), QString());
 }
 
 bool RenderedPageRenderer::reportsLoadingState() const

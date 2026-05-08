@@ -19,6 +19,7 @@
 #include "renderers/welcome/WelcomeRenderer.h"
 
 RendererRegistry::RendererRegistry(PreviewState* previewState)
+    : m_previewState(previewState)
 {
     auto registerRenderer = [this](std::unique_ptr<IPreviewRenderer> renderer) {
         if (!renderer) {
@@ -115,6 +116,70 @@ IPreviewRenderer* RendererRegistry::rendererFor(const HoveredItemInfo& info) con
             return renderer.get();
         }
     }
+    return nullptr;
+}
+
+std::unique_ptr<IPreviewRenderer> RendererRegistry::createRendererById(const QString& rendererId) const
+{
+    return createRendererByNormalizedId(normalizeRendererLookupKey(rendererId));
+}
+
+std::unique_ptr<IPreviewRenderer> RendererRegistry::createRendererFor(const HoveredItemInfo& info) const
+{
+    if (!info.rendererName.trimmed().isEmpty()) {
+        if (std::unique_ptr<IPreviewRenderer> renderer = createRendererById(info.rendererName)) {
+            return renderer;
+        }
+    }
+
+    for (const std::unique_ptr<IPreviewRenderer>& renderer : m_renderers) {
+        if (renderer && renderer->canHandle(info)) {
+            return createRendererById(renderer->rendererId());
+        }
+    }
+
+    return nullptr;
+}
+
+std::unique_ptr<IPreviewRenderer> RendererRegistry::createRendererByNormalizedId(const QString& normalizedRendererId) const
+{
+    if (normalizedRendererId == QStringLiteral("pdf")) {
+        return std::make_unique<PdfRenderer>();
+    }
+    if (normalizedRendererId == QStringLiteral("welcome")) {
+        return std::make_unique<WelcomeRenderer>();
+    }
+    if (normalizedRendererId == QStringLiteral("document")) {
+        return std::make_unique<DocumentRenderer>();
+    }
+    if (normalizedRendererId == QStringLiteral("archive")) {
+        return std::make_unique<ArchiveRenderer>();
+    }
+    if (normalizedRendererId == QStringLiteral("certificate")) {
+        return std::make_unique<CertificateRenderer>();
+    }
+    if (normalizedRendererId == QStringLiteral("folder")) {
+        return std::make_unique<FolderRenderer>();
+    }
+    if (normalizedRendererId == QStringLiteral("rendered_page")) {
+        return std::make_unique<RenderedPageRenderer>();
+    }
+    if (normalizedRendererId == QStringLiteral("code")) {
+        return std::make_unique<CodeRenderer>(m_previewState);
+    }
+    if (normalizedRendererId == QStringLiteral("text")) {
+        return std::make_unique<TextRenderer>(m_previewState);
+    }
+    if (normalizedRendererId == QStringLiteral("image")) {
+        return std::make_unique<ImageRenderer>();
+    }
+    if (normalizedRendererId == QStringLiteral("media")) {
+        return std::make_unique<MediaRenderer>();
+    }
+    if (normalizedRendererId == QStringLiteral("summary")) {
+        return std::make_unique<SummaryRenderer>(m_previewState);
+    }
+
     return nullptr;
 }
 

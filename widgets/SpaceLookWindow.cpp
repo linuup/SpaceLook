@@ -578,13 +578,6 @@ LRESULT CALLBACK SPACELOOKKeyboardProc(int code, WPARAM wParam, LPARAM lParam)
         return CallNextHookEx(g_spaceKeyboardHook, code, wParam, lParam);
     }
 
-    if (shouldIgnoreGlobalSpaceHotkey()) {
-        if (isKeyUp) {
-            g_spaceKeyPressed = false;
-        }
-        return CallNextHookEx(g_spaceKeyboardHook, code, wParam, lParam);
-    }
-
     if (isKeyDown) {
         if (g_spaceKeyPressed) {
             return 1;
@@ -768,6 +761,19 @@ bool SpaceLookWindow::containsGlobalPoint(const QPoint& globalPos) const
 
 void SpaceLookWindow::handleGlobalSpacePressed()
 {
+    if (m_previewHost && containsGlobalPoint(QCursor::pos())) {
+        if (m_previewHost->previewHoveredFolderItem()) {
+            return;
+        }
+
+        if (m_previewHost->previewStackDepth() > 1 && m_previewHost->popPreview()) {
+            return;
+        }
+
+        hidePreview();
+        return;
+    }
+
     emit spaceHotkeyPressed();
 }
 
