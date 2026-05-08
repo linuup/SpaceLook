@@ -1,4 +1,4 @@
-#include <QApplication>
+﻿#include <QApplication>
 #include <QDebug>
 #include <QIcon>
 #include <Windows.h>
@@ -7,12 +7,16 @@
 #include "core/preview_manager.h"
 #include "core/render_type_registry.h"
 #include "platform/spacelook_ipc_server.h"
+#include "settings/app_translator.h"
 
 int main(int argc, char* argv[])
 {
+    qputenv("QT_MULTIMEDIA_PREFERRED_PLUGINS", QByteArrayLiteral("windowsmediafoundation"));
+
     QApplication app(argc, argv);
     app.setApplicationName(QStringLiteral("SpaceLook"));
     app.setOrganizationName(QStringLiteral("LinDesk"));
+    AppTranslator::instance().initialize();
 
     HANDLE singleInstanceMutex = CreateMutexW(nullptr, TRUE, L"Local\\LinDesk.SpaceLook.SingleInstance");
     const DWORD mutexError = GetLastError();

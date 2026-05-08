@@ -1,4 +1,4 @@
-#include "platform/spacelook_ipc_server.h"
+﻿#include "platform/spacelook_ipc_server.h"
 
 #include <QDebug>
 #include <QJsonDocument>

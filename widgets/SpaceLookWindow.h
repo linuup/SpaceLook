@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include <QWidget>
 #include <QPoint>
@@ -46,6 +46,7 @@ signals:
     void spaceHotkeyPressed();
 
 protected:
+    void keyPressEvent(QKeyEvent* event) override;
     void hideEvent(QHideEvent* event) override;
     void mousePressEvent(QMouseEvent* event) override;
     void mouseMoveEvent(QMouseEvent* event) override;

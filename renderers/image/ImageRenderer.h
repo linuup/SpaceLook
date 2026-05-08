@@ -1,5 +1,6 @@
-#pragma once
+﻿#pragma once
 
+#include <QBuffer>
 #include <QImage>
 #include <QPixmap>
 #include <QWidget>
@@ -78,5 +79,6 @@ private:
     QLabel* m_imageLabel = nullptr;
     QScrollArea* m_scrollArea = nullptr;
     QMovie* m_movie = nullptr;
+    QBuffer* m_movieBuffer = nullptr;
     QSize m_movieFrameSize;
 };

@@ -1,6 +1,7 @@
 #include "renderers/PreviewHost.h"
 
 #include <QHBoxLayout>
+#include <QCoreApplication>
 #include <QDebug>
 #include <QFileInfo>
 #include <QLabel>
@@ -68,6 +69,12 @@ PreviewHost::PreviewHost(PreviewState* previewState, QWidget* parent)
             m_stack->addWidget(renderer->widget());
         }
     }
+
+    QTimer::singleShot(700, this, [this]() {
+        if (m_registry) {
+            m_registry->warmUpHeavyRenderers();
+        }
+    });
 }
 
 PreviewHost::~PreviewHost()
@@ -102,10 +109,13 @@ void PreviewHost::showPreview(const HoveredItemInfo& info)
 
     const PreviewLoadGuard::Token loadToken = m_previewLoadGuard.begin(info.filePath);
 
-    if (m_activeRenderer) {
-        qDebug().noquote() << QStringLiteral("[SpaceLookRender] Unloading active renderer before reload: %1")
-            .arg(m_activeRenderer->rendererId());
+    if (m_activeRenderer && m_activeRenderer != nextRenderer) {
+        qDebug().noquote() << QStringLiteral("[SpaceLookRender] Unloading active renderer before switch: %1 -> %2")
+            .arg(m_activeRenderer->rendererId(), nextRenderer->rendererId());
         m_activeRenderer->unload();
+    } else if (m_activeRenderer == nextRenderer) {
+        qDebug().noquote() << QStringLiteral("[SpaceLookRender] Reusing active renderer without host unload: %1")
+            .arg(nextRenderer->rendererId());
     }
 
     m_activeRenderer = nextRenderer;
@@ -242,17 +252,17 @@ void PreviewHost::showLoadingOverlay(const HoveredItemInfo& info, const QString&
     }
 
     const QString title = info.fileName.trimmed().isEmpty()
-        ? QStringLiteral("Preparing preview")
-        : QStringLiteral("Preparing %1").arg(info.fileName.trimmed());
+        ? QCoreApplication::translate("SpaceLook", "Preparing preview")
+        : QCoreApplication::translate("SpaceLook", "Preparing %1").arg(info.fileName.trimmed());
     const QString rendererLabel = rendererId.trimmed().isEmpty()
-        ? QStringLiteral("preview")
+        ? QCoreApplication::translate("SpaceLook", "preview")
         : rendererId.trimmed();
 
     if (m_loadingTitleLabel) {
         m_loadingTitleLabel->setText(title);
     }
     if (m_loadingMessageLabel) {
-        m_loadingMessageLabel->setText(QStringLiteral("Loading with %1...").arg(rendererLabel));
+        m_loadingMessageLabel->setText(QCoreApplication::translate("SpaceLook", "Loading with %1...").arg(rendererLabel));
     }
     PreviewStateVisuals::prepareStateCard(
         m_loadingTitleLabel ? m_loadingTitleLabel->parentWidget() : nullptr,
@@ -298,8 +308,8 @@ void PreviewHost::showSummaryFallback(const HoveredItemInfo& info, const QString
     HoveredItemInfo fallbackInfo = info;
     const QString trimmedReason = reason.trimmed();
     fallbackInfo.statusMessage = trimmedReason.isEmpty()
-        ? QStringLiteral("Failed to render preview with the selected renderer. Showing file summary instead.")
-        : QStringLiteral("Failed to render preview with the selected renderer. Showing file summary instead. %1").arg(trimmedReason);
+        ? QCoreApplication::translate("SpaceLook", "Failed to render preview with the selected renderer. Showing file summary instead.")
+        : QCoreApplication::translate("SpaceLook", "Failed to render preview with the selected renderer. Showing file summary instead. %1").arg(trimmedReason);
 
     const PreviewLoadGuard::Token loadToken = m_previewLoadGuard.begin(fallbackInfo.filePath);
 

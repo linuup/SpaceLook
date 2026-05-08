@@ -1,6 +1,7 @@
-#include "renderers/summary/SummaryRenderer.h"
+﻿#include "renderers/summary/SummaryRenderer.h"
 
 #include <QDateTime>
+#include <QCoreApplication>
 #include <QDebug>
 #include <QFileInfo>
 #include <QFrame>
@@ -58,7 +59,7 @@ QString displayValue(const QString& value, const QString& fallback = QStringLite
 QString displayDateTime(const QDateTime& value)
 {
     if (!value.isValid()) {
-        return QStringLiteral("Unavailable");
+        return QCoreApplication::translate("SpaceLook", "Unavailable");
     }
     return value.toLocalTime().toString(QStringLiteral("yyyy-MM-dd HH:mm:ss"));
 }
@@ -66,7 +67,7 @@ QString displayDateTime(const QDateTime& value)
 QString displayFileSize(qint64 size, bool isDirectory)
 {
     if (isDirectory || size < 0) {
-        return QStringLiteral("Unavailable");
+        return QCoreApplication::translate("SpaceLook", "Unavailable");
     }
 
     double currentSize = static_cast<double>(size);
@@ -161,8 +162,8 @@ SummaryRenderer::SummaryRenderer(PreviewState* previewState, QWidget* parent)
     topGrid->setVerticalSpacing(0);
     topGrid->setColumnStretch(0, 1);
     topGrid->setColumnStretch(1, 1);
-    topGrid->addWidget(createDetailBlock(QStringLiteral("Folder"), &m_folderValueLabel, m_detailsContent), 0, 0);
-    topGrid->addWidget(createDetailBlock(QStringLiteral("Created"), &m_createdValueLabel, m_detailsContent), 0, 1);
+    topGrid->addWidget(createDetailBlock(QCoreApplication::translate("SpaceLook", "Folder"), &m_folderValueLabel, m_detailsContent), 0, 0);
+    topGrid->addWidget(createDetailBlock(QCoreApplication::translate("SpaceLook", "Created"), &m_createdValueLabel, m_detailsContent), 0, 1);
     detailsContentLayout->addLayout(topGrid);
 
     detailsContentLayout->addWidget(createDetailLine(QStringLiteral("SummaryTopLine"), m_detailsContent));
@@ -173,13 +174,13 @@ SummaryRenderer::SummaryRenderer(PreviewState* previewState, QWidget* parent)
     bottomGrid->setVerticalSpacing(0);
     bottomGrid->setColumnStretch(0, 1);
     bottomGrid->setColumnStretch(1, 1);
-    bottomGrid->addWidget(createDetailBlock(QStringLiteral("Modified"), &m_modifiedValueLabel, m_detailsContent), 0, 0);
-    bottomGrid->addWidget(createDetailBlock(QStringLiteral("Size"), &m_sizeValueLabel, m_detailsContent), 0, 1);
+    bottomGrid->addWidget(createDetailBlock(QCoreApplication::translate("SpaceLook", "Modified"), &m_modifiedValueLabel, m_detailsContent), 0, 0);
+    bottomGrid->addWidget(createDetailBlock(QCoreApplication::translate("SpaceLook", "Size"), &m_sizeValueLabel, m_detailsContent), 0, 1);
     detailsContentLayout->addLayout(bottomGrid);
 
     detailsContentLayout->addWidget(createDetailLine(QStringLiteral("SummaryResolvedLine"), m_detailsContent));
 
-    m_resolvedTargetSection = createDetailBlock(QStringLiteral("Resolved target"), &m_resolvedTargetValueLabel, m_detailsContent);
+    m_resolvedTargetSection = createDetailBlock(QCoreApplication::translate("SpaceLook", "Resolved target"), &m_resolvedTargetValueLabel, m_detailsContent);
     detailsContentLayout->addWidget(m_resolvedTargetSection);
     detailsContentLayout->addStretch(1);
 
@@ -267,7 +268,7 @@ QWidget* SummaryRenderer::createDetailBlock(const QString& title, QLabel** value
     titleLabel->setTextFormat(Qt::PlainText);
     titleLabel->setAlignment(Qt::AlignLeft | Qt::AlignTop);
 
-    auto* dataLabel = new QLabel(QStringLiteral("Unavailable"), block);
+    auto* dataLabel = new QLabel(QCoreApplication::translate("SpaceLook", "Unavailable"), block);
     dataLabel->setObjectName(QStringLiteral("SummaryDetailValue"));
     dataLabel->setTextFormat(Qt::PlainText);
     dataLabel->setAlignment(Qt::AlignLeft | Qt::AlignTop);
@@ -322,13 +323,13 @@ void SummaryRenderer::setDetailValues(const HoveredItemInfo& info)
         : (hasRealPath ? fileInfo.absolutePath() : QString());
     const QString createdValue = hasRealPath
         ? displayDateTime(fileInfo.birthTime())
-        : QStringLiteral("Unavailable");
+        : QCoreApplication::translate("SpaceLook", "Unavailable");
     const QString modifiedValue = hasRealPath
         ? displayDateTime(fileInfo.lastModified())
-        : QStringLiteral("Unavailable");
+        : QCoreApplication::translate("SpaceLook", "Unavailable");
     const QString fileSizeValue = hasRealPath
         ? displayFileSize(fileInfo.size(), fileInfo.isDir())
-        : QStringLiteral("Unavailable");
+        : QCoreApplication::translate("SpaceLook", "Unavailable");
     const QString resolvedTarget = displayValue(info.resolvedPath);
 
     qDebug().noquote() << QStringLiteral("[SpaceLookRender] Summary details path=\"%1\" folder=\"%2\" created=\"%3\" modified=\"%4\" size=\"%5\" resolved=\"%6\"")
@@ -363,7 +364,7 @@ void SummaryRenderer::setDetailValues(const HoveredItemInfo& info)
 void SummaryRenderer::applyInfo(const HoveredItemInfo& info)
 {
     m_currentInfo = info;
-    m_titleLabel->setText(info.title.isEmpty() ? QStringLiteral("Summary Preview") : info.title);
+    m_titleLabel->setText(info.title.isEmpty() ? QCoreApplication::translate("SpaceLook", "Summary Preview") : info.title);
     m_titleLabel->setCopyText(m_titleLabel->text());
 
     m_iconLabel->setPixmap(FileTypeIconResolver::pixmapForInfo(info, m_iconLabel->contentsRect().size()));
@@ -371,14 +372,14 @@ void SummaryRenderer::applyInfo(const HoveredItemInfo& info)
     const QString displayPath = info.filePath.trimmed().isEmpty()
         ? info.resolvedPath.trimmed()
         : info.filePath.trimmed();
-    m_pathValueLabel->setText(displayPath.isEmpty() ? QStringLiteral("(Unavailable)") : displayPath);
+    m_pathValueLabel->setText(displayPath.isEmpty() ? QCoreApplication::translate("SpaceLook", "(Unavailable)") : displayPath);
     m_openWithButton->setTargetContext(info.filePath, info.typeKey);
 
     if (shouldShowSummaryStatus(info)) {
         PreviewStateVisuals::showStatus(
             m_statusLabel,
             info.statusMessage.isEmpty()
-                ? QStringLiteral("No object information is available.")
+                ? QCoreApplication::translate("SpaceLook", "No object information is available.")
                 : info.statusMessage,
             info.statusMessage.isEmpty() ? PreviewStateVisuals::Kind::Empty : PreviewStateVisuals::Kind::Automatic);
     } else {
@@ -405,7 +406,8 @@ void SummaryRenderer::applyChrome()
         "  border-radius: 0px;"
         "}"
         "QLabel {"
-        "  color: #18324a;"
+          "  color: #18324a;"
+        "  font-family: 'Segoe UI';"
         "}"
         "#SummaryTypeIcon {"
         "  background: transparent;"
@@ -414,17 +416,21 @@ void SummaryRenderer::applyChrome()
         "}"
         "#SummaryTitle {"
         "  color: #0f2740;"
+        "  font-family: 'Segoe UI Variable';"
         "  font-weight: 700;"
         "}"
         "#SummaryMeta {"
         "  color: #5c738b;"
+        "  font-family: 'Segoe UI';"
         "}"
         "#SummaryPathTitle {"
         "  color: #16324a;"
-        "  font-family: 'Segoe UI Rounded';"
+        "  font-family: 'Segoe UI';"
+        "  font-weight: 500;"
         "}"
         "#SummaryPathValue {"
         "  color: #445d76;"
+        "  font-family: 'Segoe UI';"
         "}"
         "#SummaryOpenWithButton QToolButton {"
         "  background: rgba(238, 244, 252, 0.96);"
@@ -458,6 +464,7 @@ void SummaryRenderer::applyChrome()
         "}"
         "#SummaryStatus {"
         "  color: #215f4d;"
+        "  font-family: 'Segoe UI';"
         "  background: rgba(207, 241, 229, 0.92);"
         "  border: 1px solid rgba(132, 196, 172, 0.9);"
         "  border-radius: 12px;"
@@ -481,14 +488,14 @@ void SummaryRenderer::applyChrome()
         "#SummaryDetailTitle {"
         "  color: #577199;"
         "  background: transparent;"
-        "  font-family: 'Segoe UI Rounded';"
+        "  font-family: 'Segoe UI';"
         "  font-size: 13px;"
-        "  font-weight: 700;"
+        "  font-weight: 500;"
         "}"
         "#SummaryDetailValue {"
         "  color: #1e2c3b;"
         "  background: transparent;"
-        "  font-family: 'Segoe UI Rounded';"
+        "  font-family: 'Segoe UI';"
         "  font-size: 15px;"
         "  line-height: 1.15;"
         "  selection-background-color: #cfe3ff;"
@@ -527,19 +534,25 @@ void SummaryRenderer::applyChrome()
     );
 
     QFont titleFont;
-    titleFont.setFamily(QStringLiteral("Segoe UI Rounded"));
+    titleFont.setFamily(QStringLiteral("Segoe UI Variable"));
     titleFont.setPixelSize(20);
-    titleFont.setWeight(QFont::Bold);
+    titleFont.setWeight(QFont::DemiBold);
     m_titleLabel->setFont(titleFont);
     m_titleLabel->setWordWrap(true);
 
-    QFont metaFont;
-    metaFont.setFamily(QStringLiteral("Segoe UI Rounded"));
-    metaFont.setPixelSize(13);
-    m_metaLabel->setFont(metaFont);
-    m_pathTitleLabel->setFont(metaFont);
-    m_pathValueLabel->setFont(metaFont);
-    m_statusLabel->setFont(metaFont);
+    QFont bodyFont;
+    bodyFont.setFamily(QStringLiteral("Segoe UI"));
+    bodyFont.setStyleName(QStringLiteral("Regular"));
+    bodyFont.setPixelSize(13);
+
+    QFont labelFont(bodyFont);
+    labelFont.setStyleName(QStringLiteral("Medium"));
+    labelFont.setWeight(QFont::Medium);
+
+    m_metaLabel->setFont(bodyFont);
+    m_pathTitleLabel->setFont(labelFont);
+    m_pathValueLabel->setFont(bodyFont);
+    m_statusLabel->setFont(bodyFont);
     m_metaLabel->setWordWrap(true);
     m_pathValueLabel->setWordWrap(true);
 }

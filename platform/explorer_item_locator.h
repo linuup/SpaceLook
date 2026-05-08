@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include "core/hovered_item_info.h"
 

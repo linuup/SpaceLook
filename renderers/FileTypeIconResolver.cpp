@@ -1,4 +1,4 @@
-#include "renderers/FileTypeIconResolver.h"
+﻿#include "renderers/FileTypeIconResolver.h"
 #include "core/file_suffix_utils.h"
 
 #include <QDir>

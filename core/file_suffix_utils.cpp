@@ -1,4 +1,4 @@
-#include "core/file_suffix_utils.h"
+﻿#include "core/file_suffix_utils.h"
 
 namespace FileSuffixUtils
 {

@@ -1,21 +1,22 @@
 #include "renderers/folder/FolderRenderer.h"
 
 #include <QDebug>
+#include <QCoreApplication>
+#include <QDateTime>
 #include <QDir>
 #include <QEvent>
 #include <QFileInfo>
 #include <QFutureWatcher>
-#include <QHash>
 #include <QHeaderView>
 #include <QHBoxLayout>
 #include <QIcon>
 #include <QKeyEvent>
+#include <QKeySequence>
 #include <QLabel>
 #include <QLineEdit>
 #include <QMenu>
 #include <QProcess>
 #include <QPushButton>
-#include <QRegularExpression>
 #include <QSignalBlocker>
 #include <QTimer>
 #include <QToolButton>
@@ -25,6 +26,7 @@
 #include <QtConcurrent/QtConcurrent>
 
 #include <Windows.h>
+#include <ShObjIdl.h>
 
 #include "renderers/FileTypeIconResolver.h"
 #include "renderers/OpenWithButton.h"
@@ -41,6 +43,9 @@ constexpr int kLoadingRole = Qt::UserRole + 3;
 constexpr int kLoadedRole = Qt::UserRole + 4;
 constexpr int kRenameOldPathRole = Qt::UserRole + 5;
 constexpr int kRenameOldNameRole = Qt::UserRole + 6;
+constexpr int kEntrySizeRole = Qt::UserRole + 7;
+constexpr int kEntryModifiedRole = Qt::UserRole + 8;
+constexpr int kExpansionPathRole = Qt::UserRole + 9;
 
 QString normalizedFolderPath(const QString& path)
 {
@@ -85,6 +90,55 @@ bool openItemInExplorer(const QString& path)
 
     return QProcess::startDetached(QStringLiteral("explorer.exe"),
                                    { QStringLiteral("/select,"), QDir::toNativeSeparators(trimmedPath) });
+}
+
+QString resolveFolderShortcutTarget(const QString& shortcutPath)
+{
+    if (!shortcutPath.endsWith(QStringLiteral(".lnk"), Qt::CaseInsensitive)) {
+        return QString();
+    }
+
+    const HRESULT coHr = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+    const bool shouldUninitializeCom = SUCCEEDED(coHr);
+    IShellLinkW* shellLink = nullptr;
+    HRESULT hr = CoCreateInstance(CLSID_ShellLink, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&shellLink));
+    if (FAILED(hr) || !shellLink) {
+        if (shouldUninitializeCom) {
+            CoUninitialize();
+        }
+        return QString();
+    }
+
+    IPersistFile* persistFile = nullptr;
+    hr = shellLink->QueryInterface(IID_PPV_ARGS(&persistFile));
+    if (FAILED(hr) || !persistFile) {
+        shellLink->Release();
+        if (shouldUninitializeCom) {
+            CoUninitialize();
+        }
+        return QString();
+    }
+
+    const std::wstring nativePath = QDir::toNativeSeparators(shortcutPath).toStdWString();
+    hr = persistFile->Load(nativePath.c_str(), STGM_READ | STGM_SHARE_DENY_NONE);
+    QString result;
+    if (SUCCEEDED(hr)) {
+        wchar_t resolvedPath[MAX_PATH] = {};
+        WIN32_FIND_DATAW findData{};
+        if (SUCCEEDED(shellLink->GetPath(resolvedPath, MAX_PATH, &findData, SLGP_RAWPATH)) && resolvedPath[0] != L'\0') {
+            const QFileInfo targetInfo(QDir::cleanPath(QString::fromWCharArray(resolvedPath)));
+            if (targetInfo.exists() && targetInfo.isDir()) {
+                result = normalizedFolderPath(targetInfo.absoluteFilePath());
+            }
+        }
+    }
+
+    persistFile->Release();
+    shellLink->Release();
+    if (shouldUninitializeCom) {
+        CoUninitialize();
+    }
+    return result;
 }
 
 QTreeWidgetItem* findChildItemByPath(QTreeWidgetItem* item, const QString& folderPath)
@@ -152,7 +206,7 @@ void ensureFolderLoadingPlaceholder(QTreeWidgetItem* item)
     }
 
     auto* placeholder = new QTreeWidgetItem();
-    placeholder->setText(0, QStringLiteral("Loading..."));
+    placeholder->setText(0, QCoreApplication::translate("SpaceLook", "Loading..."));
     placeholder->setData(0, Qt::UserRole, false);
     placeholder->setData(0, kItemPathRole, QString());
     placeholder->setData(0, kPlaceholderRole, true);
@@ -161,19 +215,20 @@ void ensureFolderLoadingPlaceholder(QTreeWidgetItem* item)
 
 FolderRenderer::FolderLoadResult loadFolderEntries(const QString& filePath,
                                                    const QString& folderPath,
-                                                   const PreviewCancellationToken& cancelToken)
+                                                   const PreviewCancellationToken& cancelToken,
+                                                   bool recursive = false)
 {
     Q_UNUSED(folderPath)
 
     FolderRenderer::FolderLoadResult result;
     if (previewCancellationRequested(cancelToken)) {
-        result.statusMessage = QStringLiteral("Folder preview was canceled.");
+        result.statusMessage = QCoreApplication::translate("SpaceLook", "Folder preview was canceled.");
         return result;
     }
 
     const QString trimmedPath = QDir::cleanPath(filePath.trimmed());
     if (trimmedPath.isEmpty()) {
-        result.statusMessage = QStringLiteral("Folder path is unavailable.");
+        result.statusMessage = QCoreApplication::translate("SpaceLook", "Folder path is unavailable.");
         return result;
     }
 
@@ -183,27 +238,58 @@ FolderRenderer::FolderLoadResult loadFolderEntries(const QString& filePath,
             .arg(trimmedPath)
             .arg(rootInfo.exists())
             .arg(rootInfo.isDir());
-        result.statusMessage = QStringLiteral("The folder could not be opened.");
+        result.statusMessage = QCoreApplication::translate("SpaceLook", "The folder could not be opened.");
         return result;
     }
 
-    const QDir rootDir(rootInfo.absoluteFilePath());
-    const QFileInfoList entries = rootDir.entryInfoList(
-        QDir::AllEntries | QDir::NoDotAndDotDot | QDir::Hidden | QDir::System,
-        QDir::Name | QDir::IgnoreCase);
+    QVector<QString> pendingFolders;
+    pendingFolders.append(rootInfo.absoluteFilePath());
 
-    for (const QFileInfo& entryInfo : entries) {
+    while (!pendingFolders.isEmpty()) {
         if (previewCancellationRequested(cancelToken)) {
             result.entries.clear();
-            result.statusMessage = QStringLiteral("Folder preview was canceled.");
+            result.statusMessage = QCoreApplication::translate("SpaceLook", "Folder preview was canceled.");
             return result;
         }
 
-        FolderRenderer::FolderEntry entry;
-        entry.name = entryInfo.fileName();
-        entry.path = normalizedFolderPath(entryInfo.absoluteFilePath());
-        entry.isDirectory = entryInfo.isDir();
-        result.entries.append(entry);
+        const QString currentFolder = pendingFolders.takeFirst();
+        const QDir currentDir(currentFolder);
+        const QFileInfoList entries = currentDir.entryInfoList(
+            QDir::AllEntries | QDir::NoDotAndDotDot | QDir::Hidden | QDir::System,
+            QDir::Name | QDir::IgnoreCase);
+
+        for (const QFileInfo& entryInfo : entries) {
+            if (previewCancellationRequested(cancelToken)) {
+                result.entries.clear();
+                result.statusMessage = QCoreApplication::translate("SpaceLook", "Folder preview was canceled.");
+                return result;
+            }
+
+            FolderRenderer::FolderEntry entry;
+            entry.name = entryInfo.fileName();
+            entry.path = normalizedFolderPath(entryInfo.absoluteFilePath());
+            entry.expansionPath = entry.path;
+            const QString shortcutTargetPath = resolveFolderShortcutTarget(entry.path);
+            entry.isDirectory = entryInfo.isDir() || !shortcutTargetPath.isEmpty();
+            if (!shortcutTargetPath.isEmpty()) {
+                entry.expansionPath = shortcutTargetPath;
+                const QString targetName = QFileInfo(shortcutTargetPath).fileName();
+                if (!targetName.trimmed().isEmpty()) {
+                    entry.name = targetName;
+                }
+            }
+            entry.sizeBytes = entry.isDirectory ? 0 : entryInfo.size();
+            entry.lastModified = entryInfo.lastModified();
+            result.entries.append(entry);
+
+            if (recursive && entryInfo.isDir()) {
+                pendingFolders.append(entry.path);
+            }
+        }
+
+        if (!recursive) {
+            break;
+        }
     }
 
     result.success = true;
@@ -236,6 +322,12 @@ FolderRenderer::FolderRenderer(QWidget* parent)
     m_pathValueLabel->setObjectName(QStringLiteral("FolderPathValue"));
     m_openWithButton->setObjectName(QStringLiteral("FolderOpenWithButton"));
     m_statusLabel->setObjectName(QStringLiteral("FolderStatus"));
+    m_searchPanel = new QWidget(this);
+    m_searchPanel->setObjectName(QStringLiteral("FolderSearchPanel"));
+    m_nameSearchEdit = new QLineEdit(m_searchPanel);
+    m_nameSearchEdit->setObjectName(QStringLiteral("FolderNameSearchEdit"));
+    m_clearFiltersButton = new QPushButton(m_searchPanel);
+    m_clearFiltersButton->setObjectName(QStringLiteral("FolderClearFiltersButton"));
     m_treeWidget->setObjectName(QStringLiteral("FolderTree"));
 
     auto* layout = new QVBoxLayout(this);
@@ -243,6 +335,7 @@ FolderRenderer::FolderRenderer(QWidget* parent)
     layout->setSpacing(12);
     layout->addWidget(m_headerRow);
     layout->addWidget(m_statusLabel);
+    layout->addWidget(m_searchPanel);
     layout->addWidget(m_treeWidget, 1);
 
     auto* headerLayout = new QHBoxLayout(m_headerRow);
@@ -267,6 +360,17 @@ FolderRenderer::FolderRenderer(QWidget* parent)
     m_pathRow->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
     PreviewStateVisuals::prepareStatusLabel(m_statusLabel);
     m_statusLabel->hide();
+
+    auto* searchLayout = new QHBoxLayout(m_searchPanel);
+    searchLayout->setContentsMargins(12, 10, 12, 10);
+    searchLayout->setSpacing(8);
+    m_nameSearchEdit->setPlaceholderText(QCoreApplication::translate("SpaceLook", "Search file name"));
+    m_clearFiltersButton->setText(QCoreApplication::translate("SpaceLook", "Clear"));
+    m_clearFiltersButton->setMinimumWidth(82);
+    m_nameSearchEdit->installEventFilter(this);
+    searchLayout->addWidget(m_nameSearchEdit, 2);
+    searchLayout->addWidget(m_clearFiltersButton);
+    setSearchPanelVisible(false);
 
     m_treeWidget->setColumnCount(1);
     m_treeWidget->setHeaderHidden(true);
@@ -294,8 +398,13 @@ FolderRenderer::FolderRenderer(QWidget* parent)
         if (folderPath.trimmed().isEmpty()) {
             return;
         }
+        const QString expansionPath = expansionPathForItem(item);
 
-        QTimer::singleShot(0, this, [this, folderPath]() {
+        const PreviewLoadGuard::Token loadToken = m_loadGuard.observe(folderPath);
+        QTimer::singleShot(0, this, [this, folderPath, expansionPath, loadToken]() {
+            if (!m_loadGuard.isCurrentGeneration(loadToken)) {
+                return;
+            }
             QTreeWidgetItem* currentItem = folderItemForPath(folderPath);
             if (!currentItem || !currentItem->data(0, Qt::UserRole).toBool()) {
                 return;
@@ -303,7 +412,7 @@ FolderRenderer::FolderRenderer(QWidget* parent)
             if (isFolderItemLoaded(currentItem) || isFolderItemLoading(currentItem)) {
                 return;
             }
-            loadFolderChildren(folderPath, currentItem);
+            loadFolderChildren(folderPath, expansionPath, currentItem);
         });
     });
     connect(m_treeWidget, &QTreeWidget::itemDoubleClicked, this, [this](QTreeWidgetItem* item, int) {
@@ -315,6 +424,12 @@ FolderRenderer::FolderRenderer(QWidget* parent)
     });
     connect(m_treeWidget, &QTreeWidget::customContextMenuRequested, this, &FolderRenderer::showItemContextMenu);
     connect(m_treeWidget, &QTreeWidget::itemChanged, this, &FolderRenderer::handleInlineRename);
+    connect(m_nameSearchEdit, &QLineEdit::textChanged, this, [this]() {
+        scheduleSearchRefresh();
+    });
+    connect(m_clearFiltersButton, &QPushButton::clicked, this, [this]() {
+        clearSearchFilters();
+    });
 
     m_openWithButton->setStatusCallback([this](const QString& message) {
         showStatusMessage(message);
@@ -374,17 +489,21 @@ void FolderRenderer::load(const HoveredItemInfo& info)
     qDebug().noquote() << QStringLiteral("[SpaceLookRender] FolderRenderer load path=\"%1\" typeKey=\"%2\"")
         .arg(info.filePath, info.typeKey);
 
-    m_titleLabel->setText(info.title.isEmpty() ? QStringLiteral("Folder Preview") : info.title);
+    m_titleLabel->setText(info.title.isEmpty() ? QCoreApplication::translate("SpaceLook", "Folder Preview") : info.title);
     m_titleLabel->setCopyText(m_titleLabel->text());
     m_iconLabel->setPixmap(FileTypeIconResolver::pixmapForInfo(info, m_iconLabel->contentsRect().size()));
-    m_pathValueLabel->setText(info.filePath.trimmed().isEmpty() ? QStringLiteral("(Unavailable)") : info.filePath);
+    m_pathValueLabel->setText(info.filePath.trimmed().isEmpty() ? QCoreApplication::translate("SpaceLook", "(Unavailable)") : info.filePath);
     m_openWithButton->setTargetContext(info.filePath, info.typeKey);
     cancelInlineRename();
     m_treeWidget->clear();
+    m_rootEntries.clear();
+    m_searchEntries.clear();
+    m_recursiveSearchReady = false;
+    m_recursiveSearchRunning = false;
     m_rootEntryCount = -1;
     m_folderCountStatus.clear();
     ++m_statusMessageSerial;
-    PreviewStateVisuals::showStatus(m_statusLabel, QStringLiteral("Loading folder contents..."), PreviewStateVisuals::Kind::Loading);
+    PreviewStateVisuals::showStatus(m_statusLabel, QCoreApplication::translate("SpaceLook", "Loading folder contents..."), PreviewStateVisuals::Kind::Loading);
 
     auto* watcher = new QFutureWatcher<FolderLoadResult>(this);
     connect(watcher, &QFutureWatcher<FolderLoadResult>::finished, this, [this, watcher, loadToken, cancelToken]() {
@@ -405,8 +524,8 @@ void FolderRenderer::load(const HoveredItemInfo& info)
             return;
         }
 
-        populateTree(nullptr, result.entries);
-        updateFolderCountStatus(result.entries.size());
+        m_rootEntries = result.entries;
+        refreshRootView();
 
         qDebug().noquote() << QStringLiteral("[SpaceLookRender] FolderRenderer entries=%1 path=\"%2\"")
             .arg(result.entries.size())
@@ -426,6 +545,10 @@ void FolderRenderer::unload()
     notifyLoadingState(false);
     cancelInlineRename();
     m_treeWidget->clear();
+    m_rootEntries.clear();
+    m_searchEntries.clear();
+    m_recursiveSearchReady = false;
+    m_recursiveSearchRunning = false;
     m_pathValueLabel->clear();
     m_openWithButton->setTargetContext(QString(), QString());
     PreviewStateVisuals::clearStatus(m_statusLabel);
@@ -439,6 +562,28 @@ bool FolderRenderer::eventFilter(QObject* watched, QEvent* event)
 {
     if (event && event->type() == QEvent::KeyPress) {
         auto* keyEvent = static_cast<QKeyEvent*>(event);
+        if ((watched == m_treeWidget || watched == m_treeWidget->viewport() || watched == m_nameSearchEdit) &&
+            keyEvent->matches(QKeySequence::Find)) {
+            setSearchPanelVisible(true);
+            if (m_nameSearchEdit) {
+                m_nameSearchEdit->setFocus(Qt::ShortcutFocusReason);
+                m_nameSearchEdit->selectAll();
+            }
+            return true;
+        }
+
+        if (watched == m_nameSearchEdit &&
+            keyEvent->key() == Qt::Key_Escape) {
+            const bool hasFilters = m_nameSearchEdit && !m_nameSearchEdit->text().trimmed().isEmpty();
+            if (!hasFilters) {
+                setSearchPanelVisible(false);
+                if (m_treeWidget) {
+                    m_treeWidget->setFocus(Qt::ShortcutFocusReason);
+                }
+            }
+            return true;
+        }
+
         if ((watched == m_treeWidget || watched == m_treeWidget->viewport()) && keyEvent->key() == Qt::Key_F2) {
             renameTreeItem(m_treeWidget ? m_treeWidget->currentItem() : nullptr);
             return true;
@@ -616,6 +761,31 @@ void FolderRenderer::applyChrome()
         "#FolderTree QScrollBar::add-page:horizontal, #FolderTree QScrollBar::sub-page:horizontal {"
         "  background: transparent;"
         "}"
+        "#FolderSearchPanel {"
+        "  background: rgba(244, 250, 255, 0.9);"
+        "  border: 1px solid rgba(196, 214, 232, 0.9);"
+        "  border-radius: 14px;"
+        "}"
+        "#FolderSearchPanel QLineEdit {"
+        "  background: rgba(255, 255, 255, 0.95);"
+        "  border: 1px solid rgba(190, 210, 230, 0.95);"
+        "  border-radius: 9px;"
+        "  padding: 5px 8px;"
+        "  color: #18324a;"
+        "}"
+        "#FolderSearchPanel QLineEdit:focus {"
+        "  border-color: rgba(84, 148, 214, 0.95);"
+        "}"
+        "#FolderClearFiltersButton {"
+        "  background: rgba(231, 241, 255, 0.96);"
+        "  border: 1px solid rgba(184, 207, 235, 0.95);"
+        "  border-radius: 9px;"
+        "  color: #18324a;"
+        "  padding: 4px 10px;"
+        "}"
+        "#FolderClearFiltersButton:hover {"
+        "  background: rgba(213, 231, 255, 1.0);"
+        "}"
     );
 
     QFont titleFont;
@@ -636,6 +806,8 @@ void FolderRenderer::applyChrome()
     treeFont.setFamily(QStringLiteral("Segoe UI Rounded"));
     treeFont.setPixelSize(13);
     m_treeWidget->setFont(treeFont);
+    m_nameSearchEdit->setFont(treeFont);
+    m_clearFiltersButton->setFont(treeFont);
 }
 
 void FolderRenderer::showStatusMessage(const QString& message)
@@ -670,12 +842,189 @@ void FolderRenderer::updateFolderCountStatus(int entryCount)
     }
 
     m_folderCountStatus = entryCount == 0
-        ? QStringLiteral("The folder is empty.")
-        : QStringLiteral("Loaded %1 entries. Expand folders to load children.").arg(entryCount);
+        ? QCoreApplication::translate("SpaceLook", "The folder is empty.")
+        : QCoreApplication::translate("SpaceLook", "Loaded %1 entries. Expand folders to load children.").arg(entryCount);
     PreviewStateVisuals::showStatus(
         m_statusLabel,
         m_folderCountStatus,
         entryCount == 0 ? PreviewStateVisuals::Kind::Empty : PreviewStateVisuals::Kind::Success);
+}
+
+void FolderRenderer::toggleSearchPanel()
+{
+    setSearchPanelVisible(!m_searchPanelVisible);
+}
+
+void FolderRenderer::setSearchPanelVisible(bool visible)
+{
+    m_searchPanelVisible = visible;
+    if (m_searchPanel) {
+        m_searchPanel->setVisible(visible);
+    }
+}
+
+void FolderRenderer::clearSearchFilters()
+{
+    if (!m_nameSearchEdit) {
+        return;
+    }
+
+    m_nameSearchEdit->clear();
+    refreshRootView();
+}
+
+bool FolderRenderer::hasActiveSearchFilters() const
+{
+    return m_nameSearchEdit && !m_nameSearchEdit->text().trimmed().isEmpty();
+}
+
+QVector<FolderRenderer::FolderEntry> FolderRenderer::filteredRootEntries() const
+{
+    const QVector<FolderEntry>& sourceEntries = hasActiveSearchFilters() && m_recursiveSearchReady
+        ? m_searchEntries
+        : m_rootEntries;
+    QVector<FolderEntry> filtered;
+    filtered.reserve(sourceEntries.size());
+    for (const FolderEntry& entry : sourceEntries) {
+        if (entryMatchesFilters(entry)) {
+            filtered.append(entry);
+        }
+    }
+    return filtered;
+}
+
+bool FolderRenderer::entryMatchesFilters(const FolderEntry& entry) const
+{
+    const QString nameFilter = m_nameSearchEdit ? m_nameSearchEdit->text().trimmed() : QString();
+    if (!nameFilter.isEmpty() && !entry.name.contains(nameFilter, Qt::CaseInsensitive)) {
+        return false;
+    }
+
+    return true;
+}
+
+void FolderRenderer::refreshRootView()
+{
+    const QVector<FolderEntry> filtered = filteredRootEntries();
+    m_treeWidget->clear();
+    populateTree(nullptr, filtered);
+    applyFiltersToTree();
+    updateFolderCountStatus(filtered.size());
+
+    if (hasActiveSearchFilters()) {
+        const int sourceCount = m_recursiveSearchReady ? m_searchEntries.size() : m_rootEntries.size();
+        const QString filterStatus = QCoreApplication::translate("SpaceLook", "Filtered %1 of %2 entries.")
+            .arg(filtered.size())
+            .arg(sourceCount);
+        PreviewStateVisuals::showStatus(m_statusLabel, filterStatus, PreviewStateVisuals::Kind::Info);
+        m_folderCountStatus = filterStatus;
+    }
+}
+
+void FolderRenderer::scheduleSearchRefresh()
+{
+    if (!hasActiveSearchFilters()) {
+        refreshRootView();
+        return;
+    }
+
+    if (m_recursiveSearchReady) {
+        refreshRootView();
+        return;
+    }
+
+    startRecursiveSearch();
+}
+
+void FolderRenderer::startRecursiveSearch()
+{
+    if (m_recursiveSearchRunning || m_info.filePath.trimmed().isEmpty()) {
+        return;
+    }
+
+    m_recursiveSearchRunning = true;
+    PreviewStateVisuals::showStatus(
+        m_statusLabel,
+        QCoreApplication::translate("SpaceLook", "Searching folder contents..."),
+        PreviewStateVisuals::Kind::Loading);
+
+    const PreviewLoadGuard::Token loadToken = m_loadGuard.observe(m_info.filePath);
+    PreviewCancellationToken cancelToken = m_cancelToken;
+    if (!cancelToken) {
+        cancelToken = makePreviewCancellationToken();
+        m_cancelToken = cancelToken;
+    }
+
+    auto* watcher = new QFutureWatcher<FolderLoadResult>(this);
+    connect(watcher, &QFutureWatcher<FolderLoadResult>::finished, this, [this, watcher, loadToken, cancelToken]() {
+        watcher->deleteLater();
+        m_recursiveSearchRunning = false;
+
+        if (previewCancellationRequested(cancelToken) ||
+            !m_loadGuard.isCurrent(loadToken, m_info.filePath) ||
+            !isVisible()) {
+            return;
+        }
+
+        const FolderLoadResult result = watcher->result();
+        if (!result.success) {
+            PreviewStateVisuals::showStatus(m_statusLabel, result.statusMessage, PreviewStateVisuals::Kind::Error);
+            return;
+        }
+
+        m_searchEntries = result.entries;
+        m_recursiveSearchReady = true;
+        refreshRootView();
+    });
+
+    watcher->setFuture(QtConcurrent::run([filePath = m_info.filePath, cancelToken]() {
+        return loadFolderEntries(filePath, filePath, cancelToken, true);
+    }));
+}
+
+bool FolderRenderer::treeItemMatchesFilters(const QTreeWidgetItem* item) const
+{
+    if (!item) {
+        return false;
+    }
+    if (item->data(0, kPlaceholderRole).toBool()) {
+        return true;
+    }
+
+    FolderEntry entry;
+    entry.name = item->text(0);
+    entry.path = item->data(0, kItemPathRole).toString();
+    entry.isDirectory = item->data(0, Qt::UserRole).toBool();
+    entry.sizeBytes = static_cast<qint64>(item->data(0, kEntrySizeRole).toULongLong());
+    entry.lastModified = item->data(0, kEntryModifiedRole).toDateTime();
+    return entryMatchesFilters(entry);
+}
+
+bool FolderRenderer::applyFilterToTreeItem(QTreeWidgetItem* item)
+{
+    if (!item) {
+        return false;
+    }
+
+    const bool matchesSelf = treeItemMatchesFilters(item);
+    bool hasVisibleChild = false;
+    for (int index = 0; index < item->childCount(); ++index) {
+        hasVisibleChild = applyFilterToTreeItem(item->child(index)) || hasVisibleChild;
+    }
+
+    const bool visible = matchesSelf || hasVisibleChild;
+    item->setHidden(!visible);
+    return visible;
+}
+
+void FolderRenderer::applyFiltersToTree()
+{
+    if (!m_treeWidget) {
+        return;
+    }
+    for (int index = 0; index < m_treeWidget->topLevelItemCount(); ++index) {
+        applyFilterToTreeItem(m_treeWidget->topLevelItem(index));
+    }
 }
 
 void FolderRenderer::populateTree(QTreeWidgetItem* parentItem, const QVector<FolderEntry>& entries)
@@ -686,7 +1035,7 @@ void FolderRenderer::populateTree(QTreeWidgetItem* parentItem, const QVector<Fol
         }
 
         if (entry.isDirectory) {
-            QTreeWidgetItem* folderItem = ensureFolderItem(entry.path, parentItem, entry.name);
+            QTreeWidgetItem* folderItem = ensureFolderItem(entry.path, parentItem, entry.name, entry.expansionPath);
             if (folderItem) {
                 ensureFolderLoadingPlaceholder(folderItem);
             }
@@ -698,6 +1047,9 @@ void FolderRenderer::populateTree(QTreeWidgetItem* parentItem, const QVector<Fol
         item->setIcon(0, iconForFolderEntry(entry.path, false));
         item->setData(0, Qt::UserRole, false);
         item->setData(0, kItemPathRole, entry.path);
+        item->setData(0, kExpansionPathRole, entry.expansionPath);
+        item->setData(0, kEntrySizeRole, static_cast<qulonglong>(entry.sizeBytes > 0 ? entry.sizeBytes : 0));
+        item->setData(0, kEntryModifiedRole, entry.lastModified);
         if (parentItem) {
             parentItem->addChild(item);
         } else {
@@ -718,13 +1070,17 @@ void FolderRenderer::clearTreeItemChildren(QTreeWidgetItem* item)
 
 QTreeWidgetItem* FolderRenderer::ensureFolderItem(const QString& folderPath,
                                                   QTreeWidgetItem* parentItem,
-                                                  const QString& folderName)
+                                                  const QString& folderName,
+                                                  const QString& expansionPath)
 {
+    const QString normalizedExpansionPath = normalizedFolderPath(expansionPath.trimmed().isEmpty() ? folderPath : expansionPath);
     if (QTreeWidgetItem* existingItem = findTreeItemByPath(m_treeWidget, folderPath)) {
         existingItem->setText(0, folderName);
         existingItem->setIcon(0, iconForFolderEntry(folderPath, true));
         existingItem->setData(0, Qt::UserRole, true);
         existingItem->setData(0, kItemPathRole, folderPath);
+        existingItem->setData(0, kExpansionPathRole, normalizedExpansionPath);
+        existingItem->setData(0, kEntrySizeRole, static_cast<qulonglong>(0));
         if (!existingItem->data(0, kLoadingRole).isValid()) {
             existingItem->setData(0, kLoadingRole, false);
         }
@@ -740,6 +1096,8 @@ QTreeWidgetItem* FolderRenderer::ensureFolderItem(const QString& folderPath,
     item->setIcon(0, iconForFolderEntry(folderPath, true));
     item->setData(0, Qt::UserRole, true);
     item->setData(0, kItemPathRole, folderPath);
+    item->setData(0, kExpansionPathRole, normalizedExpansionPath);
+    item->setData(0, kEntrySizeRole, static_cast<qulonglong>(0));
     item->setData(0, kLoadingRole, false);
     item->setData(0, kLoadedRole, false);
     if (parentItem) {
@@ -759,6 +1117,16 @@ QTreeWidgetItem* FolderRenderer::folderItemForPath(const QString& folderPath) co
 QString FolderRenderer::folderPathForItem(const QTreeWidgetItem* item) const
 {
     return item ? item->data(0, kItemPathRole).toString() : QString();
+}
+
+QString FolderRenderer::expansionPathForItem(const QTreeWidgetItem* item) const
+{
+    if (!item) {
+        return QString();
+    }
+
+    const QString expansionPath = item->data(0, kExpansionPathRole).toString();
+    return expansionPath.trimmed().isEmpty() ? folderPathForItem(item) : expansionPath;
 }
 
 bool FolderRenderer::isFolderItemLoaded(const QTreeWidgetItem* item) const
@@ -781,9 +1149,9 @@ void FolderRenderer::setFolderItemLoadState(QTreeWidgetItem* item, bool loading,
     item->setData(0, kLoadedRole, loaded);
 }
 
-void FolderRenderer::loadFolderChildren(const QString& folderPath, QTreeWidgetItem* parentItem)
+void FolderRenderer::loadFolderChildren(const QString& displayPath, const QString& expansionPath, QTreeWidgetItem* parentItem)
 {
-    if (!parentItem || folderPath.trimmed().isEmpty()) {
+    if (!parentItem || displayPath.trimmed().isEmpty() || expansionPath.trimmed().isEmpty()) {
         return;
     }
 
@@ -791,20 +1159,20 @@ void FolderRenderer::loadFolderChildren(const QString& folderPath, QTreeWidgetIt
     clearTreeItemChildren(parentItem);
     parentItem->setChildIndicatorPolicy(QTreeWidgetItem::ShowIndicator);
     auto* placeholder = new QTreeWidgetItem();
-    placeholder->setText(0, QStringLiteral("Loading..."));
+    placeholder->setText(0, QCoreApplication::translate("SpaceLook", "Loading..."));
     placeholder->setData(0, Qt::UserRole, false);
     placeholder->setData(0, kItemPathRole, QString());
     placeholder->setData(0, kPlaceholderRole, true);
     parentItem->addChild(placeholder);
 
-    const PreviewLoadGuard::Token loadToken = m_loadGuard.observe(folderPath);
+    const PreviewLoadGuard::Token loadToken = m_loadGuard.observe(displayPath);
     PreviewCancellationToken cancelToken = m_cancelToken;
     if (!cancelToken) {
         cancelToken = makePreviewCancellationToken();
         m_cancelToken = cancelToken;
     }
     auto* watcher = new QFutureWatcher<FolderLoadResult>(this);
-    connect(watcher, &QFutureWatcher<FolderLoadResult>::finished, this, [this, watcher, loadToken, folderPath, cancelToken]() {
+    connect(watcher, &QFutureWatcher<FolderLoadResult>::finished, this, [this, watcher, loadToken, displayPath, cancelToken]() {
         watcher->deleteLater();
 
         if (previewCancellationRequested(cancelToken) ||
@@ -814,18 +1182,18 @@ void FolderRenderer::loadFolderChildren(const QString& folderPath, QTreeWidgetIt
         }
 
         const FolderLoadResult result = watcher->result();
-        QTreeWidgetItem* currentParentItem = folderItemForPath(folderPath);
+        QTreeWidgetItem* currentParentItem = folderItemForPath(displayPath);
         if (!currentParentItem) {
             return;
         }
-        if (folderPathForItem(currentParentItem) != folderPath) {
+        if (folderPathForItem(currentParentItem) != displayPath) {
             return;
         }
 
         clearTreeItemChildren(currentParentItem);
         if (!result.success) {
             auto* errorItem = new QTreeWidgetItem();
-            errorItem->setText(0, result.statusMessage.isEmpty() ? QStringLiteral("Failed to load folder.") : result.statusMessage);
+            errorItem->setText(0, result.statusMessage.isEmpty() ? QCoreApplication::translate("SpaceLook", "Failed to load folder.") : result.statusMessage);
             errorItem->setData(0, Qt::UserRole, false);
             errorItem->setData(0, kItemPathRole, QString());
             currentParentItem->addChild(errorItem);
@@ -836,14 +1204,15 @@ void FolderRenderer::loadFolderChildren(const QString& folderPath, QTreeWidgetIt
         }
 
         populateTree(currentParentItem, result.entries);
+        applyFiltersToTree();
         setFolderItemLoadState(currentParentItem, false, true);
         currentParentItem->setChildIndicatorPolicy(
             result.entries.isEmpty() ? QTreeWidgetItem::DontShowIndicatorWhenChildless : QTreeWidgetItem::ShowIndicator);
         currentParentItem->setExpanded(true);
     });
 
-    watcher->setFuture(QtConcurrent::run([folderPath, cancelToken]() {
-        return loadFolderEntries(folderPath, folderPath, cancelToken);
+    watcher->setFuture(QtConcurrent::run([expansionPath, cancelToken]() {
+        return loadFolderEntries(expansionPath, expansionPath, cancelToken);
     }));
 }
 
@@ -865,10 +1234,10 @@ void FolderRenderer::showItemContextMenu(const QPoint& position)
     }
 
     QMenu menu(this);
-    QAction* openAction = menu.addAction(QStringLiteral("Open"));
-    QAction* explorerAction = menu.addAction(QStringLiteral("Open in Explorer"));
+    QAction* openAction = menu.addAction(QCoreApplication::translate("SpaceLook", "Open"));
+    QAction* explorerAction = menu.addAction(QCoreApplication::translate("SpaceLook", "Open in Explorer"));
     menu.addSeparator();
-    QAction* renameAction = menu.addAction(QStringLiteral("Rename"));
+    QAction* renameAction = menu.addAction(QCoreApplication::translate("SpaceLook", "Rename"));
     QAction* selectedAction = menu.exec(m_treeWidget->viewport()->mapToGlobal(position));
     if (selectedAction == openAction) {
         openTreeItem(item);
@@ -895,7 +1264,7 @@ void FolderRenderer::openTreeItem(QTreeWidgetItem* item)
     }
 
     if (!openItemWithDefaultApp(targetPath)) {
-        showStatusMessage(QStringLiteral("Failed to open selected item."));
+        showStatusMessage(QCoreApplication::translate("SpaceLook", "Failed to open selected item."));
         return;
     }
 
@@ -916,7 +1285,7 @@ void FolderRenderer::openTreeItemInExplorer(QTreeWidgetItem* item)
     }
 
     if (!openItemInExplorer(targetPath)) {
-        showStatusMessage(QStringLiteral("Failed to open selected location."));
+        showStatusMessage(QCoreApplication::translate("SpaceLook", "Failed to open selected location."));
         return;
     }
 }
@@ -931,7 +1300,7 @@ void FolderRenderer::renameTreeItem(QTreeWidgetItem* item)
     }
 
     if (isFolderItemLoading(item)) {
-        showStatusMessage(QStringLiteral("Please wait until the folder finishes loading."));
+        showStatusMessage(QCoreApplication::translate("SpaceLook", "Please wait until the folder finishes loading."));
         return;
     }
     if (m_renamingItem && m_renamingItem != item) {
@@ -950,7 +1319,7 @@ void FolderRenderer::renameTreeItem(QTreeWidgetItem* item)
 
     const QFileInfo oldInfo(oldPath);
     if (!oldInfo.exists()) {
-        showStatusMessage(QStringLiteral("The selected item no longer exists."));
+        showStatusMessage(QCoreApplication::translate("SpaceLook", "The selected item no longer exists."));
         return;
     }
 
@@ -974,12 +1343,12 @@ void FolderRenderer::renameTreeItem(QTreeWidgetItem* item)
     nameEdit->installEventFilter(this);
     editorLayout->addWidget(nameEdit, 1);
 
-    auto* okButton = new QPushButton(QStringLiteral("OK"), editorWidget);
+    auto* okButton = new QPushButton(QCoreApplication::translate("SpaceLook", "OK"), editorWidget);
     okButton->setObjectName(QStringLiteral("FolderRenameButton"));
     okButton->setCursor(Qt::PointingHandCursor);
     editorLayout->addWidget(okButton, 0);
 
-    auto* cancelButton = new QPushButton(QStringLiteral("Cancel"), editorWidget);
+    auto* cancelButton = new QPushButton(QCoreApplication::translate("SpaceLook", "Cancel"), editorWidget);
     cancelButton->setObjectName(QStringLiteral("FolderRenameButton"));
     cancelButton->setCursor(Qt::PointingHandCursor);
     editorLayout->addWidget(cancelButton, 0);
@@ -1069,7 +1438,7 @@ void FolderRenderer::handleInlineRename(QTreeWidgetItem* item, int column)
     };
 
     if (newName.isEmpty()) {
-        restoreOldName(QStringLiteral("Name cannot be empty."));
+        restoreOldName(QCoreApplication::translate("SpaceLook", "Name cannot be empty."));
         return;
     }
     if (newName == currentName) {
@@ -1079,25 +1448,25 @@ void FolderRenderer::handleInlineRename(QTreeWidgetItem* item, int column)
         return;
     }
     if (newName.contains(QLatin1Char('/')) || newName.contains(QLatin1Char('\\'))) {
-        restoreOldName(QStringLiteral("Name cannot contain path separators."));
+        restoreOldName(QCoreApplication::translate("SpaceLook", "Name cannot contain path separators."));
         return;
     }
 
     const QFileInfo oldInfo(oldPath);
     if (!oldInfo.exists()) {
-        restoreOldName(QStringLiteral("The selected item no longer exists."));
+        restoreOldName(QCoreApplication::translate("SpaceLook", "The selected item no longer exists."));
         return;
     }
 
     QDir parentDir = oldInfo.dir();
     const QString newPath = normalizedFolderPath(parentDir.filePath(newName));
     if (QFileInfo::exists(newPath)) {
-        restoreOldName(QStringLiteral("An item with that name already exists."));
+        restoreOldName(QCoreApplication::translate("SpaceLook", "An item with that name already exists."));
         return;
     }
 
     if (!parentDir.rename(currentName, newName)) {
-        restoreOldName(QStringLiteral("Failed to rename selected item."));
+        restoreOldName(QCoreApplication::translate("SpaceLook", "Failed to rename selected item."));
         return;
     }
 
@@ -1109,7 +1478,7 @@ void FolderRenderer::handleInlineRename(QTreeWidgetItem* item, int column)
         item->setFlags(item->flags() & ~Qt::ItemIsEditable);
     }
     updateTreeItemPathPrefix(item, oldPath, newPath);
-    showStatusMessage(QStringLiteral("Renamed to %1").arg(newName));
+    showStatusMessage(QCoreApplication::translate("SpaceLook", "Renamed to %1").arg(newName));
 }
 
 void FolderRenderer::updateTreeItemPathPrefix(QTreeWidgetItem* item, const QString& oldPath, const QString& newPath)

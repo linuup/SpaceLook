@@ -1,6 +1,7 @@
-#include "renderers/text/TextRenderer.h"
+﻿#include "renderers/text/TextRenderer.h"
 
 #include <QAbstractTextDocumentLayout>
+#include <QCoreApplication>
 #include <QDebug>
 #include <QFile>
 #include <QFileInfo>
@@ -11,13 +12,17 @@
 #include <QJsonDocument>
 #include <QJsonParseError>
 #include <QLabel>
+#include <QLineEdit>
 #include <QPainter>
 #include <QPaintEvent>
 #include <QPlainTextEdit>
 #include <QResizeEvent>
 #include <QScrollBar>
+#include <QShortcut>
 #include <QStackedWidget>
 #include <QTimer>
+#include <QTextCursor>
+#include <QTextDocument>
 #include <QTextEdit>
 #include <QTextBlock>
 #include <QToolButton>
@@ -25,6 +30,8 @@
 #include <QtXml/QDomDocument>
 #include <QtConcurrent/QtConcurrent>
 
+#include "core/PreviewFileReader.h"
+#include "core/TextEncodingDetector.h"
 #include "renderers/FileTypeIconResolver.h"
 #include "renderers/FluentIconFont.h"
 #include "renderers/ModeSwitchButton.h"
@@ -42,6 +49,7 @@ constexpr qint64 kMaxPreviewBytes = 1024 * 1024 * 2;
 struct TextLoadResult
 {
     QString text;
+    QString encodingName;
     QString statusMessage;
     bool success = false;
 };
@@ -245,32 +253,31 @@ TextLoadResult loadTextPreviewContent(const QString& filePath, const PreviewCanc
 {
     TextLoadResult result;
     if (previewCancellationRequested(cancelToken)) {
-        result.statusMessage = QStringLiteral("Text preview was canceled.");
+        result.statusMessage = QCoreApplication::translate("SpaceLook", "Text preview was canceled.");
         return result;
     }
 
-    QFile file(filePath);
-    if (!file.open(QIODevice::ReadOnly)) {
-        result.text = QStringLiteral("Could not read:\n%1").arg(filePath);
-        result.statusMessage = QStringLiteral("Failed to open the file for preview.");
+    QByteArray content;
+    bool truncated = false;
+    if (!PreviewFileReader::readPrefix(filePath, kMaxPreviewBytes, &content, &truncated)) {
+        result.text = QCoreApplication::translate("SpaceLook", "Could not read:\n%1").arg(filePath);
+        result.statusMessage = QCoreApplication::translate("SpaceLook", "Failed to open the file for preview.");
         return result;
     }
 
-    QByteArray content = file.read(kMaxPreviewBytes + 1);
-    file.close();
     if (previewCancellationRequested(cancelToken)) {
         content.clear();
-        result.statusMessage = QStringLiteral("Text preview was canceled.");
+        result.statusMessage = QCoreApplication::translate("SpaceLook", "Text preview was canceled.");
         return result;
     }
 
-    const bool truncated = content.size() > kMaxPreviewBytes;
     if (truncated) {
-        content.chop(content.size() - static_cast<int>(kMaxPreviewBytes));
-        result.statusMessage = QStringLiteral("Preview is truncated to the first 2 MB.");
+        result.statusMessage = QCoreApplication::translate("SpaceLook", "Preview is truncated to the first 2 MB.");
     }
 
-    result.text = QString::fromUtf8(content);
+    const DetectedTextEncoding decoded = TextEncodingDetector::decode(content);
+    result.text = decoded.text;
+    result.encodingName = decoded.name;
     result.success = true;
     return result;
 }
@@ -289,6 +296,11 @@ TextRenderer::TextRenderer(PreviewState* previewState, QWidget* parent)
     , m_openWithButton(new OpenWithButton(this))
     , m_contentSection(new QWidget(this))
     , m_statusRow(new QWidget(this))
+    , m_searchRow(new QWidget(this))
+    , m_searchEdit(new QLineEdit(this))
+    , m_searchPreviousButton(new QToolButton(this))
+    , m_searchNextButton(new QToolButton(this))
+    , m_searchCountLabel(new QLabel(this))
     , m_statusLabel(new QLabel(this))
     , m_modeSwitchButton(new ModeSwitchButton(this))
     , m_contentStack(new QStackedWidget(this))
@@ -310,6 +322,11 @@ TextRenderer::TextRenderer(PreviewState* previewState, QWidget* parent)
     m_openWithButton->setObjectName(QStringLiteral("TextOpenWithButton"));
     m_contentSection->setObjectName(QStringLiteral("TextContentSection"));
     m_statusRow->setObjectName(QStringLiteral("TextStatusRow"));
+    m_searchRow->setObjectName(QStringLiteral("TextSearchRow"));
+    m_searchEdit->setObjectName(QStringLiteral("TextSearchEdit"));
+    m_searchPreviousButton->setObjectName(QStringLiteral("TextSearchPreviousButton"));
+    m_searchNextButton->setObjectName(QStringLiteral("TextSearchNextButton"));
+    m_searchCountLabel->setObjectName(QStringLiteral("TextSearchCount"));
     m_statusLabel->setObjectName(QStringLiteral("TextStatus"));
     m_modeSwitchButton->setObjectName(QStringLiteral("TextModeSwitchButton"));
     m_contentStack->setObjectName(QStringLiteral("TextContentStack"));
@@ -334,7 +351,7 @@ TextRenderer::TextRenderer(PreviewState* previewState, QWidget* parent)
     trailingActionsLayout->addWidget(m_openWithButton, 0, Qt::AlignVCenter);
 
     auto* titleBlock = new PreviewHeaderBar(m_iconLabel, m_titleLabel, m_pathRow, trailingActions, m_headerRow);
-    titleBlock->setOpenActionGlyph(FluentIconFont::glyph(0xE70F), QStringLiteral("Edit"));
+    titleBlock->setOpenActionGlyph(FluentIconFont::glyph(0xE70F), QCoreApplication::translate("SpaceLook", "Edit"));
     headerLayout->addWidget(titleBlock->contentWidget(), 1);
 
     auto* pathLayout = new QHBoxLayout(m_pathRow);
@@ -345,6 +362,7 @@ TextRenderer::TextRenderer(PreviewState* previewState, QWidget* parent)
     auto* contentSectionLayout = new QVBoxLayout(m_contentSection);
     contentSectionLayout->setContentsMargins(0, 0, 0, 0);
     contentSectionLayout->setSpacing(12);
+    contentSectionLayout->addWidget(m_searchRow, 0);
     contentSectionLayout->addWidget(m_contentStack, 1);
     contentSectionLayout->addWidget(m_statusRow, 0);
 
@@ -353,6 +371,24 @@ TextRenderer::TextRenderer(PreviewState* previewState, QWidget* parent)
     statusLayout->setSpacing(12);
     statusLayout->addWidget(m_statusLabel, 1);
     statusLayout->addWidget(m_modeSwitchButton, 0, Qt::AlignRight | Qt::AlignVCenter);
+
+    auto* searchLayout = new QHBoxLayout(m_searchRow);
+    searchLayout->setContentsMargins(8, 4, 8, 4);
+    searchLayout->setSpacing(6);
+    m_searchEdit->setPlaceholderText(QCoreApplication::translate("SpaceLook", "Search"));
+    m_searchEdit->setClearButtonEnabled(true);
+    m_searchEdit->setFixedWidth(160);
+    m_searchPreviousButton->setText(QStringLiteral("<"));
+    m_searchNextButton->setText(QStringLiteral(">"));
+    m_searchPreviousButton->setFixedSize(24, 24);
+    m_searchNextButton->setFixedSize(24, 24);
+    m_searchCountLabel->setMinimumWidth(46);
+    searchLayout->addWidget(m_searchEdit);
+    searchLayout->addWidget(m_searchPreviousButton);
+    searchLayout->addWidget(m_searchNextButton);
+    searchLayout->addWidget(m_searchCountLabel);
+    searchLayout->addStretch(1);
+    m_searchRow->hide();
 
     m_textEdit->setReadOnly(true);
     m_textEdit->setLineWrapMode(QPlainTextEdit::NoWrap);
@@ -395,8 +431,8 @@ TextRenderer::TextRenderer(PreviewState* previewState, QWidget* parent)
     });
     PreviewStateVisuals::prepareStatusLabel(m_statusLabel);
     m_statusLabel->hide();
-    m_loadingTitleLabel->setText(QStringLiteral("Preparing text preview"));
-    m_loadingMessageLabel->setText(QStringLiteral("The preview shell is ready. Content is loading in the background."));
+    m_loadingTitleLabel->setText(QCoreApplication::translate("SpaceLook", "Preparing text preview"));
+    m_loadingMessageLabel->setText(QCoreApplication::translate("SpaceLook", "The preview shell is ready. Content is loading in the background."));
     m_loadingMessageLabel->setWordWrap(true);
     PreviewStateVisuals::prepareStateCard(
         m_loadingCard,
@@ -407,6 +443,26 @@ TextRenderer::TextRenderer(PreviewState* previewState, QWidget* parent)
 
     connect(m_titleLabel, &SelectableTitleLabel::copyFeedbackRequested, this, [this](const QString& message) {
         showStatusMessage(message);
+    });
+    connect(m_searchEdit, &QLineEdit::textChanged, this, [this]() {
+        findSearchMatch(false);
+    });
+    connect(m_searchEdit, &QLineEdit::returnPressed, this, [this]() {
+        findSearchMatch(false);
+    });
+    connect(m_searchPreviousButton, &QToolButton::clicked, this, [this]() {
+        findSearchMatch(true);
+    });
+    connect(m_searchNextButton, &QToolButton::clicked, this, [this]() {
+        findSearchMatch(false);
+    });
+    auto* findShortcut = new QShortcut(QKeySequence::Find, this);
+    findShortcut->setContext(Qt::WidgetWithChildrenShortcut);
+    connect(findShortcut, &QShortcut::activated, this, &TextRenderer::showSearchRow);
+    auto* hideSearchShortcut = new QShortcut(QKeySequence(Qt::Key_Escape), m_searchRow);
+    hideSearchShortcut->setContext(Qt::WidgetWithChildrenShortcut);
+    connect(hideSearchShortcut, &QShortcut::activated, this, [this]() {
+        hideSearchRow(false);
     });
     m_modeSwitchButton->setModeChangedCallback([this](const QString& rendererId) {
         if (!m_previewState) {
@@ -460,14 +516,15 @@ void TextRenderer::load(const HoveredItemInfo& info)
     const PreviewLoadGuard::Token loadToken = m_loadGuard.begin(info.filePath);
     notifyLoadingState(true);
     qDebug().noquote() << QStringLiteral("[SpaceLookRender] TextRenderer load path=\"%1\"").arg(info.filePath);
-    m_titleLabel->setText(info.title.isEmpty() ? QStringLiteral("Text Preview") : info.title);
+    m_titleLabel->setText(info.title.isEmpty() ? QCoreApplication::translate("SpaceLook", "Text Preview") : info.title);
     m_titleLabel->setCopyText(m_titleLabel->text());
     m_iconLabel->setPixmap(FileTypeIconResolver::pixmapForInfo(info, m_iconLabel->contentsRect().size()));
-    m_pathValueLabel->setText(info.filePath.trimmed().isEmpty() ? QStringLiteral("(Unavailable)") : info.filePath);
+    m_pathValueLabel->setText(info.filePath.trimmed().isEmpty() ? QCoreApplication::translate("SpaceLook", "(Unavailable)") : info.filePath);
     m_openWithButton->setTargetContext(info.filePath, info.typeKey);
     updateModeSelector(info.filePath);
-    m_loadingTitleLabel->setText(QStringLiteral("Preparing text preview"));
-    m_loadingMessageLabel->setText(QStringLiteral("The preview shell is ready. Content is loading in the background."));
+    hideSearchRow(true);
+    m_loadingTitleLabel->setText(QCoreApplication::translate("SpaceLook", "Preparing text preview"));
+    m_loadingMessageLabel->setText(QCoreApplication::translate("SpaceLook", "The preview shell is ready. Content is loading in the background."));
     PreviewStateVisuals::prepareStateCard(
         m_loadingCard,
         m_loadingTitleLabel,
@@ -476,7 +533,7 @@ void TextRenderer::load(const HoveredItemInfo& info)
         PreviewStateVisuals::Kind::Loading);
     m_contentStack->setCurrentWidget(m_loadingCard);
     m_textEdit->clear();
-    PreviewStateVisuals::showStatus(m_statusLabel, QStringLiteral("Loading text preview..."), PreviewStateVisuals::Kind::Loading);
+    PreviewStateVisuals::showStatus(m_statusLabel, QCoreApplication::translate("SpaceLook", "Loading text preview..."), PreviewStateVisuals::Kind::Loading);
 
     auto* watcher = new QFutureWatcher<TextLoadResult>(this);
     connect(watcher, &QFutureWatcher<TextLoadResult>::finished, this, [this, watcher, loadToken, cancelToken]() {
@@ -494,6 +551,7 @@ void TextRenderer::load(const HoveredItemInfo& info)
             PreviewStateVisuals::showStatus(m_statusLabel, result.statusMessage, PreviewStateVisuals::Kind::Error);
             m_textEdit->setPlainText(result.text);
             m_contentStack->setCurrentWidget(m_textEdit);
+            resetSearch();
             notifyLoadingState(false);
             return;
         }
@@ -501,10 +559,11 @@ void TextRenderer::load(const HoveredItemInfo& info)
         const QString previewText = formattedStructuredPreviewText(loadToken.path, result.text);
         m_textEdit->setPlainText(previewText);
         m_contentStack->setCurrentWidget(m_textEdit);
+        resetSearch();
         if (result.statusMessage.trimmed().isEmpty()) {
-            PreviewStateVisuals::clearStatus(m_statusLabel);
+            PreviewStateVisuals::showStatus(m_statusLabel, QCoreApplication::translate("SpaceLook", "Encoding: %1").arg(result.encodingName));
         } else {
-            PreviewStateVisuals::showStatus(m_statusLabel, result.statusMessage);
+            PreviewStateVisuals::showStatus(m_statusLabel, QCoreApplication::translate("SpaceLook", "Encoding: %1. %2").arg(result.encodingName, result.statusMessage));
         }
 
         qDebug().noquote() << QStringLiteral("[SpaceLookRender] TextRenderer loaded async chars=%1 path=\"%2\"")
@@ -523,6 +582,7 @@ void TextRenderer::unload()
     m_loadGuard.cancel();
     notifyLoadingState(false);
     m_textEdit->clear();
+    hideSearchRow(true);
     m_contentStack->setCurrentWidget(m_loadingCard);
     m_pathValueLabel->clear();
     m_openWithButton->setTargetContext(QString(), QString());
@@ -534,6 +594,101 @@ void TextRenderer::notifyLoadingState(bool loading)
 {
     if (m_loadingStateCallback) {
         m_loadingStateCallback(loading);
+    }
+}
+
+void TextRenderer::findSearchMatch(bool backwards)
+{
+    const QString query = m_searchEdit ? m_searchEdit->text() : QString();
+    if (query.trimmed().isEmpty() || !m_textEdit || !m_textEdit->document()) {
+        updateSearchSummary();
+        return;
+    }
+
+    QTextDocument::FindFlags flags;
+    if (backwards) {
+        flags |= QTextDocument::FindBackward;
+    }
+
+    QTextCursor found = m_textEdit->document()->find(query, m_textEdit->textCursor(), flags);
+    if (found.isNull()) {
+        QTextCursor wrapCursor(m_textEdit->document());
+        wrapCursor.movePosition(backwards ? QTextCursor::End : QTextCursor::Start);
+        found = m_textEdit->document()->find(query, wrapCursor, flags);
+    }
+    if (!found.isNull()) {
+        m_textEdit->setTextCursor(found);
+        m_textEdit->ensureCursorVisible();
+    }
+    updateSearchSummary();
+}
+
+void TextRenderer::updateSearchSummary()
+{
+    if (!m_searchCountLabel || !m_textEdit || !m_textEdit->document()) {
+        return;
+    }
+
+    const QString query = m_searchEdit ? m_searchEdit->text() : QString();
+    if (query.trimmed().isEmpty()) {
+        m_searchCountLabel->clear();
+        return;
+    }
+
+    int total = 0;
+    int current = 0;
+    const int selectionStart = m_textEdit->textCursor().selectionStart();
+    QTextCursor cursor(m_textEdit->document());
+    while (true) {
+        cursor = m_textEdit->document()->find(query, cursor);
+        if (cursor.isNull()) {
+            break;
+        }
+        ++total;
+        if (cursor.selectionStart() == selectionStart) {
+            current = total;
+        }
+    }
+
+    m_searchCountLabel->setText(total > 0
+        ? QStringLiteral("%1/%2").arg(current > 0 ? current : 1).arg(total)
+        : QStringLiteral("0/0"));
+}
+
+void TextRenderer::resetSearch()
+{
+    if (m_searchEdit && !m_searchEdit->text().trimmed().isEmpty()) {
+        findSearchMatch(false);
+        return;
+    }
+    if (m_searchCountLabel) {
+        m_searchCountLabel->clear();
+    }
+}
+
+void TextRenderer::showSearchRow()
+{
+    if (!m_searchRow) {
+        return;
+    }
+
+    m_searchRow->show();
+    if (m_searchEdit) {
+        m_searchEdit->setFocus(Qt::ShortcutFocusReason);
+        m_searchEdit->selectAll();
+    }
+}
+
+void TextRenderer::hideSearchRow(bool clearQuery)
+{
+    if (clearQuery && m_searchEdit) {
+        m_searchEdit->clear();
+    }
+    if (m_searchCountLabel) {
+        m_searchCountLabel->clear();
+    }
+    if (m_searchRow) {
+        m_searchRow->hide();
     }
 }
 
@@ -658,6 +813,29 @@ void TextRenderer::applyChrome()
         "}"
         "#TextStatusRow {"
         "  background: transparent;"
+        "}"
+        "#TextSearchRow {"
+        "  background: rgba(238, 244, 252, 0.96);"
+        "  border: 1px solid rgba(193, 208, 224, 0.95);"
+        "  border-radius: 12px;"
+        "}"
+        "#TextSearchEdit {"
+        "  color: #17324b;"
+        "  background: transparent;"
+        "  border: none;"
+        "  selection-background-color: #cfe3ff;"
+        "}"
+        "#TextSearchPreviousButton, #TextSearchNextButton {"
+        "  color: #17324b;"
+        "  background: transparent;"
+        "  border: none;"
+        "  border-radius: 8px;"
+        "}"
+        "#TextSearchPreviousButton:hover, #TextSearchNextButton:hover {"
+        "  background: rgba(215, 229, 246, 0.95);"
+        "}"
+        "#TextSearchCount {"
+        "  color: #526b85;"
         "}"
         "#TextContentSection {"
         "  background: transparent;"

@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include <QVector>
 #include <QWidget>

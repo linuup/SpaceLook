@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include <QtGlobal>
 #include <QWidget>
@@ -8,10 +8,12 @@
 #include "renderers/PreviewCancellationToken.h"
 #include "renderers/PreviewLoadGuard.h"
 class QLabel;
+class QLineEdit;
 class ModeSwitchButton;
 class OpenWithButton;
 class QPlainTextEdit;
 class QStackedWidget;
+class QToolButton;
 class SelectableTitleLabel;
 class QWidget;
 class PreviewState;
@@ -36,6 +38,11 @@ private:
     void showStatusMessage(const QString& message);
     void updateModeSelector(const QString& filePath);
     void notifyLoadingState(bool loading);
+    void findSearchMatch(bool backwards);
+    void updateSearchSummary();
+    void resetSearch();
+    void showSearchRow();
+    void hideSearchRow(bool clearQuery);
 
     HoveredItemInfo m_info;
     PreviewLoadGuard m_loadGuard;
@@ -51,6 +58,11 @@ private:
     OpenWithButton* m_openWithButton = nullptr;
     QWidget* m_contentSection = nullptr;
     QWidget* m_statusRow = nullptr;
+    QWidget* m_searchRow = nullptr;
+    QLineEdit* m_searchEdit = nullptr;
+    QToolButton* m_searchPreviousButton = nullptr;
+    QToolButton* m_searchNextButton = nullptr;
+    QLabel* m_searchCountLabel = nullptr;
     QLabel* m_statusLabel = nullptr;
     ModeSwitchButton* m_modeSwitchButton = nullptr;
     QStackedWidget* m_contentStack = nullptr;

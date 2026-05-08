@@ -1,4 +1,4 @@
-#include "renderers/PreviewHeaderBar.h"
+﻿#include "renderers/PreviewHeaderBar.h"
 
 #include <QHBoxLayout>
 #include <QLabel>

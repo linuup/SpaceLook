@@ -1,4 +1,4 @@
-#include "renderers/PreviewStateVisuals.h"
+﻿#include "renderers/PreviewStateVisuals.h"
 
 #include <QEvent>
 #include <QLabel>

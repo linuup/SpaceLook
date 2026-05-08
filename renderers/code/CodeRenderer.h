@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include <memory>
 
@@ -17,10 +17,12 @@ class SyntaxHighlighter;
 }
 
 class QLabel;
+class QLineEdit;
 class ModeSwitchButton;
 class OpenWithButton;
 class QPlainTextEdit;
 class QStackedWidget;
+class QToolButton;
 class QTreeWidget;
 class QTreeWidgetItem;
 class SelectableTitleLabel;
@@ -57,6 +59,14 @@ private:
     bool tryLoadXmlPreview(const QString& text);
     bool tryLoadYamlPreview(const QString& text);
     void notifyLoadingState(bool loading);
+    void findSearchMatch(bool backwards);
+    void findTextSearchMatch(bool backwards);
+    void rebuildStructuredSearchMatches();
+    void selectStructuredSearchMatch(int index);
+    void updateSearchSummary();
+    void resetSearch();
+    void showSearchRow();
+    void hideSearchRow(bool clearQuery);
     static bool isStructuredPreviewPath(const QString& filePath);
 
     HoveredItemInfo m_info;
@@ -73,6 +83,11 @@ private:
     OpenWithButton* m_openWithButton = nullptr;
     QWidget* m_contentSection = nullptr;
     QWidget* m_statusRow = nullptr;
+    QWidget* m_searchRow = nullptr;
+    QLineEdit* m_searchEdit = nullptr;
+    QToolButton* m_searchPreviousButton = nullptr;
+    QToolButton* m_searchNextButton = nullptr;
+    QLabel* m_searchCountLabel = nullptr;
     QLabel* m_statusLabel = nullptr;
     ModeSwitchButton* m_modeSwitchButton = nullptr;
     QStackedWidget* m_contentStack = nullptr;
@@ -82,6 +97,9 @@ private:
     QPlainTextEdit* m_textEdit = nullptr;
     QTreeWidget* m_treeView = nullptr;
     PreviewState* m_previewState = nullptr;
+    QVector<QTreeWidgetItem*> m_searchMatches;
+    QString m_lastSearchQuery;
+    int m_searchMatchIndex = -1;
     std::unique_ptr<KSyntaxHighlighting::Repository> m_repository;
     KSyntaxHighlighting::SyntaxHighlighter* m_highlighter = nullptr;
 };

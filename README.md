@@ -41,7 +41,7 @@ The current renderer modules under `renderers/` are:
 | `renderers/folder/` | `FolderRenderer` | Shows folder contents, shell folder entries, item actions, and inline rename UI. |
 | `renderers/image/` | `ImageRenderer` | Previews raster and vector images with zoom, pan, animated image handling, and special decoders. |
 | `renderers/markup/` | `RenderedPageRenderer`, `WebView2HtmlView`, `LiteHtmlView` | Previews Markdown and HTML through rendered page views, with WebView2 preferred for HTML. |
-| `renderers/media/` | `MediaRenderer` | Previews audio and video with modern playback controls, mpv first, Qt media fallback. |
+| `renderers/media/` | `MediaRenderer` | Previews audio and video with modern playback controls, Windows first for common formats, MPV enhanced runtime for Opus and Vorbis audio. |
 | `renderers/pdf/` | `PdfRenderer`, `PdfDocument`, `PdfViewWidget` | Previews PDF through PDFium and routes XPS or OXPS through Windows Preview Handler fallback. |
 | `renderers/summary/` | `SummaryRenderer`, `ArchiveRenderer` | Shows fallback metadata and archive contents. |
 | `renderers/text/` | `TextRenderer` | Shows plain text and structured text formats with formatting, wrapping, and line numbers. |
@@ -79,7 +79,7 @@ The current renderer modules under `renderers/` are:
 | Text and Structured Data | `TextRenderer` | ✅ `txt`, ✅ `log`, ✅ `json`, ✅ `jsonc`, ✅ `xml`, ✅ `yaml`, ✅ `yml`, ✅ `toml`, ✅ `ini`, ✅ `conf`, ✅ `config`, ✅ `cfg`, ✅ `env`, ✅ `csv`, ✅ `tsv`, ✅ `properties`, ✅ `editorconfig`, ✅ `gitignore`, ✅ `gitattributes`, ✅ `reg`, ✅ `props`, ✅ `targets`, ✅ `cmake`, ✅ `qrc`, ✅ `qss`, ✅ `ui`, ✅ `pri`, ✅ `pro`, ✅ `tsbuildinfo` |
 | Images, Raster and Vector | `ImageRenderer` | ✅ `png`, ✅ `jpg`, ✅ `jpeg`, ✅ `jpe`, ✅ `bmp`, ✅ `dib`, ✅ `gif`, ✅ `webp`, ✅ `heic`, ✅ `heif`, ✅ `avif`, ✅ `tif`, ✅ `tiff`, ✅ `svg`, ✅ `ico`, ✅ `dds`, ✅ `tga` |
 | Camera RAW Images | `ImageRenderer` | `raw`, `dng`, `cr2`, `cr3`, `nef`, `arw`, `orf`, `rw2`, `raf`, `pef`, `srw`  |
-| Audio | `MediaRenderer` | ✅ `mp3`, ✅ `wav`, ✅ `flac`, ✅ `aac`, ✅ `m4a`, ✅ `ogg`, ✅ `oga`, ✅ `wma`, ✅ `opus`, ✅ `aiff`, ✅ `aif`, ✅ `alac`, ✅ `ape`, ✅ `mid`, ✅ `midi` |
+| Audio | `MediaRenderer` | ✅ `mp3`, ✅ `wav`, ✅ `flac`, ✅ `aac`, ✅ `m4a`, ✅ `wma`, ✅ `aiff`, ✅ `aif`, ✅ `alac`, ✅ `ape`, ✅ `mid`, ✅ `midi`, ✅ MPV required `ogg`, ✅ MPV required `oga`, ✅ MPV required `opus` |
 | Video | `MediaRenderer` | ✅ `mp4`, ✅ `mkv`, ✅ `avi`, ✅ `mov`, ✅ `wmv`, ✅ `webm`, ✅ `m4v`, ✅ `mpg`, ✅ `mpeg`, ✅ `mts`, ✅ `m2ts`, `3gp`, `flv`, `ogv`, `ts` |
 | Subtitles and Captions | `TextRenderer` | `srt`, `vtt`, `ass`, `ssa`, `sub`, `idx` |
 | Archives and Packages | `ArchiveRenderer` | ✅ `zip`, ✅ `7z`, ✅ `rar`, ✅ `tar`, ✅ `gz`, ✅ `tgz`, ✅ `bz2`, ✅ `tbz`, ✅ `tbz2`, ✅ `xz`, ✅ `txz`, ✅ `cab`, `iso`, `jar`, `war`, `ear`, `apk`, `ipa`, `nupkg`, `vsix`, `crx`, `appx`, `msix` |
@@ -174,13 +174,14 @@ Renderer: `MediaRenderer`
 
 Behavior:
 
-1. Prefers dynamic `libmpv` playback when available.
+1. Uses Windows playback first for common audio and video formats.
 2. Opens preview in paused state.
 3. Uses default volume `50`.
 4. Supports click to play or pause.
 5. Supports click seek on the progress slider.
 6. Supports mute toggle and direct volume slider control.
-7. Falls back to `QMediaPlayer` for audio when `libmpv` is unavailable.
+7. Requires the MPV enhanced runtime for `Opus audio` and `Vorbis audio`, including `.ogg`, `.oga`, and `.opus` files.
+8. Falls back to MPV when Windows playback cannot parse supported fallback formats.
 
 ### Summary and Fallback
 

@@ -1,10 +1,13 @@
-#include "renderers/pdf/PdfDocument.h"
+﻿#include "renderers/pdf/PdfDocument.h"
 
 #include <QColor>
 #include <QFile>
 #include <QSize>
+#include <QVector>
 
+#include "core/PreviewFileReader.h"
 #include "renderers/pdf/PdfiumBridge.h"
+#include "third_party/pdfium/include/fpdf_text.h"
 
 namespace {
 
@@ -28,16 +31,14 @@ bool PdfDocument::load(const QString& filePath, QString* errorMessage)
 {
     unload();
 
-    QFile file(filePath);
-    if (!file.open(QIODevice::ReadOnly)) {
+    QString readError;
+    if (!PreviewFileReader::readAll(filePath, &m_fileData, &readError)) {
         if (errorMessage) {
-            *errorMessage = QStringLiteral("Failed to open the PDF file for reading.");
+            *errorMessage = QStringLiteral("Failed to open the PDF file for reading: %1").arg(readError);
         }
         return false;
     }
 
-    m_fileData = file.readAll();
-    file.close();
     if (m_fileData.isEmpty()) {
         if (errorMessage) {
             *errorMessage = QStringLiteral("The PDF file is empty or could not be read.");
@@ -163,4 +164,39 @@ QImage PdfDocument::renderPage(int pageIndex, double scale, QColor background, Q
     FPDFBitmap_Destroy(bitmap);
     FPDF_ClosePage(page);
     return image;
+}
+
+QString PdfDocument::pageText(int pageIndex) const
+{
+    if (!m_document || pageIndex < 0 || pageIndex >= m_pageCount) {
+        return QString();
+    }
+
+    FPDF_PAGE page = FPDF_LoadPage(m_document, pageIndex);
+    if (!page) {
+        return QString();
+    }
+
+    FPDF_TEXTPAGE textPage = FPDFText_LoadPage(page);
+    if (!textPage) {
+        FPDF_ClosePage(page);
+        return QString();
+    }
+
+    const int charCount = FPDFText_CountChars(textPage);
+    if (charCount <= 0) {
+        FPDFText_ClosePage(textPage);
+        FPDF_ClosePage(page);
+        return QString();
+    }
+
+    QVector<ushort> buffer(charCount + 1);
+    const int written = FPDFText_GetText(textPage, 0, charCount + 1, buffer.data());
+    FPDFText_ClosePage(textPage);
+    FPDF_ClosePage(page);
+    if (written <= 0) {
+        return QString();
+    }
+
+    return QString::fromUtf16(buffer.constData(), qMax(0, written - 1));
 }

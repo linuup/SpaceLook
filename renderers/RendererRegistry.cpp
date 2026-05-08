@@ -2,6 +2,7 @@
 
 #include <QDebug>
 #include <QHash>
+#include <QTimer>
 
 #include "core/preview_state.h"
 #include "renderers/summary/ArchiveRenderer.h"
@@ -115,4 +116,28 @@ IPreviewRenderer* RendererRegistry::rendererFor(const HoveredItemInfo& info) con
         }
     }
     return nullptr;
+}
+
+void RendererRegistry::warmUpHeavyRenderers() const
+{
+    const QStringList warmupOrder = {
+        QStringLiteral("pdf"),
+        QStringLiteral("media"),
+        QStringLiteral("rendered_page"),
+        QStringLiteral("document")
+    };
+
+    int delayMs = 0;
+    for (const QString& rendererId : warmupOrder) {
+        IPreviewRenderer* renderer = rendererById(rendererId);
+        if (!renderer) {
+            continue;
+        }
+
+        QTimer::singleShot(delayMs, [renderer, rendererId]() {
+            qDebug().noquote() << QStringLiteral("[SpaceLookRender] Warmup renderer=%1").arg(rendererId);
+            renderer->warmUp();
+        });
+        delayMs += 180;
+    }
 }

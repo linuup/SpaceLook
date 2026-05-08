@@ -13,13 +13,18 @@ set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 set(CMAKE_AUTOUIC ON)
 
-find_package(Qt5 COMPONENTS Core Gui Network Widgets WinExtras Qml Quick QuickWidgets Multimedia MultimediaWidgets Concurrent Xml REQUIRED)
+find_package(Qt5 COMPONENTS Core Gui Network Widgets WinExtras AxContainer Qml Quick QuickWidgets Multimedia MultimediaWidgets Concurrent Xml LinguistTools REQUIRED)
 
 file(GLOB_RECURSE SPACELOOK_SOURCES CONFIGURE_DEPENDS
     "*.cpp"
     "*.h"
     "*.qrc"
 )
+
+set(SPACELOOK_TRANSLATIONS
+    "${CMAKE_CURRENT_SOURCE_DIR}/translations/SpaceLook_zh_CN.ts"
+)
+qt5_add_translation(SPACELOOK_QM_FILES ${SPACELOOK_TRANSLATIONS})
 
 list(APPEND SPACELOOK_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/renderers/summary/ArchiveRenderer.cpp"
@@ -37,6 +42,9 @@ list(FILTER SPACELOOK_SOURCES EXCLUDE REGEX ".*/third_party/tmp_probe/.*")
 list(FILTER SPACELOOK_SOURCES EXCLUDE REGEX ".*/build/.*")
 list(FILTER SPACELOOK_SOURCES EXCLUDE REGEX ".*/third_party/cmark/.*")
 list(FILTER SPACELOOK_SOURCES EXCLUDE REGEX ".*/third_party/litehtml/.*")
+list(FILTER SPACELOOK_SOURCES EXCLUDE REGEX ".*/third_party/MediaInfoLib/.*")
+list(FILTER SPACELOOK_SOURCES EXCLUDE REGEX ".*/third_party/ZenLib/.*")
+list(FILTER SPACELOOK_SOURCES EXCLUDE REGEX ".*/third_party/zlib/.*")
 list(FILTER SPACELOOK_SOURCES EXCLUDE REGEX ".*/third_party/ksyntaxhighlighting/src/lib/ansihighlighter\\.(cpp|h)$")
 list(FILTER SPACELOOK_SOURCES EXCLUDE REGEX ".*/third_party/ksyntaxhighlighting/src/lib/definitiondownloader\\.(cpp|h)$")
 list(FILTER SPACELOOK_SOURCES EXCLUDE REGEX ".*/third_party/ksyntaxhighlighting/src/lib/htmlhighlighter\\.(cpp|h)$")
@@ -46,13 +54,22 @@ set(BUILD_TESTING OFF CACHE BOOL "Disable vendor tests" FORCE)
 set(CMARK_LIB_FUZZER OFF CACHE BOOL "Disable cmark fuzz targets" FORCE)
 set(LITEHTML_BUILD_TESTING OFF CACHE BOOL "Disable litehtml tests" FORCE)
 set(EXTERNAL_GUMBO OFF CACHE BOOL "Use bundled gumbo" FORCE)
+set(BUILD_ZENLIB ON CACHE BOOL "Build bundled ZenLib for MediaInfoLib" FORCE)
+set(BUILD_ZLIB ON CACHE BOOL "Build bundled zlib for MediaInfoLib" FORCE)
+set(ZLIB_BUILD_EXAMPLES OFF CACHE BOOL "Disable zlib examples" FORCE)
+set(CMAKE_SKIP_INSTALL_RULES ON CACHE BOOL "Disable vendor install rules" FORCE)
 
 add_subdirectory(third_party/cmark EXCLUDE_FROM_ALL)
 add_subdirectory(third_party/litehtml EXCLUDE_FROM_ALL)
+add_subdirectory(third_party/MediaInfoLib/Project/CMake EXCLUDE_FROM_ALL)
 
-add_executable(SpaceLook ${SPACELOOK_SOURCES})
+option(SPACELOOK_DEPLOY_MPV_RUNTIME "Deploy optional libmpv enhanced playback runtime with SpaceLook" OFF)
+
+add_executable(SpaceLook ${SPACELOOK_SOURCES} ${SPACELOOK_QM_FILES})
 
 target_sources(SpaceLook PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/core/TextEncodingDetector.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/core/TextEncodingDetector.h"
     "${CMAKE_CURRENT_SOURCE_DIR}/renderers/document/PreviewHandlerHost.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/renderers/document/PreviewHandlerHost.h"
     "${CMAKE_CURRENT_SOURCE_DIR}/renderers/markup/WebView2HtmlView.cpp"
@@ -90,6 +107,7 @@ target_link_libraries(SpaceLook
         Qt5::Network
         Qt5::Widgets
         Qt5::WinExtras
+        Qt5::AxContainer
         Qt5::Qml
         Qt5::Quick
         Qt5::QuickWidgets
@@ -99,6 +117,7 @@ target_link_libraries(SpaceLook
         Qt5::Xml
         cmark
         litehtml
+        mediainfo
 )
 
 target_compile_definitions(SpaceLook
@@ -118,6 +137,8 @@ target_include_directories(SpaceLook
         ${CMAKE_CURRENT_SOURCE_DIR}/third_party/libheif/include
         ${CMAKE_CURRENT_SOURCE_DIR}/third_party/libde265/include
         ${CMAKE_CURRENT_SOURCE_DIR}/third_party/x265/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/third_party/MediaInfoLib/Source
+        ${CMAKE_CURRENT_SOURCE_DIR}/third_party/ZenLib/Source
 )
 
 file(GLOB _QTGUI_PRIVATE_BASE "${Qt5_DIR}/../../../include/QtGui/*")
@@ -183,7 +204,7 @@ if(WIN32)
     set(SPACELOOK_MPV_PART3 "${CMAKE_CURRENT_SOURCE_DIR}/third_party/mpv/libmpv-2.dll.part3")
     set(SPACELOOK_MPV_JOINED_DLL "${CMAKE_CURRENT_SOURCE_DIR}/third_party/mpv/libmpv-2.dll")
 
-    if(NOT EXISTS "${SPACELOOK_MPV_JOINED_DLL}" AND EXISTS "${SPACELOOK_MPV_PART1}" AND EXISTS "${SPACELOOK_MPV_PART2}" AND EXISTS "${SPACELOOK_MPV_PART3}")
+    if(SPACELOOK_DEPLOY_MPV_RUNTIME AND NOT EXISTS "${SPACELOOK_MPV_JOINED_DLL}" AND EXISTS "${SPACELOOK_MPV_PART1}" AND EXISTS "${SPACELOOK_MPV_PART2}" AND EXISTS "${SPACELOOK_MPV_PART3}")
         message(STATUS "Reconstructing libmpv runtime DLL from split parts")
         execute_process(
             COMMAND powershell -NoProfile -ExecutionPolicy Bypass -Command
@@ -254,16 +275,17 @@ if(WIN32)
         COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:SpaceLook>/ksyntaxhighlighting/syntax"
         COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:SpaceLook>/ksyntaxhighlighting/themes"
         COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:SpaceLook>/QtQuick"
+        COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:SpaceLook>/i18n"
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "${QT_PLUGIN_ROOT}/mediaservice/wmfengine.dll"
-            "${QT_PLUGIN_ROOT}/mediaservice/dsengine.dll"
+            "${QT_PLUGIN_ROOT}/mediaservice/$<IF:$<CONFIG:Debug>,wmfengined.dll,wmfengine.dll>"
+            "${QT_PLUGIN_ROOT}/mediaservice/$<IF:$<CONFIG:Debug>,dsengined.dll,dsengine.dll>"
             "$<TARGET_FILE_DIR:SpaceLook>/mediaservice"
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "${QT_PLUGIN_ROOT}/audio/qtaudio_windows.dll"
-            "${QT_PLUGIN_ROOT}/audio/qtaudio_wasapi.dll"
+            "${QT_PLUGIN_ROOT}/audio/$<IF:$<CONFIG:Debug>,qtaudio_windowsd.dll,qtaudio_windows.dll>"
+            "${QT_PLUGIN_ROOT}/audio/$<IF:$<CONFIG:Debug>,qtaudio_wasapid.dll,qtaudio_wasapi.dll>"
             "$<TARGET_FILE_DIR:SpaceLook>/audio"
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "${QT_PLUGIN_ROOT}/playlistformats/qtmultimedia_m3u.dll"
+            "${QT_PLUGIN_ROOT}/playlistformats/$<IF:$<CONFIG:Debug>,qtmultimedia_m3ud.dll,qtmultimedia_m3u.dll>"
             "$<TARGET_FILE_DIR:SpaceLook>/playlistformats"
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             ${SPACELOOK_QT_IMAGEFORMAT_PLUGINS}
@@ -301,22 +323,27 @@ if(WIN32)
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "${CMAKE_CURRENT_SOURCE_DIR}/third_party/libavif/bin/avifdec.exe"
             "$<TARGET_FILE_DIR:SpaceLook>"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            ${SPACELOOK_QM_FILES}
+            "$<TARGET_FILE_DIR:SpaceLook>/i18n"
         COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:SpaceLook>/7zip"
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "${CMAKE_CURRENT_SOURCE_DIR}/third_party/7zip/runtime/7z.exe"
-            "${CMAKE_CURRENT_SOURCE_DIR}/third_party/7zip/runtime/7z.dll"
-            "${CMAKE_CURRENT_SOURCE_DIR}/third_party/7zip/runtime/License.txt"
+            "${CMAKE_CURRENT_SOURCE_DIR}/third_party/7zip/private/7z.exe"
+            "${CMAKE_CURRENT_SOURCE_DIR}/third_party/7zip/private/7z.dll"
+            "${CMAKE_CURRENT_SOURCE_DIR}/third_party/7zip/private/License.txt"
             "$<TARGET_FILE_DIR:SpaceLook>/7zip"
         COMMENT "Copying Qt multimedia plugins for SpaceLook..."
         COMMAND_EXPAND_LISTS
     )
 
-    if(SPACELOOK_LIBMPV_DLL)
+    if(SPACELOOK_DEPLOY_MPV_RUNTIME AND SPACELOOK_LIBMPV_DLL)
         add_custom_command(TARGET SpaceLook POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
                 "${SPACELOOK_LIBMPV_DLL}"
                 "$<TARGET_FILE_DIR:SpaceLook>"
             COMMENT "Copying libmpv runtime for SpaceLook..."
         )
+    elseif(NOT SPACELOOK_DEPLOY_MPV_RUNTIME)
+        message(STATUS "SpaceLook libmpv runtime deployment is disabled. mpv is treated as an optional enhanced playback runtime.")
     endif()
 endif()

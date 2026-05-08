@@ -1,6 +1,7 @@
-#include "renderers/SelectableTitleLabel.h"
+﻿#include "renderers/SelectableTitleLabel.h"
 
 #include <QClipboard>
+#include <QCoreApplication>
 #include <QGuiApplication>
 #include <QMouseEvent>
 
@@ -8,7 +9,7 @@ SelectableTitleLabel::SelectableTitleLabel(QWidget* parent)
     : QLabel(parent)
 {
     setTextInteractionFlags(Qt::TextSelectableByMouse);
-    m_defaultToolTip = QStringLiteral("Double click to copy file name");
+    m_defaultToolTip = QCoreApplication::translate("SpaceLook", "Double click to copy file name");
     setToolTip(m_defaultToolTip);
     m_toolTipResetTimer.setSingleShot(true);
     m_toolTipResetTimer.setInterval(1400);
@@ -28,7 +29,7 @@ void SelectableTitleLabel::mouseDoubleClickEvent(QMouseEvent* event)
         if (QClipboard* clipboard = QGuiApplication::clipboard()) {
             clipboard->setText(m_copyText.isEmpty() ? text() : m_copyText);
         }
-        emit copyFeedbackRequested(QStringLiteral("File name copied"));
+        emit copyFeedbackRequested(QCoreApplication::translate("SpaceLook", "File name copied"));
         event->accept();
         return;
     }

@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include <QtGlobal>
 #include <QWidget>
@@ -28,6 +28,7 @@ public:
     QWidget* widget() override;
     void load(const HoveredItemInfo& info) override;
     void unload() override;
+    void warmUp() override;
     bool reportsLoadingState() const override;
     void setLoadingStateCallback(std::function<void(bool)> callback) override;
 

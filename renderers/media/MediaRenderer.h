@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include <QWidget>
 
@@ -14,7 +14,9 @@ class QMediaPlayer;
 class QTimer;
 class QEvent;
 class QPoint;
+class QVideoWidget;
 class InternalMpvVideoBackend;
+class WindowsMediaPlayerAudioBackend;
 class SelectableTitleLabel;
 
 class MediaRenderer : public QWidget, public IPreviewRenderer
@@ -30,6 +32,7 @@ public:
     QWidget* widget() override;
     void load(const HoveredItemInfo& info) override;
     void unload() override;
+    void warmUp() override;
 
 protected:
     bool eventFilter(QObject* watched, QEvent* event) override;
@@ -42,6 +45,14 @@ private:
     void destroyAudioBackend();
     void ensureVideoBackend();
     void destroyVideoBackend();
+    bool tryStartMpvVideo();
+    bool tryStartMpvAudio();
+    bool tryStartWindowsAudioFallback(const QString& reason);
+    void fallbackToMpvVideo(const QString& reason);
+    void fallbackToMpvAudio(const QString& reason);
+    QString mpvInstallHint(const QString& reason) const;
+    QString windowsBackendFailureMessage(const QString& reason) const;
+    bool isMpvInstallHintMessage(const QString& message) const;
     void seekToSliderValue(int value);
     int sliderValueForMousePosition(QSlider* slider, const QPoint& position) const;
     void togglePlayback();
@@ -65,8 +76,14 @@ private:
     bool m_isSeeking = false;
     bool m_usingMpvVideo = false;
     bool m_usingMpvPlayback = false;
+    bool m_usingWindowsAudioFallback = false;
     bool m_mpvPaused = true;
     bool m_videoPreviewReady = false;
+    bool m_videoStartedPlayback = false;
+    bool m_triedMpvVideoFallback = false;
+    bool m_triedMpvAudioFallback = false;
+    bool m_allowMpvFallbackForCurrentMedia = false;
+    QString m_currentCodecSummary;
     QWidget* m_headerRow = nullptr;
     QLabel* m_iconLabel = nullptr;
     SelectableTitleLabel* m_titleLabel = nullptr;
@@ -75,7 +92,9 @@ private:
     QLabel* m_pathTitleLabel = nullptr;
     QLabel* m_pathValueLabel = nullptr;
     OpenWithButton* m_openWithButton = nullptr;
+    QWidget* m_statusRow = nullptr;
     QLabel* m_statusLabel = nullptr;
+    QPushButton* m_mpvHelpButton = nullptr;
     QWidget* m_stageCard = nullptr;
     QVBoxLayout* m_stageLayout = nullptr;
     QWidget* m_controlsCard = nullptr;
@@ -84,6 +103,7 @@ private:
     QLabel* m_audioPlaceholder = nullptr;
     QLabel* m_videoPlaceholder = nullptr;
     QWidget* m_videoHost = nullptr;
+    QVideoWidget* m_qtVideoWidget = nullptr;
     QPushButton* m_playPauseButton = nullptr;
     QPushButton* m_volumeButton = nullptr;
     QLabel* m_positionLabel = nullptr;
@@ -94,6 +114,7 @@ private:
     QMediaPlayer* m_player = nullptr;
     QTimer* m_videoPollTimer = nullptr;
     InternalMpvVideoBackend* m_mpvBackend = nullptr;
+    WindowsMediaPlayerAudioBackend* m_windowsAudioBackend = nullptr;
     bool m_videoMuted = true;
     int m_audioVolume = 50;
     int m_videoVolume = 50;

@@ -1,4 +1,4 @@
-#include "renderers/FluentIconFont.h"
+﻿#include "renderers/FluentIconFont.h"
 
 #include <QFontDatabase>
 

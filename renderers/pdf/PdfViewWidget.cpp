@@ -1,4 +1,4 @@
-#include "renderers/pdf/PdfViewWidget.h"
+﻿#include "renderers/pdf/PdfViewWidget.h"
 
 #include <QPainter>
 #include <QResizeEvent>

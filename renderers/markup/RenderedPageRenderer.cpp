@@ -1,4 +1,4 @@
-#include "renderers/markup/RenderedPageRenderer.h"
+﻿#include "renderers/markup/RenderedPageRenderer.h"
 
 #include <cmark.h>
 
@@ -19,6 +19,7 @@
 #include <QDebug>
 #include <QtConcurrent/QtConcurrent>
 
+#include "core/PreviewFileReader.h"
 #include "renderers/FileTypeIconResolver.h"
 #include "renderers/OpenWithButton.h"
 #include "renderers/PreviewHeaderBar.h"
@@ -47,23 +48,21 @@ RenderedPageLoadResult loadRenderedPageContent(const QString& filePath, const Pr
         return result;
     }
 
-    QFile file(filePath);
-    if (!file.open(QIODevice::ReadOnly)) {
+    QByteArray content;
+    bool truncated = false;
+    if (!PreviewFileReader::readPrefix(filePath, kMaxRenderedPagePreviewBytes, &content, &truncated)) {
         result.text = QStringLiteral("Could not read:\n%1").arg(filePath);
         result.statusMessage = QStringLiteral("Failed to open the file for preview.");
         return result;
     }
 
-    QByteArray content = file.read(kMaxRenderedPagePreviewBytes + 1);
-    file.close();
     if (previewCancellationRequested(cancelToken)) {
         content.clear();
         result.statusMessage = QStringLiteral("Rendered page preview was canceled.");
         return result;
     }
 
-    if (content.size() > kMaxRenderedPagePreviewBytes) {
-        content.chop(content.size() - static_cast<int>(kMaxRenderedPagePreviewBytes));
+    if (truncated) {
         result.statusMessage = QStringLiteral("Preview is truncated to the first 2 MB.");
     }
 
@@ -293,13 +292,12 @@ QString inlineLocalStylesheets(const QString& html, const QString& basePath)
             cssFilePath = QDir(basePath).absoluteFilePath(cssFilePath);
         }
 
-        QFile cssFile(cssFilePath);
-        if (!cssFile.open(QIODevice::ReadOnly)) {
+        QByteArray cssBytes;
+        if (!PreviewFileReader::readAll(cssFilePath, &cssBytes)) {
             continue;
         }
 
-        const QString cssText = QString::fromUtf8(cssFile.readAll());
-        cssFile.close();
+        const QString cssText = QString::fromUtf8(cssBytes);
         if (!cssText.trimmed().isEmpty()) {
             cssBlocks.append(cssText);
         }
@@ -605,6 +603,15 @@ bool RenderedPageRenderer::canHandle(const HoveredItemInfo& info) const
 QWidget* RenderedPageRenderer::widget()
 {
     return this;
+}
+
+void RenderedPageRenderer::warmUp()
+{
+    QString errorMessage;
+    if (!m_webView->warmUp(&errorMessage) && !errorMessage.trimmed().isEmpty()) {
+        qDebug().noquote() << QStringLiteral("[SpaceLookRender] RenderedPageRenderer warmup skipped: %1").arg(errorMessage);
+    }
+    m_fallbackHtmlView->setDocumentHtml(QStringLiteral("<!doctype html><html><body></body></html>"), QString());
 }
 
 bool RenderedPageRenderer::reportsLoadingState() const

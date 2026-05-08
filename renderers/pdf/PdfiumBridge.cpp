@@ -1,4 +1,4 @@
-#include "renderers/pdf/PdfiumBridge.h"
+﻿#include "renderers/pdf/PdfiumBridge.h"
 
 PdfiumBridge& PdfiumBridge::instance()
 {

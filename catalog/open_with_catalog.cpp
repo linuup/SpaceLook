@@ -1,4 +1,4 @@
-#include "catalog/open_with_catalog.h"
+﻿#include "catalog/open_with_catalog.h"
 
 #include <QDir>
 #include <QFileIconProvider>

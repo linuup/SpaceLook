@@ -10,8 +10,10 @@
 #include "core/hovered_item_info.h"
 #include "renderers/pdf/PdfDocument.h"
 #include "renderers/IPreviewRenderer.h"
+#include "renderers/PreviewLoadGuard.h"
 
 class QLabel;
+class QLineEdit;
 class QListWidget;
 class OpenWithButton;
 class PreviewHandlerHost;
@@ -19,6 +21,7 @@ class PdfViewWidget;
 class SelectableTitleLabel;
 class QSpinBox;
 class QTimer;
+class QToolButton;
 class QWidget;
 
 class PdfRenderer : public QWidget, public IPreviewRenderer
@@ -33,6 +36,7 @@ public:
     QWidget* widget() override;
     void load(const HoveredItemInfo& info) override;
     void unload() override;
+    void warmUp() override;
     void setSummaryFallbackCallback(std::function<void(const HoveredItemInfo&, const QString&)> callback) override;
 
 private:
@@ -45,9 +49,18 @@ private:
     void scheduleThumbnailPage(int pageIndex);
     void scheduleVisibleThumbnails();
     void renderNextThumbnail();
+    bool isCurrentPdfLoad() const;
+    void findSearchMatch(bool backwards);
+    void rebuildSearchMatches();
+    void updateSearchSummary();
+    void resetSearch();
+    void showSearchRow();
+    void hideSearchRow(bool clearQuery);
 
     HoveredItemInfo m_info;
     PdfDocument m_document;
+    PreviewLoadGuard m_loadGuard;
+    PreviewLoadGuard::Token m_loadToken;
     std::function<void(const HoveredItemInfo&, const QString&)> m_summaryFallbackCallback;
     QWidget* m_headerRow = nullptr;
     QLabel* m_iconLabel = nullptr;
@@ -58,6 +71,11 @@ private:
     QLabel* m_pathValueLabel = nullptr;
     OpenWithButton* m_openWithButton = nullptr;
     QLabel* m_statusLabel = nullptr;
+    QWidget* m_searchRow = nullptr;
+    QLineEdit* m_searchEdit = nullptr;
+    QToolButton* m_searchPreviousButton = nullptr;
+    QToolButton* m_searchNextButton = nullptr;
+    QLabel* m_searchCountLabel = nullptr;
     QWidget* m_contentRow = nullptr;
     QWidget* m_thumbnailPanel = nullptr;
     QWidget* m_pageInfoRow = nullptr;
@@ -70,4 +88,7 @@ private:
     QTimer* m_thumbnailRenderTimer = nullptr;
     QVector<int> m_pendingThumbnailPages;
     QSet<int> m_renderedThumbnailPages;
+    QVector<int> m_searchPageMatches;
+    QString m_lastSearchQuery;
+    int m_searchMatchIndex = -1;
 };

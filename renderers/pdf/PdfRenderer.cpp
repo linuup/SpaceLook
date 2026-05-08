@@ -1,17 +1,20 @@
-#include "renderers/pdf/PdfRenderer.h"
+﻿#include "renderers/pdf/PdfRenderer.h"
 
 #include <QAbstractItemView>
+#include <QCoreApplication>
 #include <QDebug>
 #include <QFileInfo>
 #include <QHBoxLayout>
 #include <QIcon>
 #include <QLabel>
+#include <QLineEdit>
 #include <QListView>
 #include <QListWidget>
 #include <QListWidgetItem>
 #include <QPainter>
 #include <QPixmap>
 #include <QScrollBar>
+#include <QShortcut>
 #include <QSignalBlocker>
 #include <QSpinBox>
 #include <QTimer>
@@ -48,6 +51,11 @@ PdfRenderer::PdfRenderer(QWidget* parent)
     , m_pathValueLabel(new QLabel(this))
     , m_openWithButton(new OpenWithButton(this))
     , m_statusLabel(new QLabel(this))
+    , m_searchRow(new QWidget(this))
+    , m_searchEdit(new QLineEdit(this))
+    , m_searchPreviousButton(new QToolButton(this))
+    , m_searchNextButton(new QToolButton(this))
+    , m_searchCountLabel(new QLabel(this))
     , m_contentRow(new QWidget(this))
     , m_thumbnailPanel(new QWidget(this))
     , m_pageInfoRow(new QWidget(this))
@@ -70,6 +78,11 @@ PdfRenderer::PdfRenderer(QWidget* parent)
     m_pathValueLabel->setObjectName(QStringLiteral("PdfPathValue"));
     m_openWithButton->setObjectName(QStringLiteral("PdfOpenWithButton"));
     m_statusLabel->setObjectName(QStringLiteral("PdfStatus"));
+    m_searchRow->setObjectName(QStringLiteral("PdfSearchRow"));
+    m_searchEdit->setObjectName(QStringLiteral("PdfSearchEdit"));
+    m_searchPreviousButton->setObjectName(QStringLiteral("PdfSearchPreviousButton"));
+    m_searchNextButton->setObjectName(QStringLiteral("PdfSearchNextButton"));
+    m_searchCountLabel->setObjectName(QStringLiteral("PdfSearchCount"));
     m_contentRow->setObjectName(QStringLiteral("PdfContentRow"));
     m_thumbnailPanel->setObjectName(QStringLiteral("PdfThumbnailPanel"));
     m_pageInfoRow->setObjectName(QStringLiteral("PdfPageInfoRow"));
@@ -85,6 +98,7 @@ PdfRenderer::PdfRenderer(QWidget* parent)
     layout->setSpacing(14);
     layout->addWidget(m_headerRow);
     layout->addWidget(m_statusLabel);
+    layout->addWidget(m_searchRow);
     layout->addWidget(m_contentRow, 1);
 
     auto* headerLayout = new QHBoxLayout(m_headerRow);
@@ -122,6 +136,23 @@ PdfRenderer::PdfRenderer(QWidget* parent)
     });
     PreviewStateVisuals::prepareStatusLabel(m_statusLabel);
     m_statusLabel->hide();
+    auto* searchLayout = new QHBoxLayout(m_searchRow);
+    searchLayout->setContentsMargins(8, 4, 8, 4);
+    searchLayout->setSpacing(6);
+    m_searchEdit->setPlaceholderText(QCoreApplication::translate("SpaceLook", "Search PDF"));
+    m_searchEdit->setClearButtonEnabled(true);
+    m_searchEdit->setFixedWidth(190);
+    m_searchPreviousButton->setText(QStringLiteral("<"));
+    m_searchNextButton->setText(QStringLiteral(">"));
+    m_searchPreviousButton->setFixedSize(24, 24);
+    m_searchNextButton->setFixedSize(24, 24);
+    m_searchCountLabel->setMinimumWidth(46);
+    searchLayout->addWidget(m_searchEdit);
+    searchLayout->addWidget(m_searchPreviousButton);
+    searchLayout->addWidget(m_searchNextButton);
+    searchLayout->addWidget(m_searchCountLabel);
+    searchLayout->addStretch(1);
+    m_searchRow->hide();
     auto* contentLayout = new QHBoxLayout(m_contentRow);
     contentLayout->setContentsMargins(0, 0, 0, 0);
     contentLayout->setSpacing(12);
@@ -143,7 +174,7 @@ PdfRenderer::PdfRenderer(QWidget* parent)
     pageInfoLayout->addWidget(m_pageTotalLabel);
     m_thumbnailPanel->setFixedWidth(168);
     m_pageInfoLabel->setAlignment(Qt::AlignCenter);
-    m_pageInfoLabel->setText(QStringLiteral("Page"));
+    m_pageInfoLabel->setText(QCoreApplication::translate("SpaceLook", "Page"));
     m_pageInput->setRange(0, 0);
     m_pageInput->setButtonSymbols(QAbstractSpinBox::NoButtons);
     m_pageInput->setAlignment(Qt::AlignCenter);
@@ -191,6 +222,26 @@ PdfRenderer::PdfRenderer(QWidget* parent)
     connect(m_thumbnailRenderTimer, &QTimer::timeout, this, [this]() {
         renderNextThumbnail();
     });
+    connect(m_searchEdit, &QLineEdit::textChanged, this, [this]() {
+        findSearchMatch(false);
+    });
+    connect(m_searchEdit, &QLineEdit::returnPressed, this, [this]() {
+        findSearchMatch(false);
+    });
+    connect(m_searchPreviousButton, &QToolButton::clicked, this, [this]() {
+        findSearchMatch(true);
+    });
+    connect(m_searchNextButton, &QToolButton::clicked, this, [this]() {
+        findSearchMatch(false);
+    });
+    auto* findShortcut = new QShortcut(QKeySequence::Find, this);
+    findShortcut->setContext(Qt::WidgetWithChildrenShortcut);
+    connect(findShortcut, &QShortcut::activated, this, &PdfRenderer::showSearchRow);
+    auto* hideSearchShortcut = new QShortcut(QKeySequence(Qt::Key_Escape), m_searchRow);
+    hideSearchShortcut->setContext(Qt::WidgetWithChildrenShortcut);
+    connect(hideSearchShortcut, &QShortcut::activated, this, [this]() {
+        hideSearchRow(false);
+    });
 
     applyChrome();
 }
@@ -210,6 +261,12 @@ QWidget* PdfRenderer::widget()
     return this;
 }
 
+void PdfRenderer::warmUp()
+{
+    m_pdfView->winId();
+    m_previewHandlerHost->winId();
+}
+
 void PdfRenderer::setSummaryFallbackCallback(std::function<void(const HoveredItemInfo&, const QString&)> callback)
 {
     m_summaryFallbackCallback = std::move(callback);
@@ -218,23 +275,29 @@ void PdfRenderer::setSummaryFallbackCallback(std::function<void(const HoveredIte
 void PdfRenderer::load(const HoveredItemInfo& info)
 {
     m_info = info;
+    m_loadToken = m_loadGuard.begin(info.filePath);
     qDebug().noquote() << QStringLiteral("[SpaceLookRender] PdfRenderer load path=\"%1\"").arg(info.filePath);
 
-    m_titleLabel->setText(info.fileName.trimmed().isEmpty() ? QStringLiteral("PDF Preview") : info.fileName);
+    m_thumbnailRenderTimer->stop();
+    m_pendingThumbnailPages.clear();
+    m_renderedThumbnailPages.clear();
+    m_thumbnailList->clear();
+    m_previewHandlerHost->unload();
+    m_previewHandlerHost->hide();
+    m_pdfView->clearDocument();
+    m_document.unload();
+    updatePageInfo(-1, 0);
+    resetSearch();
+
+    m_titleLabel->setText(info.fileName.trimmed().isEmpty() ? QCoreApplication::translate("SpaceLook", "PDF Preview") : info.fileName);
     m_titleLabel->setCopyText(info.fileName.trimmed().isEmpty() ? m_titleLabel->text() : info.fileName);
     m_iconLabel->setPixmap(FileTypeIconResolver::pixmapForInfo(info, m_iconLabel->contentsRect().size()));
-    m_pathValueLabel->setText(info.filePath.trimmed().isEmpty() ? QStringLiteral("(Unavailable)") : info.filePath);
+    m_pathValueLabel->setText(info.filePath.trimmed().isEmpty() ? QCoreApplication::translate("SpaceLook", "(Unavailable)") : info.filePath);
     m_openWithButton->setTargetContext(info.filePath, info.typeKey);
+    hideSearchRow(true);
 
     if (isXpsPreviewFile(info.filePath)) {
-        showStatusMessage(QStringLiteral("Opening XPS document through Windows Preview Handler..."));
-        m_thumbnailRenderTimer->stop();
-        m_pendingThumbnailPages.clear();
-        m_renderedThumbnailPages.clear();
-        m_thumbnailList->clear();
-        updatePageInfo(-1, 0);
-        m_pdfView->clearDocument();
-        m_document.unload();
+        showStatusMessage(QCoreApplication::translate("SpaceLook", "Opening XPS document through Windows Preview Handler..."));
         m_thumbnailPanel->hide();
         m_pdfView->hide();
         m_previewHandlerHost->show();
@@ -242,7 +305,7 @@ void PdfRenderer::load(const HoveredItemInfo& info)
         QString errorMessage;
         if (!m_previewHandlerHost->openFile(info.filePath, &errorMessage)) {
             if (errorMessage.contains(QStringLiteral("No Windows Preview Handler"), Qt::CaseInsensitive)) {
-                errorMessage = QStringLiteral("No Windows XPS Preview Handler is registered. Install the Windows XPS Viewer optional feature, then try again.");
+                errorMessage = QCoreApplication::translate("SpaceLook", "No Windows XPS Preview Handler is registered. Install the Windows XPS Viewer optional feature, then try again.");
             }
             m_previewHandlerHost->hide();
             m_thumbnailPanel->hide();
@@ -252,12 +315,13 @@ void PdfRenderer::load(const HoveredItemInfo& info)
                 return;
             }
             showStatusMessage(errorMessage.isEmpty()
-                ? QStringLiteral("Failed to open the XPS document.")
+                ? QCoreApplication::translate("SpaceLook", "Failed to open the XPS document.")
                 : errorMessage);
             return;
         }
 
         showStatusMessage(QString());
+        resetSearch();
         return;
     }
 
@@ -266,14 +330,15 @@ void PdfRenderer::load(const HoveredItemInfo& info)
     m_thumbnailPanel->show();
     m_pdfView->show();
 
-    showStatusMessage(QStringLiteral("Opening PDF document..."));
+    showStatusMessage(QCoreApplication::translate("SpaceLook", "Opening PDF document..."));
     QString errorMessage;
     if (!m_document.load(info.filePath, &errorMessage)) {
         showStatusMessage(errorMessage.isEmpty()
-            ? QStringLiteral("Failed to open the PDF document.")
+            ? QCoreApplication::translate("SpaceLook", "Failed to open the PDF document.")
             : errorMessage);
         m_pdfView->clearDocument();
         rebuildThumbnails();
+        resetSearch();
         return;
     }
 
@@ -281,15 +346,21 @@ void PdfRenderer::load(const HoveredItemInfo& info)
         .arg(m_document.pageCount())
         .arg(info.filePath);
 
-    showStatusMessage(QStringLiteral("Rendering first PDF page..."));
+    showStatusMessage(QCoreApplication::translate("SpaceLook", "Rendering first PDF page..."));
     m_pdfView->setDocument(&m_document);
     rebuildThumbnails();
     updatePageInfo(0, m_document.pageCount());
+    resetSearch();
     showStatusMessage(QString());
 }
 
 void PdfRenderer::unload()
 {
+    m_loadGuard.cancel();
+    m_loadToken = PreviewLoadGuard::Token();
+    m_thumbnailRenderTimer->stop();
+    m_pendingThumbnailPages.clear();
+    m_renderedThumbnailPages.clear();
     m_pathValueLabel->clear();
     m_openWithButton->setTargetContext(QString(), QString());
     showStatusMessage(QString());
@@ -301,6 +372,7 @@ void PdfRenderer::unload()
     m_document.unload();
     rebuildThumbnails();
     updatePageInfo(-1, 0);
+    hideSearchRow(true);
     m_info = HoveredItemInfo();
 }
 
@@ -322,7 +394,11 @@ void PdfRenderer::rebuildThumbnails()
         item->setSizeHint(QSize(138, thumbHeight + 38));
     }
 
-    QTimer::singleShot(0, this, [this]() {
+    const PreviewLoadGuard::Token thumbnailToken = m_loadToken;
+    QTimer::singleShot(0, this, [this, thumbnailToken]() {
+        if (!m_loadGuard.isCurrent(thumbnailToken, m_info.filePath)) {
+            return;
+        }
         scheduleVisibleThumbnails();
     });
 }
@@ -370,7 +446,7 @@ QPixmap PdfRenderer::createThumbnailPlaceholder(int pageIndex) const
     painter.drawRect(pageRect.adjusted(0, 0, -1, -1));
 
     painter.setPen(QColor(QStringLiteral("#9badbf")));
-    painter.drawText(pageRect, Qt::AlignCenter, QStringLiteral("Page %1").arg(pageIndex + 1));
+    painter.drawText(pageRect, Qt::AlignCenter, QCoreApplication::translate("SpaceLook", "Page %1").arg(pageIndex + 1));
     return thumbnail;
 }
 
@@ -378,7 +454,7 @@ QPixmap PdfRenderer::renderThumbnailPixmap(int pageIndex) const
 {
     constexpr int thumbWidth = 112;
     constexpr int thumbHeight = 158;
-    if (!m_document.isLoaded() || pageIndex < 0 || pageIndex >= m_document.pageCount()) {
+    if (!isCurrentPdfLoad() || !m_document.isLoaded() || pageIndex < 0 || pageIndex >= m_document.pageCount()) {
         return createThumbnailPlaceholder(pageIndex);
     }
 
@@ -414,7 +490,8 @@ QPixmap PdfRenderer::renderThumbnailPixmap(int pageIndex) const
 
 void PdfRenderer::scheduleThumbnailPage(int pageIndex)
 {
-    if (!m_document.isLoaded() ||
+    if (!isCurrentPdfLoad() ||
+        !m_document.isLoaded() ||
         pageIndex < 0 ||
         pageIndex >= m_document.pageCount() ||
         m_renderedThumbnailPages.contains(pageIndex) ||
@@ -430,7 +507,7 @@ void PdfRenderer::scheduleThumbnailPage(int pageIndex)
 
 void PdfRenderer::scheduleVisibleThumbnails()
 {
-    if (!m_document.isLoaded() || m_thumbnailList->count() <= 0) {
+    if (!isCurrentPdfLoad() || !m_document.isLoaded() || m_thumbnailList->count() <= 0) {
         return;
     }
 
@@ -456,7 +533,7 @@ void PdfRenderer::scheduleVisibleThumbnails()
 
 void PdfRenderer::renderNextThumbnail()
 {
-    if (!m_document.isLoaded()) {
+    if (!isCurrentPdfLoad() || !m_document.isLoaded()) {
         m_thumbnailRenderTimer->stop();
         m_pendingThumbnailPages.clear();
         return;
@@ -476,12 +553,120 @@ void PdfRenderer::renderNextThumbnail()
         }
 
         item->setIcon(QIcon(renderThumbnailPixmap(pageIndex)));
+        if (!isCurrentPdfLoad()) {
+            return;
+        }
         m_renderedThumbnailPages.insert(pageIndex);
         break;
     }
 
     if (m_pendingThumbnailPages.isEmpty()) {
         m_thumbnailRenderTimer->stop();
+    }
+}
+
+bool PdfRenderer::isCurrentPdfLoad() const
+{
+    return m_loadGuard.isCurrent(m_loadToken, m_info.filePath);
+}
+
+void PdfRenderer::findSearchMatch(bool backwards)
+{
+    rebuildSearchMatches();
+    if (m_searchPageMatches.isEmpty()) {
+        updateSearchSummary();
+        return;
+    }
+
+    const int nextIndex = m_searchMatchIndex < 0
+        ? 0
+        : (backwards
+            ? (m_searchMatchIndex + m_searchPageMatches.size() - 1) % m_searchPageMatches.size()
+            : (m_searchMatchIndex + 1) % m_searchPageMatches.size());
+    m_searchMatchIndex = nextIndex;
+    m_pdfView->scrollToPage(m_searchPageMatches.at(m_searchMatchIndex));
+    updateSearchSummary();
+}
+
+void PdfRenderer::rebuildSearchMatches()
+{
+    const QString query = m_searchEdit ? m_searchEdit->text().trimmed() : QString();
+    if (query == m_lastSearchQuery && !m_searchPageMatches.isEmpty()) {
+        return;
+    }
+
+    m_lastSearchQuery = query;
+    m_searchPageMatches.clear();
+    m_searchMatchIndex = -1;
+    if (query.isEmpty() || !m_document.isLoaded()) {
+        return;
+    }
+
+    for (int pageIndex = 0; pageIndex < m_document.pageCount(); ++pageIndex) {
+        if (m_document.pageText(pageIndex).contains(query, Qt::CaseInsensitive)) {
+            m_searchPageMatches.append(pageIndex);
+        }
+    }
+}
+
+void PdfRenderer::updateSearchSummary()
+{
+    if (!m_searchCountLabel) {
+        return;
+    }
+
+    const QString query = m_searchEdit ? m_searchEdit->text() : QString();
+    if (query.trimmed().isEmpty()) {
+        m_searchCountLabel->clear();
+        return;
+    }
+
+    rebuildSearchMatches();
+    m_searchCountLabel->setText(m_searchPageMatches.isEmpty()
+        ? QStringLiteral("0/0")
+        : QStringLiteral("%1/%2").arg(m_searchMatchIndex >= 0 ? m_searchMatchIndex + 1 : 1).arg(m_searchPageMatches.size()));
+}
+
+void PdfRenderer::resetSearch()
+{
+    m_searchPageMatches.clear();
+    m_lastSearchQuery.clear();
+    m_searchMatchIndex = -1;
+    if (m_searchEdit && !m_searchEdit->text().trimmed().isEmpty()) {
+        findSearchMatch(false);
+        return;
+    }
+    if (m_searchCountLabel) {
+        m_searchCountLabel->clear();
+    }
+}
+
+void PdfRenderer::showSearchRow()
+{
+    if (!m_searchRow) {
+        return;
+    }
+
+    m_searchRow->show();
+    if (m_searchEdit) {
+        m_searchEdit->setFocus(Qt::ShortcutFocusReason);
+        m_searchEdit->selectAll();
+    }
+}
+
+void PdfRenderer::hideSearchRow(bool clearQuery)
+{
+    if (clearQuery && m_searchEdit) {
+        m_searchEdit->clear();
+    }
+    m_searchPageMatches.clear();
+    m_lastSearchQuery.clear();
+    m_searchMatchIndex = -1;
+    if (m_searchCountLabel) {
+        m_searchCountLabel->clear();
+    }
+    if (m_searchRow) {
+        m_searchRow->hide();
     }
 }
 
@@ -551,6 +736,29 @@ void PdfRenderer::applyChrome()
         "  border: 1px solid rgba(164, 193, 229, 0.95);"
         "  border-radius: 12px;"
         "  padding: 10px 14px;"
+        "}"
+        "#PdfSearchRow {"
+        "  background: rgba(238, 244, 252, 0.96);"
+        "  border: 1px solid rgba(193, 208, 224, 0.95);"
+        "  border-radius: 12px;"
+        "}"
+        "#PdfSearchEdit {"
+        "  color: #17324b;"
+        "  background: transparent;"
+        "  border: none;"
+        "  selection-background-color: #cfe3ff;"
+        "}"
+        "#PdfSearchPreviousButton, #PdfSearchNextButton {"
+        "  color: #17324b;"
+        "  background: transparent;"
+        "  border: none;"
+        "  border-radius: 8px;"
+        "}"
+        "#PdfSearchPreviousButton:hover, #PdfSearchNextButton:hover {"
+        "  background: rgba(215, 229, 246, 0.95);"
+        "}"
+        "#PdfSearchCount {"
+        "  color: #526b85;"
         "}"
         "#PdfContentRow {"
         "  background: transparent;"

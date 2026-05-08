@@ -1,4 +1,4 @@
-#include "renderers/ModeSwitchButton.h"
+﻿#include "renderers/ModeSwitchButton.h"
 
 #include <QAction>
 #include <QHBoxLayout>

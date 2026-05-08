@@ -1,6 +1,7 @@
-#include "renderers/welcome/WelcomeRenderer.h"
+﻿#include "renderers/welcome/WelcomeRenderer.h"
 
 #include <QGraphicsDropShadowEffect>
+#include <QCoreApplication>
 #include <QHBoxLayout>
 #include <QIcon>
 #include <QLabel>
@@ -121,9 +122,9 @@ WelcomeRenderer::WelcomeRenderer(QWidget* parent)
     m_heroLabel->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     m_chipRow->setFixedHeight(44);
     m_chipRow->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
-    m_titleLabel->setText(QStringLiteral("Welcome to SpaceLook"));
-    m_subtitleLabel->setText(QStringLiteral("Hover a file or folder and press Space to preview it instantly."));
-    m_exploreButton->setText(QStringLiteral("Explore"));
+    m_titleLabel->setText(QCoreApplication::translate("SpaceLook", "Welcome to SpaceLook"));
+    m_subtitleLabel->setText(QCoreApplication::translate("SpaceLook", "Hover a file or folder and press Space to preview it instantly."));
+    m_exploreButton->setText(QCoreApplication::translate("SpaceLook", "Explore"));
     m_exploreButton->setCursor(Qt::PointingHandCursor);
     m_exploreButton->setFixedSize(198, 44);
     connect(m_exploreButton, &QPushButton::clicked, this, [this]() {
@@ -132,9 +133,9 @@ WelcomeRenderer::WelcomeRenderer(QWidget* parent)
         }
     });
     m_hintLabel->setText(QStringLiteral(
-        "<a href=\"https://github.com/linuup\" style=\"color:#1680ff; text-decoration: underline;\">Learn more</a>"
+        "<a href=\"https://github.com/linuup\" style=\"color:#1680ff; text-decoration: underline;\">%3</a>"
         "  <a href=\"https://github.com/linuup\" style=\"color:#1680ff; text-decoration: none; font-family:'%1'; font-size:16px; font-weight:700;\">%2</a>")
-        .arg(FluentIconFont::family().toHtmlEscaped(), FluentIconFont::glyph(0xE72D)));
+        .arg(FluentIconFont::family().toHtmlEscaped(), FluentIconFont::glyph(0xE72D), QCoreApplication::translate("SpaceLook", "Learn more")));
     m_hintLabel->setTextFormat(Qt::RichText);
     m_hintLabel->setOpenExternalLinks(true);
     m_titleLabel->setAlignment(Qt::AlignCenter);
@@ -145,12 +146,12 @@ WelcomeRenderer::WelcomeRenderer(QWidget* parent)
 
     m_chipLayout->setContentsMargins(0, 0, 0, 0);
     m_chipLayout->setSpacing(14);
-    m_featureChips.append(createFeatureChip(QStringLiteral(":/SPACELOOK/welcome-icons/welcome-document.svg"), QStringLiteral("PDF"), m_chipTrack));
-    m_featureChips.append(createFeatureChip(QStringLiteral(":/SPACELOOK/welcome-icons/welcome-image.svg"), QStringLiteral("Images"), m_chipTrack));
-    m_featureChips.append(createFeatureChip(QStringLiteral(":/SPACELOOK/welcome-icons/welcome-code.svg"), QStringLiteral("Code"), m_chipTrack));
-    m_featureChips.append(createFeatureChip(QStringLiteral(":/SPACELOOK/welcome-icons/welcome-folder.svg"), QStringLiteral("Folders"), m_chipTrack));
-    m_featureChips.append(createFeatureChip(QStringLiteral(":/SPACELOOK/welcome-icons/welcome-archive.svg"), QStringLiteral("Archives"), m_chipTrack));
-    m_featureChips.append(createFeatureChip(QStringLiteral(":/SPACELOOK/welcome-icons/welcome-text.svg"), QStringLiteral("Text"), m_chipTrack));
+    m_featureChips.append(createFeatureChip(QStringLiteral(":/SPACELOOK/welcome-icons/welcome-document.svg"), QCoreApplication::translate("SpaceLook", "PDF"), m_chipTrack));
+    m_featureChips.append(createFeatureChip(QStringLiteral(":/SPACELOOK/welcome-icons/welcome-image.svg"), QCoreApplication::translate("SpaceLook", "Images"), m_chipTrack));
+    m_featureChips.append(createFeatureChip(QStringLiteral(":/SPACELOOK/welcome-icons/welcome-code.svg"), QCoreApplication::translate("SpaceLook", "Code"), m_chipTrack));
+    m_featureChips.append(createFeatureChip(QStringLiteral(":/SPACELOOK/welcome-icons/welcome-folder.svg"), QCoreApplication::translate("SpaceLook", "Folders"), m_chipTrack));
+    m_featureChips.append(createFeatureChip(QStringLiteral(":/SPACELOOK/welcome-icons/welcome-archive.svg"), QCoreApplication::translate("SpaceLook", "Archives"), m_chipTrack));
+    m_featureChips.append(createFeatureChip(QStringLiteral(":/SPACELOOK/welcome-icons/welcome-text.svg"), QCoreApplication::translate("SpaceLook", "Text"), m_chipTrack));
     relayoutFeatureChips();
 
     m_chipScrollTimer->setInterval(16);

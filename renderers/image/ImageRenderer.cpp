@@ -1,4 +1,4 @@
-#include "renderers/image/ImageRenderer.h"
+﻿#include "renderers/image/ImageRenderer.h"
 
 #include <QDebug>
 #include <QCoreApplication>
@@ -40,6 +40,7 @@
 #include <libheif/heif.h>
 #endif
 
+#include "core/PreviewFileReader.h"
 #include "renderers/FileTypeIconResolver.h"
 #include "renderers/OpenWithButton.h"
 #include "renderers/PreviewHeaderBar.h"
@@ -87,7 +88,14 @@ bool isAnimatedImageFile(const QString& filePath)
         return false;
     }
 
-    QImageReader reader(filePath);
+    QByteArray imageBytes;
+    if (!PreviewFileReader::readAll(filePath, &imageBytes)) {
+        return false;
+    }
+
+    QBuffer imageBuffer(&imageBytes);
+    imageBuffer.open(QIODevice::ReadOnly);
+    QImageReader reader(&imageBuffer, suffix.toLatin1());
     if (!reader.canRead()) {
         return false;
     }
@@ -329,20 +337,20 @@ ImageLoadResult loadImagePreviewContent(const QString& filePath,
 {
     ImageLoadResult result;
     if (previewCancellationRequested(cancelToken)) {
-        result.statusMessage = QStringLiteral("Image preview was canceled.");
+        result.statusMessage = QCoreApplication::translate("SpaceLook", "Image preview was canceled.");
         return result;
     }
 
     result.image = loader(filePath);
     if (previewCancellationRequested(cancelToken)) {
         result.image = QImage();
-        result.statusMessage = QStringLiteral("Image preview was canceled.");
+        result.statusMessage = QCoreApplication::translate("SpaceLook", "Image preview was canceled.");
         return result;
     }
 
     result.success = !result.image.isNull();
     if (!result.success) {
-        result.statusMessage = QStringLiteral("Failed to load the image.");
+        result.statusMessage = QCoreApplication::translate("SpaceLook", "Failed to load the image.");
     }
     return result;
 }
@@ -353,21 +361,21 @@ ImageLoadResult loadThumbnailPreviewContent(const QString& filePath,
 {
     ImageLoadResult result;
     if (previewCancellationRequested(cancelToken)) {
-        result.statusMessage = QStringLiteral("Thumbnail preview was canceled.");
+        result.statusMessage = QCoreApplication::translate("SpaceLook", "Thumbnail preview was canceled.");
         return result;
     }
 
     result.image = loader(filePath);
     if (previewCancellationRequested(cancelToken)) {
         result.image = QImage();
-        result.statusMessage = QStringLiteral("Thumbnail preview was canceled.");
+        result.statusMessage = QCoreApplication::translate("SpaceLook", "Thumbnail preview was canceled.");
         return result;
     }
 
     result.success = !result.image.isNull();
     result.finalImage = false;
     if (!result.success) {
-        result.statusMessage = QStringLiteral("Thumbnail preview is unavailable.");
+        result.statusMessage = QCoreApplication::translate("SpaceLook", "Thumbnail preview is unavailable.");
     }
     return result;
 }
@@ -549,10 +557,10 @@ void ImageRenderer::load(const HoveredItemInfo& info)
     const PreviewLoadGuard::Token loadToken = m_loadGuard.begin(info.filePath);
     notifyLoadingState(true);
     qDebug().noquote() << QStringLiteral("[SpaceLookRender] ImageRenderer load path=\"%1\"").arg(info.filePath);
-    m_titleLabel->setText(info.title.isEmpty() ? QStringLiteral("Image Preview") : info.title);
+    m_titleLabel->setText(info.title.isEmpty() ? QCoreApplication::translate("SpaceLook", "Image Preview") : info.title);
     m_titleLabel->setCopyText(m_titleLabel->text());
     m_iconLabel->setPixmap(FileTypeIconResolver::pixmapForInfo(info, m_iconLabel->contentsRect().size()));
-    m_pathValueLabel->setText(info.filePath.trimmed().isEmpty() ? QStringLiteral("(Unavailable)") : info.filePath);
+    m_pathValueLabel->setText(info.filePath.trimmed().isEmpty() ? QCoreApplication::translate("SpaceLook", "(Unavailable)") : info.filePath);
     m_openWithButton->setTargetContext(info.filePath, info.typeKey);
     clearAnimatedImage();
     m_originalPixmap = QPixmap();
@@ -560,8 +568,8 @@ void ImageRenderer::load(const HoveredItemInfo& info)
     m_zoomFactor = 1.0;
     m_isDragging = false;
     m_movieFrameSize = QSize();
-    m_imageLabel->setText(QStringLiteral("Loading image preview..."));
-    PreviewStateVisuals::showStatus(m_statusLabel, QStringLiteral("Loading image preview..."), PreviewStateVisuals::Kind::Loading);
+    m_imageLabel->setText(QCoreApplication::translate("SpaceLook", "Loading image preview..."));
+    PreviewStateVisuals::showStatus(m_statusLabel, QCoreApplication::translate("SpaceLook", "Loading image preview..."), PreviewStateVisuals::Kind::Loading);
     updateDragCursor();
 
     if (isAnimatedImageFile(info.filePath) && tryLoadAnimatedImage(info.filePath)) {
@@ -589,7 +597,7 @@ void ImageRenderer::load(const HoveredItemInfo& info)
             return;
         }
 
-        PreviewStateVisuals::showStatus(m_statusLabel, QStringLiteral("Thumbnail ready. Loading full image..."), PreviewStateVisuals::Kind::Loading);
+        PreviewStateVisuals::showStatus(m_statusLabel, QCoreApplication::translate("SpaceLook", "Thumbnail ready. Loading full image..."), PreviewStateVisuals::Kind::Loading);
         updatePixmapView();
         qDebug().noquote() << QStringLiteral("[SpaceLookRender] ImageRenderer thumbnail loaded size=%1x%2 path=\"%3\"")
             .arg(m_originalPixmap.width())
@@ -617,7 +625,7 @@ void ImageRenderer::load(const HoveredItemInfo& info)
             qDebug().noquote() << QStringLiteral("[SpaceLookRender] ImageRenderer failed to load: %1").arg(loadToken.path);
             if (m_originalPixmap.isNull()) {
                 PreviewStateVisuals::showStatus(m_statusLabel, result.statusMessage, PreviewStateVisuals::Kind::Error);
-                m_imageLabel->setText(QStringLiteral("Image preview is unavailable."));
+                m_imageLabel->setText(QCoreApplication::translate("SpaceLook", "Image preview is unavailable."));
             } else {
                 PreviewStateVisuals::showStatus(m_statusLabel, result.statusMessage, PreviewStateVisuals::Kind::Error);
             }
@@ -628,8 +636,8 @@ void ImageRenderer::load(const HoveredItemInfo& info)
         m_originalPixmap = QPixmap::fromImage(result.image);
         if (m_originalPixmap.isNull()) {
             if (m_originalPixmap.isNull()) {
-                PreviewStateVisuals::showStatus(m_statusLabel, QStringLiteral("Failed to load the image."), PreviewStateVisuals::Kind::Error);
-                m_imageLabel->setText(QStringLiteral("Image preview is unavailable."));
+                PreviewStateVisuals::showStatus(m_statusLabel, QCoreApplication::translate("SpaceLook", "Failed to load the image."), PreviewStateVisuals::Kind::Error);
+                m_imageLabel->setText(QCoreApplication::translate("SpaceLook", "Image preview is unavailable."));
             }
             notifyLoadingState(false);
             return;
@@ -689,16 +697,26 @@ QImage ImageRenderer::loadImageForPath(const QString& filePath, const PreviewCan
         return QImage();
     }
 
-    const QImage directImage(filePath);
-    if (!directImage.isNull()) {
-        return directImage;
+    QByteArray imageBytes;
+    if (PreviewFileReader::readAll(filePath, &imageBytes)) {
+        const QImage directImage = QImage::fromData(imageBytes, suffix.toLatin1().constData());
+        if (!directImage.isNull()) {
+            return directImage;
+        }
+
+        const QImage detectedImage = QImage::fromData(imageBytes);
+        if (!detectedImage.isNull()) {
+            qDebug().noquote() << QStringLiteral("[SpaceLookRender] Image format detected from content instead of suffix: %1")
+                .arg(filePath);
+            return detectedImage;
+        }
     }
 
     if (suffix == QStringLiteral("dib")) {
-        QFile dibFile(filePath);
-        if (dibFile.open(QIODevice::ReadOnly)) {
+        QByteArray dibBytes;
+        if (PreviewFileReader::readAll(filePath, &dibBytes)) {
             QImage dibImage;
-            if (dibImage.loadFromData(dibFile.readAll(), "BMP")) {
+            if (dibImage.loadFromData(dibBytes, "BMP")) {
                 return dibImage;
             }
         }
@@ -803,14 +821,14 @@ QImage ImageRenderer::loadAvifImageForPath(const QString& filePath, const Previe
 
 QImage ImageRenderer::loadDdsImageForPath(const QString& filePath) const
 {
-    QFile sourceFile(filePath);
-    if (!sourceFile.open(QIODevice::ReadOnly)) {
+    QString readError;
+    QByteArray data;
+    if (!PreviewFileReader::readAll(filePath, &data, &readError)) {
         qDebug().noquote() << QStringLiteral("[SpaceLookRender] DDS source open failed for: %1 error=\"%2\"")
-            .arg(filePath, sourceFile.errorString());
+            .arg(filePath, readError);
         return QImage();
     }
 
-    const QByteArray data = sourceFile.readAll();
     if (data.size() < 128 || data.left(4) != QByteArrayLiteral("DDS ")) {
         qDebug().noquote() << QStringLiteral("[SpaceLookRender] DDS header is invalid: %1").arg(filePath);
         return QImage();
@@ -877,14 +895,14 @@ QImage ImageRenderer::loadHeifImageForPath(const QString& filePath) const
 
     ensureLibheifInitialized();
 
-    QFile sourceFile(trimmedPath);
-    if (!sourceFile.open(QIODevice::ReadOnly)) {
+    QString heifReadError;
+    QByteArray fileBytes;
+    if (!PreviewFileReader::readAll(trimmedPath, &fileBytes, &heifReadError)) {
         qDebug().noquote() << QStringLiteral("[SpaceLookRender] HEIF source open failed for: %1 error=\"%2\"")
-            .arg(trimmedPath, sourceFile.errorString());
+            .arg(trimmedPath, heifReadError);
         return QImage();
     }
 
-    const QByteArray fileBytes = sourceFile.readAll();
     if (fileBytes.isEmpty()) {
         qDebug().noquote() << QStringLiteral("[SpaceLookRender] HEIF source read returned no bytes for: %1")
             .arg(trimmedPath);
@@ -1052,7 +1070,7 @@ QImage ImageRenderer::loadShellThumbnailForPath(const QString& filePath, int edg
     }
 
     IShellItemImageFactory* imageFactory = nullptr;
-    const std::wstring nativePath = trimmedPath.toStdWString();
+    const std::wstring nativePath = QDir::toNativeSeparators(trimmedPath).toStdWString();
     const HRESULT createHr = SHCreateItemFromParsingName(
         nativePath.c_str(),
         nullptr,
@@ -1083,7 +1101,18 @@ QImage ImageRenderer::loadShellThumbnailForPath(const QString& filePath, int edg
 
 bool ImageRenderer::tryLoadAnimatedImage(const QString& filePath)
 {
-    std::unique_ptr<QMovie> movie = std::make_unique<QMovie>(filePath);
+    QByteArray movieBytes;
+    if (!PreviewFileReader::readAll(filePath, &movieBytes)) {
+        qDebug().noquote() << QStringLiteral("[SpaceLookRender] Animated image source read failed path=\"%1\"")
+            .arg(filePath);
+        return false;
+    }
+
+    std::unique_ptr<QBuffer> movieBuffer = std::make_unique<QBuffer>();
+    movieBuffer->setData(movieBytes);
+    movieBuffer->open(QIODevice::ReadOnly);
+
+    std::unique_ptr<QMovie> movie = std::make_unique<QMovie>(movieBuffer.get(), QFileInfo(filePath).suffix().toLatin1());
     if (!movie || !movie->isValid()) {
         qDebug().noquote() << QStringLiteral("[SpaceLookRender] Animated image load failed path=\"%1\"")
             .arg(filePath);
@@ -1109,11 +1138,12 @@ bool ImageRenderer::tryLoadAnimatedImage(const QString& filePath)
     });
 
     m_movie = movie.release();
+    m_movieBuffer = movieBuffer.release();
     m_movieFrameSize = m_movie->currentPixmap().size();
     m_imageLabel->clear();
     m_imageLabel->setMovie(m_movie);
     m_hasHighResolutionImage = true;
-    PreviewStateVisuals::showStatus(m_statusLabel, QStringLiteral("Animated image ready"), PreviewStateVisuals::Kind::Success);
+    PreviewStateVisuals::showStatus(m_statusLabel, QCoreApplication::translate("SpaceLook", "Animated image ready"), PreviewStateVisuals::Kind::Success);
     m_movie->start();
     updateMovieView();
 
@@ -1124,14 +1154,20 @@ bool ImageRenderer::tryLoadAnimatedImage(const QString& filePath)
 
 void ImageRenderer::clearAnimatedImage()
 {
-    if (!m_movie) {
+    if (!m_movie && !m_movieBuffer) {
         return;
     }
 
-    m_imageLabel->setMovie(nullptr);
-    m_movie->stop();
-    m_movie->deleteLater();
-    m_movie = nullptr;
+    if (m_movie) {
+        m_imageLabel->setMovie(nullptr);
+        m_movie->stop();
+        m_movie->deleteLater();
+        m_movie = nullptr;
+    }
+    if (m_movieBuffer) {
+        m_movieBuffer->deleteLater();
+        m_movieBuffer = nullptr;
+    }
     m_movieFrameSize = QSize();
 }
 

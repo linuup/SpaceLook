@@ -1,9 +1,10 @@
-#include "renderers/certificate/CertificateRenderer.h"
+﻿#include "renderers/certificate/CertificateRenderer.h"
 
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif
 #include <windows.h>
+#include <QCoreApplication>
 #include <wincrypt.h>
 
 #include <QDateTime>
@@ -24,6 +25,7 @@
 #include <QToolButton>
 #include <QVBoxLayout>
 
+#include "core/PreviewFileReader.h"
 #include "renderers/FileTypeIconResolver.h"
 #include "renderers/OpenWithButton.h"
 #include "renderers/PreviewHeaderBar.h"
@@ -60,7 +62,7 @@ QString formatSystemTime(const FILETIME& fileTime)
     SYSTEMTIME localTime = {};
     if (!FileTimeToSystemTime(&fileTime, &utcTime) ||
         !SystemTimeToTzSpecificLocalTime(nullptr, &utcTime, &localTime)) {
-        return QStringLiteral("Unavailable");
+        return QCoreApplication::translate("SpaceLook", "Unavailable");
     }
 
     const QDate date(localTime.wYear, localTime.wMonth, localTime.wDay);
@@ -110,7 +112,7 @@ QString lastWindowsError()
 {
     const DWORD errorCode = GetLastError();
     if (!errorCode) {
-        return QStringLiteral("Unknown error.");
+        return QCoreApplication::translate("SpaceLook", "Unknown error.");
     }
 
     wchar_t* messageBuffer = nullptr;
@@ -125,7 +127,7 @@ QString lastWindowsError()
 
     QString message = size > 0 && messageBuffer
         ? QString::fromWCharArray(messageBuffer).trimmed()
-        : QStringLiteral("Windows error %1").arg(errorCode);
+        : QCoreApplication::translate("SpaceLook", "Windows error %1").arg(errorCode);
     if (messageBuffer) {
         LocalFree(messageBuffer);
     }
@@ -210,7 +212,7 @@ CertificateRenderer::CertificateRenderer(QWidget* parent)
     m_statusLabel->setTextInteractionFlags(Qt::TextSelectableByMouse);
     PreviewStateVisuals::prepareStatusLabel(m_statusLabel);
     m_statusLabel->hide();
-    m_unlockButton->setText(QStringLiteral("Unlock with password"));
+    m_unlockButton->setText(QCoreApplication::translate("SpaceLook", "Unlock with password"));
     m_unlockButton->setCursor(Qt::PointingHandCursor);
     m_unlockButton->hide();
 
@@ -257,10 +259,14 @@ void CertificateRenderer::load(const HoveredItemInfo& info)
     m_info = info;
     qDebug().noquote() << QStringLiteral("[SpaceLookRender] CertificateRenderer load path=\"%1\"").arg(info.filePath);
 
-    m_titleLabel->setText(info.fileName.trimmed().isEmpty() ? QStringLiteral("Certificate Preview") : info.fileName);
+    showStatusMessage(QString());
+    m_unlockButton->hide();
+    populateDetails({});
+
+    m_titleLabel->setText(info.fileName.trimmed().isEmpty() ? QCoreApplication::translate("SpaceLook", "Certificate Preview") : info.fileName);
     m_titleLabel->setCopyText(m_titleLabel->text());
     m_iconLabel->setPixmap(FileTypeIconResolver::pixmapForInfo(info, m_iconLabel->contentsRect().size()));
-    m_pathValueLabel->setText(info.filePath.trimmed().isEmpty() ? QStringLiteral("(Unavailable)") : info.filePath);
+    m_pathValueLabel->setText(info.filePath.trimmed().isEmpty() ? QCoreApplication::translate("SpaceLook", "(Unavailable)") : info.filePath);
     m_openWithButton->setTargetContext(info.filePath, info.typeKey);
     updateUnlockButtonVisibility();
 
@@ -317,29 +323,27 @@ QVector<CertificateRenderer::Detail> CertificateRenderer::inspectCertificateFile
     QVector<Detail> details;
     const QFileInfo fileInfo(info.filePath);
     const QString suffix = fileInfo.suffix().toLower();
-    details.append({QStringLiteral("Format"), suffix.isEmpty() ? QStringLiteral("Certificate or key file") : suffix.toUpper()});
-    details.append({QStringLiteral("Size"), QStringLiteral("%1 bytes").arg(fileInfo.size())});
+    details.append({QCoreApplication::translate("SpaceLook", "Format"), suffix.isEmpty() ? QCoreApplication::translate("SpaceLook", "Certificate or key file") : suffix.toUpper()});
+    details.append({QCoreApplication::translate("SpaceLook", "Size"), QCoreApplication::translate("SpaceLook", "%1 bytes").arg(fileInfo.size())});
 
-    QFile file(info.filePath);
-    if (!file.open(QIODevice::ReadOnly)) {
+    QByteArray data;
+    if (!PreviewFileReader::readAll(info.filePath, &data)) {
         if (statusMessage) {
-            *statusMessage = QStringLiteral("Failed to open certificate file for reading.");
+            *statusMessage = QCoreApplication::translate("SpaceLook", "Failed to open certificate file for reading.");
         }
         return details;
     }
-    const QByteArray data = file.readAll();
-    file.close();
 
     if (suffix == QStringLiteral("pfx") || suffix == QStringLiteral("p12")) {
         CRYPT_DATA_BLOB blob;
         blob.cbData = static_cast<DWORD>(data.size());
         blob.pbData = reinterpret_cast<BYTE*>(const_cast<char*>(data.constData()));
-        details.append({QStringLiteral("Container"), QStringLiteral("PKCS#12 certificate bundle")});
-        details.append({QStringLiteral("Password status"), PFXIsPFXBlob(&blob)
-            ? (PFXVerifyPassword(&blob, L"", 0) ? QStringLiteral("No password or empty password") : QStringLiteral("Password protected"))
-            : QStringLiteral("Invalid PKCS#12 data")});
+        details.append({QCoreApplication::translate("SpaceLook", "Container"), QCoreApplication::translate("SpaceLook", "PKCS#12 certificate bundle")});
+        details.append({QCoreApplication::translate("SpaceLook", "Password status"), PFXIsPFXBlob(&blob)
+            ? (PFXVerifyPassword(&blob, L"", 0) ? QCoreApplication::translate("SpaceLook", "No password or empty password") : QCoreApplication::translate("SpaceLook", "Password protected"))
+            : QCoreApplication::translate("SpaceLook", "Invalid PKCS#12 data")});
         if (statusMessage) {
-            *statusMessage = QStringLiteral("PKCS#12 files can contain private keys. SpaceLook shows container metadata only.");
+            *statusMessage = QCoreApplication::translate("SpaceLook", "PKCS#12 files can contain private keys. SpaceLook shows container metadata only.");
         }
         return details;
     }
@@ -350,20 +354,20 @@ QVector<CertificateRenderer::Detail> CertificateRenderer::inspectCertificateFile
         suffix == QStringLiteral("gpg")) {
         const QString firstLine = firstNonEmptyLine(data.left(8192));
         const QString lowerText = QString::fromUtf8(data.left(8192)).toLower();
-        QString kind = QStringLiteral("Key or signature material");
+        QString kind = QCoreApplication::translate("SpaceLook", "Key or signature material");
         if (lowerText.contains(QStringLiteral("private key"))) {
-            kind = QStringLiteral("Private key");
+            kind = QCoreApplication::translate("SpaceLook", "Private key");
         } else if (lowerText.contains(QStringLiteral("public key")) || suffix == QStringLiteral("pub")) {
-            kind = QStringLiteral("Public key");
+            kind = QCoreApplication::translate("SpaceLook", "Public key");
         } else if (lowerText.contains(QStringLiteral("pgp"))) {
-            kind = QStringLiteral("OpenPGP armored data");
+            kind = QCoreApplication::translate("SpaceLook", "OpenPGP armored data");
         } else if (suffix == QStringLiteral("gpg")) {
-            kind = QStringLiteral("OpenPGP binary data");
+            kind = QCoreApplication::translate("SpaceLook", "OpenPGP binary data");
         }
-        details.append({QStringLiteral("Detected kind"), kind});
-        details.append({QStringLiteral("Header"), displayValue(firstLine)});
+        details.append({QCoreApplication::translate("SpaceLook", "Detected kind"), kind});
+        details.append({QCoreApplication::translate("SpaceLook", "Header"), displayValue(firstLine)});
         if (statusMessage) {
-            *statusMessage = QStringLiteral("Sensitive key contents are not rendered directly. Use Open with to inspect the full file.");
+            *statusMessage = QCoreApplication::translate("SpaceLook", "Sensitive key contents are not rendered directly. Use Open with to inspect the full file.");
         }
         return details;
     }
@@ -417,7 +421,7 @@ QVector<CertificateRenderer::Detail> CertificateRenderer::inspectCertificateFile
             CertCloseStore(store, 0);
         }
         if (statusMessage) {
-            *statusMessage = QStringLiteral("Certificate metadata could not be parsed: %1").arg(lastWindowsError());
+            *statusMessage = QCoreApplication::translate("SpaceLook", "Certificate metadata could not be parsed: %1").arg(lastWindowsError());
         }
         return details;
     }
@@ -436,7 +440,7 @@ QVector<CertificateRenderer::Detail> CertificateRenderer::inspectCertificateFile
     }
 
     if (statusMessage) {
-        *statusMessage = QStringLiteral("Certificate metadata loaded.");
+        *statusMessage = QCoreApplication::translate("SpaceLook", "Certificate metadata loaded.");
     }
     return details;
 }
@@ -450,23 +454,23 @@ void CertificateRenderer::appendCertificateContextDetails(QVector<Detail>* detai
     }
 
     const QString labelPrefix = prefix.trimmed().isEmpty() ? QString() : prefix.trimmed() + QStringLiteral(" ");
-    details->append({labelPrefix + QStringLiteral("Detected kind"), QStringLiteral("X.509 certificate")});
-    details->append({labelPrefix + QStringLiteral("Subject"), certName(certContext, 0)});
-    details->append({labelPrefix + QStringLiteral("Issuer"), certName(certContext, CERT_NAME_ISSUER_FLAG)});
-    details->append({labelPrefix + QStringLiteral("Valid from"), formatSystemTime(certContext->pCertInfo->NotBefore)});
-    details->append({labelPrefix + QStringLiteral("Valid until"), formatSystemTime(certContext->pCertInfo->NotAfter)});
-    details->append({labelPrefix + QStringLiteral("Serial number"), formatBytes(QByteArray(
+    details->append({labelPrefix + QCoreApplication::translate("SpaceLook", "Detected kind"), QCoreApplication::translate("SpaceLook", "X.509 certificate")});
+    details->append({labelPrefix + QCoreApplication::translate("SpaceLook", "Subject"), certName(certContext, 0)});
+    details->append({labelPrefix + QCoreApplication::translate("SpaceLook", "Issuer"), certName(certContext, CERT_NAME_ISSUER_FLAG)});
+    details->append({labelPrefix + QCoreApplication::translate("SpaceLook", "Valid from"), formatSystemTime(certContext->pCertInfo->NotBefore)});
+    details->append({labelPrefix + QCoreApplication::translate("SpaceLook", "Valid until"), formatSystemTime(certContext->pCertInfo->NotAfter)});
+    details->append({labelPrefix + QCoreApplication::translate("SpaceLook", "Serial number"), formatBytes(QByteArray(
         reinterpret_cast<const char*>(certContext->pCertInfo->SerialNumber.pbData),
         static_cast<int>(certContext->pCertInfo->SerialNumber.cbData)), true)});
-    details->append({labelPrefix + QStringLiteral("Signature algorithm"), oidName(certContext->pCertInfo->SignatureAlgorithm.pszObjId)});
-    details->append({labelPrefix + QStringLiteral("Public key algorithm"), oidName(certContext->pCertInfo->SubjectPublicKeyInfo.Algorithm.pszObjId)});
+    details->append({labelPrefix + QCoreApplication::translate("SpaceLook", "Signature algorithm"), oidName(certContext->pCertInfo->SignatureAlgorithm.pszObjId)});
+    details->append({labelPrefix + QCoreApplication::translate("SpaceLook", "Public key algorithm"), oidName(certContext->pCertInfo->SubjectPublicKeyInfo.Algorithm.pszObjId)});
 
     DWORD hashSize = 0;
     if (CertGetCertificateContextProperty(certContext, CERT_HASH_PROP_ID, nullptr, &hashSize) && hashSize > 0) {
         QByteArray hash;
         hash.resize(static_cast<int>(hashSize));
         if (CertGetCertificateContextProperty(certContext, CERT_HASH_PROP_ID, hash.data(), &hashSize)) {
-            details->append({labelPrefix + QStringLiteral("SHA1 thumbprint"), formatBytes(hash)});
+            details->append({labelPrefix + QCoreApplication::translate("SpaceLook", "SHA1 thumbprint"), formatBytes(hash)});
         }
     }
 
@@ -476,9 +480,9 @@ void CertificateRenderer::appendCertificateContextDetails(QVector<Detail>* detai
         CERT_KEY_PROV_INFO_PROP_ID,
         nullptr,
         &keyInfoSize);
-    details->append({labelPrefix + QStringLiteral("Private key"), hasPrivateKeyInfo
-        ? QStringLiteral("Present in unlocked container")
-        : QStringLiteral("Not exposed by this certificate context")});
+    details->append({labelPrefix + QCoreApplication::translate("SpaceLook", "Private key"), hasPrivateKeyInfo
+        ? QCoreApplication::translate("SpaceLook", "Present in unlocked container")
+        : QCoreApplication::translate("SpaceLook", "Not exposed by this certificate context")});
 }
 
 QVector<CertificateRenderer::Detail> CertificateRenderer::inspectPkcs12File(const QString& filePath,
@@ -487,26 +491,23 @@ QVector<CertificateRenderer::Detail> CertificateRenderer::inspectPkcs12File(cons
 {
     QVector<Detail> details;
     const QFileInfo fileInfo(filePath);
-    details.append({QStringLiteral("Format"), fileInfo.suffix().toUpper()});
-    details.append({QStringLiteral("Container"), QStringLiteral("PKCS#12 certificate bundle")});
+    details.append({QCoreApplication::translate("SpaceLook", "Format"), fileInfo.suffix().toUpper()});
+    details.append({QCoreApplication::translate("SpaceLook", "Container"), QCoreApplication::translate("SpaceLook", "PKCS#12 certificate bundle")});
 
-    QFile file(filePath);
-    if (!file.open(QIODevice::ReadOnly)) {
+    QByteArray data;
+    if (!PreviewFileReader::readAll(filePath, &data)) {
         if (statusMessage) {
-            *statusMessage = QStringLiteral("Failed to open PKCS#12 file for reading.");
+            *statusMessage = QCoreApplication::translate("SpaceLook", "Failed to open PKCS#12 file for reading.");
         }
         return details;
     }
-
-    const QByteArray data = file.readAll();
-    file.close();
 
     CRYPT_DATA_BLOB blob;
     blob.cbData = static_cast<DWORD>(data.size());
     blob.pbData = reinterpret_cast<BYTE*>(const_cast<char*>(data.constData()));
     if (!PFXIsPFXBlob(&blob)) {
         if (statusMessage) {
-            *statusMessage = QStringLiteral("This file is not a valid PKCS#12 container.");
+            *statusMessage = QCoreApplication::translate("SpaceLook", "This file is not a valid PKCS#12 container.");
         }
         return details;
     }
@@ -514,7 +515,7 @@ QVector<CertificateRenderer::Detail> CertificateRenderer::inspectPkcs12File(cons
     const std::wstring nativePassword = password.toStdWString();
     if (!PFXVerifyPassword(&blob, nativePassword.c_str(), 0)) {
         if (statusMessage) {
-            *statusMessage = QStringLiteral("PKCS#12 password is incorrect or unsupported: %1").arg(lastWindowsError());
+            *statusMessage = QCoreApplication::translate("SpaceLook", "PKCS#12 password is incorrect or unsupported: %1").arg(lastWindowsError());
         }
         return details;
     }
@@ -525,7 +526,7 @@ QVector<CertificateRenderer::Detail> CertificateRenderer::inspectPkcs12File(cons
         PKCS12_NO_PERSIST_KEY | PKCS12_PREFER_CNG_KSP);
     if (!store) {
         if (statusMessage) {
-            *statusMessage = QStringLiteral("Failed to unlock PKCS#12 container: %1").arg(lastWindowsError());
+            *statusMessage = QCoreApplication::translate("SpaceLook", "Failed to unlock PKCS#12 container: %1").arg(lastWindowsError());
         }
         return details;
     }
@@ -537,14 +538,14 @@ QVector<CertificateRenderer::Detail> CertificateRenderer::inspectPkcs12File(cons
         appendCertificateContextDetails(
             &details,
             certContext,
-            QStringLiteral("Certificate %1").arg(certificateIndex));
+            QCoreApplication::translate("SpaceLook", "Certificate %1").arg(certificateIndex));
     }
 
     CertCloseStore(store, 0);
     if (statusMessage) {
         *statusMessage = certificateIndex > 0
-            ? QStringLiteral("PKCS#12 container unlocked in memory. No certificate or key was written to the system store.")
-            : QStringLiteral("PKCS#12 container unlocked, but no certificate entry was found.");
+            ? QCoreApplication::translate("SpaceLook", "PKCS#12 container unlocked in memory. No certificate or key was written to the system store.")
+            : QCoreApplication::translate("SpaceLook", "PKCS#12 container unlocked, but no certificate entry was found.");
     }
     return details;
 }
@@ -560,15 +561,15 @@ void CertificateRenderer::unlockCurrentFile()
 {
     const QString filePath = m_info.filePath.trimmed();
     if (filePath.isEmpty()) {
-        showStatusMessage(QStringLiteral("No PKCS#12 file is loaded."));
+        showStatusMessage(QCoreApplication::translate("SpaceLook", "No PKCS#12 file is loaded."));
         return;
     }
 
     bool accepted = false;
     const QString password = QInputDialog::getText(
         this,
-        QStringLiteral("Unlock PKCS#12"),
-        QStringLiteral("Enter certificate password"),
+        QCoreApplication::translate("SpaceLook", "Unlock PKCS#12"),
+        QCoreApplication::translate("SpaceLook", "Enter certificate password"),
         QLineEdit::Password,
         QString(),
         &accepted);

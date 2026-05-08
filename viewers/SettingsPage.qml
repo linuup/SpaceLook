@@ -14,9 +14,18 @@ Rectangle {
     property int activeNavIndex: 0
     property int selectedRenderTypeIndex: -1
     property var renderTypeEntries: []
-    property string displayFontFamily: "Segoe UI Rounded"
-    property string textFontFamily: "Segoe UI Rounded"
-    property string bodyFontFamily: "Segoe UI Rounded"
+    property var filteredRenderTypeEntries: []
+    property string renderTypeFilter: ""
+    property bool loadingRenderTypeEditor: false
+    property bool wideLayout: width >= 860
+    property bool roomyFileTypeLayout: width >= 980
+    property int pageMargin: width >= 760 ? 14 : 8
+    property string displayFontFamily: "Segoe UI Variable"
+    property string textFontFamily: "Segoe UI"
+    property string bodyFontFamily: "Segoe UI"
+    property int displayFontWeight: Font.DemiBold
+    property int labelFontWeight: Font.Medium
+    property int bodyFontWeight: Font.Normal
     property string iconFontFamily: iconFontLoader.status === FontLoader.Ready
                                     ? iconFontLoader.name
                                     : "Segoe Fluent Icons"
@@ -52,6 +61,7 @@ Rectangle {
         property bool showMenuExpand: true
         property bool showMenuClose: true
         property bool showMenuMore: true
+        property string language: "en"
     }
 
     QtObject {
@@ -74,22 +84,22 @@ Rectangle {
 
     function navText(index) {
         if (index === 0) {
-            return "General"
+            return qsTr("General")
         }
         if (index === 1) {
-            return "Toolbar"
+            return qsTr("Toolbar")
         }
-        return "File Types"
+        return qsTr("File Types")
     }
 
     function navSubtitle(index) {
         if (index === 0) {
-            return "Startup and window behavior"
+            return qsTr("Startup and window behavior")
         }
         if (index === 1) {
-            return "Preview menu appearance"
+            return qsTr("Preview menu appearance")
         }
-        return "Renderer mapping rules"
+        return qsTr("Renderer mapping rules")
     }
 
     function navGlyph(index) {
@@ -152,6 +162,58 @@ Rectangle {
         }
     }
 
+    function suffixArray(text) {
+        var parts = (text || "").split(/[\s,;]+/)
+        var output = []
+        var seen = {}
+        for (var index = 0; index < parts.length; ++index) {
+            var suffix = normalizeSuffixToken(parts[index])
+            if (suffix.length > 0 && !seen[suffix]) {
+                seen[suffix] = true
+                output.push(suffix)
+            }
+        }
+        return output
+    }
+
+    function normalizeSuffixToken(text) {
+        var suffix = (text || "").trim().toLowerCase()
+        while (suffix.charAt(0) === ".") {
+            suffix = suffix.substring(1)
+        }
+        return suffix
+    }
+
+    function normalizeSuffixText(text) {
+        return suffixArray(text).join(", ")
+    }
+
+    function suffixCountText(text) {
+        var count = suffixArray(text).length
+        return count === 1 ? "1 suffix" : count + " suffixes"
+    }
+
+    function renderTypeMatchesFilter(entry) {
+        var filter = renderTypeFilter.trim().toLowerCase()
+        if (filter.length === 0) {
+            return true
+        }
+        var haystack = ((entry.key || "") + " " + (entry.name || "") + " " + (entry.typeKey || "") + " " + (entry.typeDetails || "") + " " + (entry.suffixes || "")).toLowerCase()
+        return haystack.indexOf(filter) >= 0
+    }
+
+    function rebuildFilteredRenderTypeEntries() {
+        var visibleEntries = []
+        for (var index = 0; index < renderTypeEntries.length; ++index) {
+            if (renderTypeMatchesFilter(renderTypeEntries[index])) {
+                var copied = copyRenderTypeEntry(renderTypeEntries[index])
+                copied.sourceIndex = index
+                visibleEntries.push(copied)
+            }
+        }
+        filteredRenderTypeEntries = visibleEntries
+    }
+
     function reloadRenderTypeEntries() {
         if (!resolvedRenderTypeSettings) {
             return
@@ -164,6 +226,7 @@ Rectangle {
         }
         renderTypeEntries = loadedEntries
         selectedRenderTypeIndex = renderTypeEntries.length > 0 ? 0 : -1
+        rebuildFilteredRenderTypeEntries()
         loadSelectedRenderTypeEntry()
     }
 
@@ -183,6 +246,7 @@ Rectangle {
         if (selectedRenderTypeIndex < 0 && renderTypeEntries.length > 0) {
             selectedRenderTypeIndex = 0
         }
+        rebuildFilteredRenderTypeEntries()
         loadSelectedRenderTypeEntry()
     }
 
@@ -190,12 +254,14 @@ Rectangle {
         if (!renderTypeKeyField) {
             return
         }
+        loadingRenderTypeEditor = true
         if (selectedRenderTypeIndex < 0 || selectedRenderTypeIndex >= renderTypeEntries.length) {
             renderTypeKeyField.text = ""
             renderTypeNameField.text = ""
             renderTypeTypeKeyField.text = ""
             renderTypeDetailsField.text = ""
             renderTypeSuffixesField.text = ""
+            loadingRenderTypeEditor = false
             return
         }
 
@@ -205,9 +271,13 @@ Rectangle {
         renderTypeTypeKeyField.text = entry.typeKey || ""
         renderTypeDetailsField.text = entry.typeDetails || ""
         renderTypeSuffixesField.text = entry.suffixes || ""
+        loadingRenderTypeEditor = false
     }
 
     function applyRenderTypeEditor() {
+        if (loadingRenderTypeEditor) {
+            return
+        }
         if (selectedRenderTypeIndex < 0 || selectedRenderTypeIndex >= renderTypeEntries.length) {
             return
         }
@@ -218,9 +288,10 @@ Rectangle {
             name: renderTypeNameField.text.trim(),
             typeKey: renderTypeTypeKeyField.text.trim(),
             typeDetails: renderTypeDetailsField.text.trim(),
-            suffixes: renderTypeSuffixesField.text.trim()
+            suffixes: normalizeSuffixText(renderTypeSuffixesField.text)
         }
         renderTypeEntries = nextEntries
+        rebuildFilteredRenderTypeEntries()
     }
 
     function selectRenderTypeEntry(index) {
@@ -241,6 +312,7 @@ Rectangle {
         })
         renderTypeEntries = nextEntries
         selectedRenderTypeIndex = renderTypeEntries.length - 1
+        rebuildFilteredRenderTypeEntries()
         loadSelectedRenderTypeEntry()
     }
 
@@ -252,7 +324,40 @@ Rectangle {
         nextEntries.splice(selectedRenderTypeIndex, 1)
         renderTypeEntries = nextEntries
         selectedRenderTypeIndex = Math.min(selectedRenderTypeIndex, renderTypeEntries.length - 1)
+        rebuildFilteredRenderTypeEntries()
         loadSelectedRenderTypeEntry()
+    }
+
+    function addRenderTypeSuffix(text) {
+        if (!renderTypeSuffixesField) {
+            return
+        }
+        var suffix = normalizeSuffixToken(text)
+        if (suffix.length === 0) {
+            return
+        }
+        var values = suffixArray(renderTypeSuffixesField.text)
+        for (var index = 0; index < values.length; ++index) {
+            if (values[index] === suffix) {
+                return
+            }
+        }
+        values.push(suffix)
+        renderTypeSuffixesField.text = values.join(", ")
+        applyRenderTypeEditor()
+    }
+
+    function removeRenderTypeSuffixAt(index) {
+        if (!renderTypeSuffixesField) {
+            return
+        }
+        var values = suffixArray(renderTypeSuffixesField.text)
+        if (index < 0 || index >= values.length) {
+            return
+        }
+        values.splice(index, 1)
+        renderTypeSuffixesField.text = values.join(", ")
+        applyRenderTypeEditor()
     }
 
     function saveRenderTypeEntries() {
@@ -375,7 +480,7 @@ Rectangle {
                     color: root.inkColor
                     font.family: root.textFontFamily
                     font.pixelSize: 14
-                    font.weight: Font.DemiBold
+                    font.weight: root.labelFontWeight
                     elide: Text.ElideRight
                     renderType: Text.NativeRendering
                 }
@@ -386,6 +491,7 @@ Rectangle {
                     color: root.mutedInkColor
                     font.family: root.bodyFontFamily
                     font.pixelSize: 11
+                    font.weight: root.bodyFontWeight
                     elide: Text.ElideRight
                     renderType: Text.NativeRendering
                 }
@@ -456,7 +562,7 @@ Rectangle {
                 color: root.inkColor
                 font.family: root.displayFontFamily
                 font.pixelSize: 22
-                font.weight: Font.DemiBold
+                font.weight: root.displayFontWeight
                 elide: Text.ElideRight
                 renderType: Text.NativeRendering
             }
@@ -467,6 +573,7 @@ Rectangle {
                 color: root.mutedInkColor
                 font.family: root.bodyFontFamily
                 font.pixelSize: 12
+                font.weight: root.bodyFontWeight
                 wrapMode: Text.Wrap
                 renderType: Text.NativeRendering
             }
@@ -504,7 +611,7 @@ Rectangle {
                 color: root.inkColor
                 font.family: root.textFontFamily
                 font.pixelSize: 15
-                font.weight: Font.DemiBold
+                font.weight: root.labelFontWeight
                 elide: Text.ElideRight
                 renderType: Text.NativeRendering
             }
@@ -515,6 +622,7 @@ Rectangle {
                 color: root.mutedInkColor
                 font.family: root.bodyFontFamily
                 font.pixelSize: 12
+                font.weight: root.bodyFontWeight
                 wrapMode: Text.Wrap
                 maximumLineCount: 2
                 elide: Text.ElideRight
@@ -609,7 +717,7 @@ Rectangle {
                 color: root.inkColor
                 font.family: root.textFontFamily
                 font.pixelSize: 13
-                font.weight: Font.DemiBold
+                font.weight: root.labelFontWeight
                 elide: Text.ElideRight
                 renderType: Text.NativeRendering
             }
@@ -701,7 +809,7 @@ Rectangle {
                 color: resolvedUiSettings.menuPlacement === placementOptionButton.placementValue ? root.accentColor : root.inkColor
                 font.family: root.textFontFamily
                 font.pixelSize: 13
-                font.weight: Font.DemiBold
+                font.weight: root.labelFontWeight
                 horizontalAlignment: Text.AlignHCenter
                 verticalAlignment: Text.AlignVCenter
                 renderType: Text.NativeRendering
@@ -781,19 +889,20 @@ Rectangle {
                     spacing: 0
 
                     Text {
-                        text: "Settings"
+                        text: qsTr("Settings")
                         color: root.inkColor
                         font.family: root.displayFontFamily
                         font.pixelSize: 17
-                        font.weight: Font.DemiBold
+                        font.weight: root.displayFontWeight
                         renderType: Text.NativeRendering
                     }
 
                     Text {
-                        text: "SpaceLook preview preferences"
+                        text: qsTr("SpaceLook preview preferences")
                         color: root.mutedInkColor
                         font.family: root.bodyFontFamily
                         font.pixelSize: 11
+                        font.weight: root.bodyFontWeight
                         renderType: Text.NativeRendering
                     }
                 }
@@ -813,26 +922,27 @@ Rectangle {
             }
         }
 
-        RowLayout {
+        ColumnLayout {
             Layout.fillWidth: true
             Layout.fillHeight: true
-            Layout.leftMargin: 14
-            Layout.rightMargin: 14
-            Layout.bottomMargin: 14
-            spacing: 14
+            Layout.leftMargin: root.pageMargin
+            Layout.rightMargin: root.pageMargin
+            Layout.bottomMargin: root.pageMargin
+            spacing: root.pageMargin
 
             Rectangle {
-                Layout.preferredWidth: 218
-                Layout.fillHeight: true
-                radius: 24
+                Layout.fillWidth: true
+                Layout.preferredHeight: root.wideLayout ? 0 : 76
+                visible: !root.wideLayout
+                radius: 22
                 color: root.sidebarColor
                 border.width: 1
                 border.color: "#d5e3e8"
 
-                ColumnLayout {
+                RowLayout {
                     anchors.fill: parent
-                    anchors.margins: 14
-                    spacing: 14
+                    anchors.margins: 10
+                    spacing: 10
 
                     SidebarButton {
                         Layout.fillWidth: true
@@ -848,21 +958,57 @@ Rectangle {
                         Layout.fillWidth: true
                         navIndex: 2
                     }
-
-                    Item {
-                        Layout.fillHeight: true
-                    }
                 }
             }
 
-            Flickable {
-                id: contentFlickable
+            RowLayout {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
-                contentWidth: width
-                contentHeight: contentColumn.implicitHeight + 28
-                clip: true
-                boundsBehavior: Flickable.StopAtBounds
+                spacing: root.pageMargin
+
+                Rectangle {
+                    Layout.preferredWidth: root.wideLayout ? 218 : 0
+                    Layout.fillHeight: true
+                    visible: root.wideLayout
+                    radius: 24
+                    color: root.sidebarColor
+                    border.width: 1
+                    border.color: "#d5e3e8"
+
+                    ColumnLayout {
+                        anchors.fill: parent
+                        anchors.margins: 14
+                        spacing: 14
+
+                        SidebarButton {
+                            Layout.fillWidth: true
+                            navIndex: 0
+                        }
+
+                        SidebarButton {
+                            Layout.fillWidth: true
+                            navIndex: 1
+                        }
+
+                        SidebarButton {
+                            Layout.fillWidth: true
+                            navIndex: 2
+                        }
+
+                        Item {
+                            Layout.fillHeight: true
+                        }
+                    }
+                }
+
+                Flickable {
+                    id: contentFlickable
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    contentWidth: width
+                    contentHeight: contentColumn.implicitHeight + 28
+                    clip: true
+                    boundsBehavior: Flickable.StopAtBounds
 
                 onContentYChanged: root.syncActiveNavFromScroll()
 
@@ -898,14 +1044,71 @@ Rectangle {
                         Column {
                             id: generalContent
                             anchors.fill: parent
-                            anchors.margins: 22
+                        anchors.margins: 22
                             spacing: 18
 
                             SectionHeader {
                                 width: parent.width
                                 glyph: "\uE713"
-                                title: "General"
-                                subtitle: "Control startup behavior, tray presence, taskbar visibility, and preview menu size."
+                                title: qsTr("General")
+                                subtitle: qsTr("Control startup behavior, tray presence, taskbar visibility, and preview menu size.")
+                            }
+
+                            Rectangle {
+                                width: parent.width
+                                height: 72
+                                radius: 18
+                                color: "#f8fbfc"
+                                border.width: 1
+                                border.color: "#e1ebf0"
+
+                                RowLayout {
+                                    anchors.fill: parent
+                                    anchors.margins: 16
+                                    spacing: 14
+
+                                    Column {
+                                        Layout.fillWidth: true
+                                        spacing: 4
+
+                                        Text {
+                                            width: parent.width
+                                            text: qsTr("Language")
+                                            color: root.inkColor
+                                            font.family: root.textFontFamily
+                                            font.pixelSize: 15
+                                            font.weight: root.labelFontWeight
+                                            renderType: Text.NativeRendering
+                                        }
+
+                                        Text {
+                                            width: parent.width
+                                            text: qsTr("Choose the display language for the Settings page.")
+                                            color: root.mutedInkColor
+                                            font.family: root.bodyFontFamily
+                                            font.pixelSize: 12
+                                            font.weight: root.bodyFontWeight
+                                            elide: Text.ElideRight
+                                            renderType: Text.NativeRendering
+                                        }
+                                    }
+
+                                    ComboBox {
+                                        id: languageComboBox
+                                        property bool settingsNoDrag: true
+                                        Layout.preferredWidth: 132
+                                        model: [
+                                            { text: qsTr("English"), value: "en" },
+                                            { text: qsTr("Chinese"), value: "zh" }
+                                        ]
+                                        textRole: "text"
+                                        valueRole: "value"
+                                        currentIndex: resolvedUiSettings && resolvedUiSettings.language === "zh" ? 1 : 0
+                                        onActivated: {
+                                            resolvedUiSettings.language = currentValue
+                                        }
+                                    }
+                                }
                             }
 
                             Rectangle {
@@ -925,11 +1128,11 @@ Rectangle {
                                         width: parent.width
 
                                         Text {
-                                            text: "Menu button size"
+                                            text: qsTr("Menu button size")
                                             color: root.inkColor
                                             font.family: root.textFontFamily
                                             font.pixelSize: 15
-                                            font.weight: Font.DemiBold
+                                            font.weight: root.labelFontWeight
                                             renderType: Text.NativeRendering
                                         }
 
@@ -987,10 +1190,11 @@ Rectangle {
                                         width: parent.width
 
                                         Text {
-                                            text: "Small"
+                                            text: qsTr("Small")
                                             color: root.faintInkColor
                                             font.family: root.bodyFontFamily
                                             font.pixelSize: 11
+                                            font.weight: root.bodyFontWeight
                                             renderType: Text.NativeRendering
                                         }
 
@@ -999,10 +1203,11 @@ Rectangle {
                                         }
 
                                         Text {
-                                            text: "Large"
+                                            text: qsTr("Large")
                                             color: root.faintInkColor
                                             font.family: root.bodyFontFamily
                                             font.pixelSize: 11
+                                            font.weight: root.bodyFontWeight
                                             renderType: Text.NativeRendering
                                         }
                                     }
@@ -1011,8 +1216,8 @@ Rectangle {
 
                             SettingSwitchRow {
                                 width: parent.width
-                                labelText: "Follow system startup"
-                                descriptionText: "Launch SpaceLook automatically when Windows starts."
+                                labelText: qsTr("Follow system startup")
+                                descriptionText: qsTr("Launch SpaceLook automatically when Windows starts.")
                                 checkedValue: resolvedUiSettings.autoStart
                                 onToggledValue: resolvedUiSettings.autoStart = checked
                             }
@@ -1021,8 +1226,8 @@ Rectangle {
 
                             SettingSwitchRow {
                                 width: parent.width
-                                labelText: "Enable system tray"
-                                descriptionText: "Keep a tray entry available for quick access."
+                                labelText: qsTr("Enable system tray")
+                                descriptionText: qsTr("Keep a tray entry available for quick access.")
                                 checkedValue: resolvedUiSettings.showSystemTray
                                 onToggledValue: resolvedUiSettings.showSystemTray = checked
                             }
@@ -1031,8 +1236,8 @@ Rectangle {
 
                             SettingSwitchRow {
                                 width: parent.width
-                                labelText: "Show preview in taskbar"
-                                descriptionText: "Only affects the preview window. The Settings window stays independent."
+                                labelText: qsTr("Show preview in taskbar")
+                                descriptionText: qsTr("Only affects the preview window. The Settings window stays independent.")
                                 checkedValue: resolvedUiSettings.showTaskbar
                                 onToggledValue: resolvedUiSettings.showTaskbar = checked
                             }
@@ -1041,8 +1246,8 @@ Rectangle {
 
                             SettingSwitchRow {
                                 width: parent.width
-                                labelText: "Performance mode"
-                                descriptionText: "Use the QML preview path when available for smoother rendering."
+                                labelText: qsTr("Performance mode")
+                                descriptionText: qsTr("Use the QML preview path when available for smoother rendering.")
                                 checkedValue: resolvedUiSettings.performanceMode
                                 onToggledValue: resolvedUiSettings.performanceMode = checked
                             }
@@ -1063,16 +1268,31 @@ Rectangle {
                             SectionHeader {
                                 width: parent.width
                                 glyph: "\uE8FD"
-                                title: "Toolbar"
-                                subtitle: "Tune the capsule menu, placement, border, and visible actions."
+                                title: qsTr("Toolbar")
+                                subtitle: qsTr("Tune the capsule menu, placement, border, and visible actions.")
                             }
 
-                            SettingSwitchRow {
+                            Text {
+                                text: qsTr("Appearance")
+                                color: root.inkColor
+                                font.family: root.textFontFamily
+                                font.pixelSize: 15
+                                font.weight: root.labelFontWeight
+                                renderType: Text.NativeRendering
+                            }
+
+                            GridLayout {
                                 width: parent.width
-                                labelText: "Show menu border"
-                                descriptionText: "Draw a tight border around the preview capsule menu."
-                                checkedValue: resolvedUiSettings.showMenuBorder
-                                onToggledValue: resolvedUiSettings.showMenuBorder = checked
+                                columns: width >= 620 ? 3 : 2
+                                columnSpacing: 12
+                                rowSpacing: 12
+
+                                ToolbarTile {
+                                    titleText: qsTr("Border")
+                                    glyph: "\uE8A7"
+                                    checkedValue: resolvedUiSettings.showMenuBorder
+                                    onToggledValue: resolvedUiSettings.showMenuBorder = checked
+                                }
                             }
 
                             DividerLine { }
@@ -1082,11 +1302,11 @@ Rectangle {
                                 spacing: 12
 
                                 Text {
-                                    text: "Menu placement"
+                                    text: qsTr("Menu placement")
                                     color: root.inkColor
                                     font.family: root.textFontFamily
                                     font.pixelSize: 15
-                                    font.weight: Font.DemiBold
+                                    font.weight: root.labelFontWeight
                                     renderType: Text.NativeRendering
                                 }
 
@@ -1100,28 +1320,28 @@ Rectangle {
                                         Layout.fillWidth: true
                                         placementValue: 0
                                         glyph: "\uE70E"
-                                        labelText: "Top"
+                                        labelText: qsTr("Top")
                                     }
 
                                     PlacementOptionButton {
                                         Layout.fillWidth: true
                                         placementValue: 1
                                         glyph: "\uE70D"
-                                        labelText: "Bottom"
+                                        labelText: qsTr("Bottom")
                                     }
 
                                     PlacementOptionButton {
                                         Layout.fillWidth: true
                                         placementValue: 2
                                         glyph: "\uE76B"
-                                        labelText: "Left"
+                                        labelText: qsTr("Left")
                                     }
 
                                     PlacementOptionButton {
                                         Layout.fillWidth: true
                                         placementValue: 3
                                         glyph: "\uE76C"
-                                        labelText: "Right"
+                                        labelText: qsTr("Right")
                                     }
                                 }
                             }
@@ -1129,11 +1349,11 @@ Rectangle {
                             DividerLine { }
 
                             Text {
-                                text: "Visible actions"
+                                text: qsTr("Visible actions")
                                 color: root.inkColor
                                 font.family: root.textFontFamily
                                 font.pixelSize: 15
-                                font.weight: Font.DemiBold
+                                font.weight: root.labelFontWeight
                                 renderType: Text.NativeRendering
                             }
 
@@ -1144,49 +1364,49 @@ Rectangle {
                                 rowSpacing: 12
 
                                 ToolbarTile {
-                                    titleText: "Pin"
+                                    titleText: qsTr("Pin")
                                     glyph: "\uE840"
                                     checkedValue: resolvedUiSettings.showMenuPin
                                     onToggledValue: resolvedUiSettings.showMenuPin = checked
                                 }
 
                                 ToolbarTile {
-                                    titleText: "Open"
+                                    titleText: qsTr("Open")
                                     glyph: "\uE8E5"
                                     checkedValue: resolvedUiSettings.showMenuOpen
                                     onToggledValue: resolvedUiSettings.showMenuOpen = checked
                                 }
 
                                 ToolbarTile {
-                                    titleText: "Copy"
+                                    titleText: qsTr("Copy")
                                     glyph: "\uE8C8"
                                     checkedValue: resolvedUiSettings.showMenuCopy
                                     onToggledValue: resolvedUiSettings.showMenuCopy = checked
                                 }
 
                                 ToolbarTile {
-                                    titleText: "Refresh"
+                                    titleText: qsTr("Refresh")
                                     glyph: "\uE72C"
                                     checkedValue: resolvedUiSettings.showMenuRefresh
                                     onToggledValue: resolvedUiSettings.showMenuRefresh = checked
                                 }
 
                                 ToolbarTile {
-                                    titleText: "Expand"
+                                    titleText: qsTr("Expand")
                                     glyph: "\uE740"
                                     checkedValue: resolvedUiSettings.showMenuExpand
                                     onToggledValue: resolvedUiSettings.showMenuExpand = checked
                                 }
 
                                 ToolbarTile {
-                                    titleText: "Close"
+                                    titleText: qsTr("Close")
                                     glyph: "\uE711"
                                     checkedValue: resolvedUiSettings.showMenuClose
                                     onToggledValue: resolvedUiSettings.showMenuClose = checked
                                 }
 
                                 ToolbarTile {
-                                    titleText: "More"
+                                    titleText: qsTr("More")
                                     glyph: "\uE712"
                                     checkedValue: resolvedUiSettings.showMenuMore
                                     onToggledValue: resolvedUiSettings.showMenuMore = checked
@@ -1209,8 +1429,8 @@ Rectangle {
                             SectionHeader {
                                 width: parent.width
                                 glyph: "\uE8B7"
-                                title: "File Types"
-                                subtitle: "Edit RenderType.json mappings. Each row maps suffixes to one renderer."
+                                title: qsTr("File Types")
+                                subtitle: qsTr("Edit RenderType.json mappings. Each row maps suffixes to one renderer.")
                             }
 
                             Rectangle {
@@ -1231,77 +1451,176 @@ Rectangle {
                                     color: root.mutedInkColor
                                     font.family: root.bodyFontFamily
                                     font.pixelSize: 11
+                                    font.weight: root.bodyFontWeight
                                     elide: Text.ElideMiddle
                                     renderType: Text.NativeRendering
                                 }
                             }
 
-                            RowLayout {
+                            GridLayout {
                                 width: parent.width
-                                height: 430
-                                spacing: 14
+                                height: root.roomyFileTypeLayout ? 430 : 760
+                                columns: root.roomyFileTypeLayout ? 2 : 1
+                                columnSpacing: 14
+                                rowSpacing: 14
 
                                 Rectangle {
-                                    Layout.preferredWidth: 260
-                                    Layout.fillHeight: true
+                                    Layout.preferredWidth: root.roomyFileTypeLayout ? 330 : 0
+                                    Layout.fillWidth: !root.roomyFileTypeLayout
+                                    Layout.preferredHeight: root.roomyFileTypeLayout ? 0 : 300
+                                    Layout.fillHeight: root.roomyFileTypeLayout
                                     radius: 18
                                     color: "#f8fbfc"
                                     border.width: 1
                                     border.color: "#e1ebf0"
 
-                                    ListView {
-                                        id: renderTypeList
-                                        property bool settingsNoDrag: true
+                                    Column {
                                         anchors.fill: parent
-                                        anchors.margins: 8
-                                        clip: true
-                                        spacing: 6
-                                        model: root.renderTypeEntries
+                                        anchors.margins: 10
+                                        spacing: 10
 
-                                        delegate: Rectangle {
+                                        TextField {
+                                            id: renderTypeFilterField
                                             property bool settingsNoDrag: true
-                                            width: renderTypeList.width
-                                            height: 58
-                                            radius: 14
-                                            color: index === root.selectedRenderTypeIndex ? root.accentSoftColor : (rowMouse.containsMouse ? "#ffffff" : "transparent")
-                                            border.width: index === root.selectedRenderTypeIndex ? 1 : 0
-                                            border.color: "#b6dde2"
-
-                                            Column {
-                                                anchors.left: parent.left
-                                                anchors.right: parent.right
-                                                anchors.verticalCenter: parent.verticalCenter
-                                                anchors.leftMargin: 12
-                                                anchors.rightMargin: 12
-                                                spacing: 2
-
-                                                Text {
-                                                    width: parent.width
-                                                    text: modelData.key || "Untitled"
-                                                    color: root.inkColor
-                                                    font.family: root.textFontFamily
-                                                    font.pixelSize: 13
-                                                    font.weight: Font.DemiBold
-                                                    elide: Text.ElideRight
-                                                    renderType: Text.NativeRendering
-                                                }
-
-                                                Text {
-                                                    width: parent.width
-                                                    text: (modelData.name || "") + "  " + (modelData.suffixes || "")
-                                                    color: root.mutedInkColor
-                                                    font.family: root.bodyFontFamily
-                                                    font.pixelSize: 11
-                                                    elide: Text.ElideRight
-                                                    renderType: Text.NativeRendering
-                                                }
+                                            width: parent.width
+                                            height: 34
+                                            placeholderText: qsTr("Search key, renderer, suffix")
+                                            text: root.renderTypeFilter
+                                            font.family: root.bodyFontFamily
+                                            font.pixelSize: 12
+                                            onTextChanged: {
+                                                root.renderTypeFilter = text
+                                                root.rebuildFilteredRenderTypeEntries()
                                             }
+                                        }
 
-                                            MouseArea {
-                                                id: rowMouse
-                                                anchors.fill: parent
-                                                hoverEnabled: true
-                                                onClicked: root.selectRenderTypeEntry(index)
+                                        ListView {
+                                            id: renderTypeList
+                                            property bool settingsNoDrag: true
+                                            width: parent.width
+                                            height: parent.height - renderTypeFilterField.height - parent.spacing
+                                            clip: true
+                                            spacing: 8
+                                            model: root.filteredRenderTypeEntries
+
+                                            delegate: Rectangle {
+                                                property bool settingsNoDrag: true
+                                                property var suffixItems: root.suffixArray(modelData.suffixes || "")
+                                                width: renderTypeList.width
+                                                height: Math.max(86, listDelegateContent.implicitHeight + 20)
+                                                radius: 16
+                                                color: modelData.sourceIndex === root.selectedRenderTypeIndex ? root.accentSoftColor : (rowMouse.containsMouse ? "#ffffff" : "transparent")
+                                                border.width: modelData.sourceIndex === root.selectedRenderTypeIndex ? 1 : 0
+                                                border.color: "#b6dde2"
+
+                                                Column {
+                                                    id: listDelegateContent
+                                                    anchors.left: parent.left
+                                                    anchors.right: parent.right
+                                                    anchors.top: parent.top
+                                                    anchors.leftMargin: 12
+                                                    anchors.rightMargin: 12
+                                                    anchors.topMargin: 10
+                                                    spacing: 6
+
+                                                    RowLayout {
+                                                        width: parent.width
+                                                        spacing: 8
+
+                                                        Text {
+                                                            Layout.fillWidth: true
+                                                            text: modelData.key || "Untitled"
+                                                            color: root.inkColor
+                                                            font.family: root.textFontFamily
+                                                            font.pixelSize: 13
+                                                            font.weight: root.labelFontWeight
+                                                            elide: Text.ElideRight
+                                                            renderType: Text.NativeRendering
+                                                        }
+
+                                                        Rectangle {
+                                                            radius: 10
+                                                            color: "#eef6f7"
+                                                            implicitWidth: typeKeyText.implicitWidth + 14
+                                                            implicitHeight: 22
+
+                                                            Text {
+                                                                id: typeKeyText
+                                                                anchors.centerIn: parent
+                                                                text: modelData.typeKey || "type"
+                                                                color: root.accentColor
+                                                                font.family: root.bodyFontFamily
+                                                                font.pixelSize: 10
+                                                                font.weight: root.labelFontWeight
+                                                                renderType: Text.NativeRendering
+                                                            }
+                                                        }
+                                                    }
+
+                                                    Text {
+                                                        width: parent.width
+                                                        text: modelData.name || ""
+                                                        color: root.mutedInkColor
+                                                        font.family: root.bodyFontFamily
+                                                        font.pixelSize: 11
+                                                        font.weight: root.bodyFontWeight
+                                                        elide: Text.ElideRight
+                                                        renderType: Text.NativeRendering
+                                                    }
+
+                                                    Flow {
+                                                        width: parent.width
+                                                        spacing: 5
+
+                                                        Repeater {
+                                                            model: Math.min(8, suffixItems.length)
+
+                                                            Rectangle {
+                                                                radius: 9
+                                                                color: "#ffffff"
+                                                                border.width: 1
+                                                                border.color: "#dce8ee"
+                                                                implicitWidth: suffixText.implicitWidth + 14
+                                                                implicitHeight: 22
+
+                                                                Text {
+                                                                    id: suffixText
+                                                                    anchors.centerIn: parent
+                                                                    text: "." + suffixItems[index]
+                                                                    color: root.mutedInkColor
+                                                                    font.family: root.bodyFontFamily
+                                                                    font.pixelSize: 10
+                                                                    renderType: Text.NativeRendering
+                                                                }
+                                                            }
+                                                        }
+
+                                                        Rectangle {
+                                                            visible: suffixItems.length > 8
+                                                            radius: 9
+                                                            color: "#eef2f5"
+                                                            implicitWidth: moreSuffixText.implicitWidth + 14
+                                                            implicitHeight: 22
+
+                                                            Text {
+                                                                id: moreSuffixText
+                                                                anchors.centerIn: parent
+                                                                text: "+" + (suffixItems.length - 8)
+                                                                color: root.faintInkColor
+                                                                font.family: root.bodyFontFamily
+                                                                font.pixelSize: 10
+                                                                renderType: Text.NativeRendering
+                                                            }
+                                                        }
+                                                    }
+                                                }
+
+                                                MouseArea {
+                                                    id: rowMouse
+                                                    anchors.fill: parent
+                                                    hoverEnabled: true
+                                                    onClicked: root.selectRenderTypeEntry(modelData.sourceIndex)
+                                                }
                                             }
                                         }
                                     }
@@ -1309,7 +1628,8 @@ Rectangle {
 
                                 Rectangle {
                                     Layout.fillWidth: true
-                                    Layout.fillHeight: true
+                                    Layout.preferredHeight: root.roomyFileTypeLayout ? 0 : 446
+                                    Layout.fillHeight: root.roomyFileTypeLayout
                                     radius: 18
                                     color: "#fbfdfe"
                                     border.width: 1
@@ -1321,11 +1641,11 @@ Rectangle {
                                         spacing: 12
 
                                         Text {
-                                            text: "Mapping details"
+                                            text: qsTr("Mapping details")
                                             color: root.inkColor
                                             font.family: root.textFontFamily
                                             font.pixelSize: 15
-                                            font.weight: Font.DemiBold
+                                            font.weight: root.labelFontWeight
                                             renderType: Text.NativeRendering
                                         }
 
@@ -1335,72 +1655,240 @@ Rectangle {
                                             columnSpacing: 12
                                             rowSpacing: 10
 
-                                            TextField {
-                                                id: renderTypeKeyField
-                                                property bool settingsNoDrag: true
+                                            Column {
                                                 Layout.fillWidth: true
-                                                placeholderText: "Group key, for example code"
-                                                font.family: root.bodyFontFamily
-                                                font.pixelSize: 13
-                                                onEditingFinished: root.applyRenderTypeEditor()
+                                                spacing: 2
+
+                                                Text {
+                                                    text: qsTr("Group key")
+                                                    color: root.faintInkColor
+                                                    font.family: root.bodyFontFamily
+                                                    font.pixelSize: 11
+                                                    font.weight: root.labelFontWeight
+                                                    renderType: Text.NativeRendering
+                                                }
+
+                                                Text {
+                                                    id: renderTypeKeyField
+                                                    text: ""
+                                                    color: root.inkColor
+                                                    font.family: root.bodyFontFamily
+                                                    font.pixelSize: 13
+                                                    font.weight: root.bodyFontWeight
+                                                    renderType: Text.NativeRendering
+                                                    elide: Text.ElideRight
+                                                }
                                             }
 
-                                            TextField {
-                                                id: renderTypeNameField
-                                                property bool settingsNoDrag: true
+                                            Column {
                                                 Layout.fillWidth: true
-                                                placeholderText: "Renderer, for example CodeRenderer"
-                                                font.family: root.bodyFontFamily
-                                                font.pixelSize: 13
-                                                onEditingFinished: root.applyRenderTypeEditor()
+                                                spacing: 2
+
+                                                Text {
+                                                    text: qsTr("Renderer")
+                                                    color: root.faintInkColor
+                                                    font.family: root.bodyFontFamily
+                                                    font.pixelSize: 11
+                                                    font.weight: root.labelFontWeight
+                                                    renderType: Text.NativeRendering
+                                                }
+
+                                                Text {
+                                                    id: renderTypeNameField
+                                                    text: ""
+                                                    color: root.inkColor
+                                                    font.family: root.bodyFontFamily
+                                                    font.pixelSize: 13
+                                                    font.weight: root.bodyFontWeight
+                                                    renderType: Text.NativeRendering
+                                                    elide: Text.ElideRight
+                                                }
                                             }
 
-                                            TextField {
-                                                id: renderTypeTypeKeyField
-                                                property bool settingsNoDrag: true
+                                            Column {
                                                 Layout.fillWidth: true
-                                                placeholderText: "typeKey, for example code"
-                                                font.family: root.bodyFontFamily
-                                                font.pixelSize: 13
-                                                onEditingFinished: root.applyRenderTypeEditor()
+                                                spacing: 2
+
+                                                Text {
+                                                    text: qsTr("typeKey")
+                                                    color: root.faintInkColor
+                                                    font.family: root.bodyFontFamily
+                                                    font.pixelSize: 11
+                                                    font.weight: root.labelFontWeight
+                                                    renderType: Text.NativeRendering
+                                                }
+
+                                                Text {
+                                                    id: renderTypeTypeKeyField
+                                                    text: ""
+                                                    color: root.inkColor
+                                                    font.family: root.bodyFontFamily
+                                                    font.pixelSize: 13
+                                                    font.weight: root.bodyFontWeight
+                                                    renderType: Text.NativeRendering
+                                                    elide: Text.ElideRight
+                                                }
                                             }
 
-                                            TextField {
-                                                id: renderTypeDetailsField
-                                                property bool settingsNoDrag: true
+                                            Column {
                                                 Layout.fillWidth: true
-                                                placeholderText: "Type description"
-                                                font.family: root.bodyFontFamily
-                                                font.pixelSize: 13
-                                                onEditingFinished: root.applyRenderTypeEditor()
+                                                spacing: 2
+
+                                                Text {
+                                                    text: qsTr("Description")
+                                                    color: root.faintInkColor
+                                                    font.family: root.bodyFontFamily
+                                                    font.pixelSize: 11
+                                                    font.weight: root.labelFontWeight
+                                                    renderType: Text.NativeRendering
+                                                }
+
+                                                Text {
+                                                    id: renderTypeDetailsField
+                                                    text: ""
+                                                    color: root.inkColor
+                                                    font.family: root.bodyFontFamily
+                                                    font.pixelSize: 13
+                                                    font.weight: root.bodyFontWeight
+                                                    renderType: Text.NativeRendering
+                                                    elide: Text.ElideRight
+                                                }
                                             }
                                         }
 
-                                        Text {
-                                            text: "Suffixes"
-                                            color: root.inkColor
-                                            font.family: root.textFontFamily
-                                            font.pixelSize: 13
-                                            font.weight: Font.DemiBold
-                                            renderType: Text.NativeRendering
+                                        RowLayout {
+                                            width: parent.width
+                                            spacing: 10
+
+                                            Text {
+                                                text: qsTr("Suffixes")
+                                                color: root.inkColor
+                                                font.family: root.textFontFamily
+                                                font.pixelSize: 13
+                                                font.weight: root.labelFontWeight
+                                                renderType: Text.NativeRendering
+                                            }
+
+                                            Text {
+                                                Layout.fillWidth: true
+                                                text: root.suffixCountText(renderTypeSuffixesField.text)
+                                                color: root.faintInkColor
+                                                font.family: root.bodyFontFamily
+                                                font.pixelSize: 11
+                                                horizontalAlignment: Text.AlignRight
+                                                renderType: Text.NativeRendering
+                                            }
+                                        }
+
+                                        Rectangle {
+                                            width: parent.width
+                                            height: 160
+                                            radius: 16
+                                            color: "#ffffff"
+                                            border.width: 1
+                                            border.color: root.borderColor
+
+                                            Column {
+                                                anchors.fill: parent
+                                                anchors.margins: 12
+                                                spacing: 10
+
+                                                RowLayout {
+                                                    width: parent.width
+                                                    spacing: 8
+
+                                                    TextField {
+                                                        id: renderTypeSuffixInput
+                                                        property bool settingsNoDrag: true
+                                                        Layout.fillWidth: true
+                                                        height: 32
+                                                        placeholderText: qsTr("Add suffix, for example tsx")
+                                                        font.family: root.bodyFontFamily
+                                                        font.pixelSize: 12
+                                                        onAccepted: {
+                                                            root.addRenderTypeSuffix(text)
+                                                            text = ""
+                                                        }
+                                                    }
+
+                                                    Button {
+                                                        property bool settingsNoDrag: true
+                                                        text: qsTr("Add suffix")
+                                                        enabled: renderTypeSuffixInput.text.trim().length > 0
+                                                        onClicked: {
+                                                            root.addRenderTypeSuffix(renderTypeSuffixInput.text)
+                                                            renderTypeSuffixInput.text = ""
+                                                        }
+                                                    }
+                                                }
+
+                                                Flickable {
+                                                    width: parent.width
+                                                    height: parent.height - 42
+                                                    contentWidth: width
+                                                    contentHeight: suffixChipFlow.implicitHeight
+                                                    clip: true
+
+                                                    Flow {
+                                                        id: suffixChipFlow
+                                                        width: parent.width
+                                                        spacing: 7
+
+                                                        Repeater {
+                                                            model: root.suffixArray(renderTypeSuffixesField.text)
+
+                                                            Rectangle {
+                                                                radius: 12
+                                                                color: "#f7fbfc"
+                                                                border.width: 1
+                                                                border.color: "#dce8ee"
+                                                                implicitWidth: suffixChipRow.implicitWidth + 16
+                                                                implicitHeight: 28
+
+                                                                Row {
+                                                                    id: suffixChipRow
+                                                                    anchors.centerIn: parent
+                                                                    spacing: 6
+
+                                                                    Text {
+                                                                        text: "." + modelData
+                                                                        color: root.inkColor
+                                                                        font.family: root.bodyFontFamily
+                                                                        font.pixelSize: 12
+                                                                        renderType: Text.NativeRendering
+                                                                    }
+
+                                                                    Text {
+                                                                        property bool settingsNoDrag: true
+                                                                        text: "\uE711"
+                                                                        color: suffixRemoveMouse.containsMouse ? root.dangerColor : root.faintInkColor
+                                                                        font.family: root.iconFontFamily
+                                                                        font.pixelSize: 10
+                                                                        renderType: Text.NativeRendering
+
+                                                                        MouseArea {
+                                                                            id: suffixRemoveMouse
+                                                                            anchors.fill: parent
+                                                                            anchors.margins: -6
+                                                                            hoverEnabled: true
+                                                                            onClicked: root.removeRenderTypeSuffixAt(index)
+                                                                        }
+                                                                    }
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
                                         }
 
                                         TextArea {
                                             id: renderTypeSuffixesField
                                             property bool settingsNoDrag: true
-                                            width: parent.width
-                                            height: 120
-                                            wrapMode: TextEdit.Wrap
-                                            placeholderText: "Comma or space separated suffixes, for example ts tsx js"
-                                            font.family: root.bodyFontFamily
-                                            font.pixelSize: 13
-                                            selectByMouse: true
-                                            background: Rectangle {
-                                                radius: 14
-                                                color: "#ffffff"
-                                                border.width: 1
-                                                border.color: root.borderColor
-                                            }
+                                            visible: false
+                                            height: 0
+                                            width: 1
+                                            onTextChanged: root.applyRenderTypeEditor()
                                         }
 
                                         Rectangle {
@@ -1418,6 +1906,7 @@ Rectangle {
                                                 color: root.mutedInkColor
                                                 font.family: root.bodyFontFamily
                                                 font.pixelSize: 12
+                                                font.weight: root.bodyFontWeight
                                                 wrapMode: Text.Wrap
                                                 renderType: Text.NativeRendering
                                             }
@@ -1429,13 +1918,13 @@ Rectangle {
 
                                             Button {
                                                 property bool settingsNoDrag: true
-                                                text: "Add"
+                                                text: qsTr("Add")
                                                 onClicked: root.addRenderTypeEntry()
                                             }
 
                                             Button {
                                                 property bool settingsNoDrag: true
-                                                text: "Remove"
+                                                text: qsTr("Remove")
                                                 enabled: root.selectedRenderTypeIndex >= 0
                                                 onClicked: root.removeRenderTypeEntry()
                                             }
@@ -1446,13 +1935,13 @@ Rectangle {
 
                                             Button {
                                                 property bool settingsNoDrag: true
-                                                text: "Reload"
+                                                text: qsTr("Reload")
                                                 onClicked: root.reloadRenderTypeEntries()
                                             }
 
                                             Button {
                                                 property bool settingsNoDrag: true
-                                                text: "Save"
+                                                text: qsTr("Save")
                                                 highlighted: true
                                                 onClicked: root.saveRenderTypeEntries()
                                             }
@@ -1471,4 +1960,5 @@ Rectangle {
             }
         }
     }
+}
 }

@@ -1,4 +1,4 @@
-#include "renderers/markup/WebView2HtmlView.h"
+﻿#include "renderers/markup/WebView2HtmlView.h"
 
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
@@ -98,6 +98,7 @@ WebView2HtmlView::~WebView2HtmlView()
 
 bool WebView2HtmlView::setDocumentHtml(const QString& html, const QString& filePath, QString* errorMessage)
 {
+    const PreviewLoadGuard::Token loadToken = m_loadGuard.begin(filePath);
     m_pendingHtml = html;
     m_pendingFilePath = filePath;
     setLastError(QString());
@@ -107,7 +108,7 @@ bool WebView2HtmlView::setDocumentHtml(const QString& html, const QString& fileP
     }
 
     if (m_ready && m_webView) {
-        navigatePendingHtml();
+        navigatePendingHtml(loadToken);
         return true;
     }
 
@@ -116,6 +117,7 @@ bool WebView2HtmlView::setDocumentHtml(const QString& html, const QString& fileP
 
 void WebView2HtmlView::clearDocument()
 {
+    m_loadGuard.cancel();
     m_pendingHtml.clear();
     m_pendingFilePath.clear();
     if (m_webView) {
@@ -130,6 +132,22 @@ void WebView2HtmlView::clearDocument()
     releaseComObject(m_environment);
     m_ready = false;
     m_initializing = false;
+}
+
+bool WebView2HtmlView::warmUp(QString* errorMessage)
+{
+    if (!ensureRuntimeAvailable(errorMessage)) {
+        return false;
+    }
+    winId();
+    if (m_ready && m_webView) {
+        return true;
+    }
+    if (m_pendingHtml.isEmpty()) {
+        m_pendingHtml = QStringLiteral("<!doctype html><html><body></body></html>");
+        m_pendingFilePath = QStringLiteral("spacelook:warmup");
+    }
+    return ensureInitializing(errorMessage);
 }
 
 QString WebView2HtmlView::lastError() const
@@ -200,11 +218,17 @@ bool WebView2HtmlView::ensureInitializing(QString* errorMessage)
         nullptr,
         Callback<ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler>(
             [this](HRESULT result, ICoreWebView2Environment* environment) -> HRESULT {
+                if (m_pendingHtml.isEmpty()) {
+                    m_initializing = false;
+                    return S_OK;
+                }
                 if (FAILED(result) || !environment) {
                     const QString message = QStringLiteral("Failed to create WebView2 environment: %1").arg(hresultMessage(result));
                     setLastError(message);
                     m_initializing = false;
-                    emit unavailable(message);
+                    if (!m_pendingHtml.isEmpty()) {
+                        emit unavailable(message);
+                    }
                     return S_OK;
                 }
 
@@ -217,10 +241,18 @@ bool WebView2HtmlView::ensureInitializing(QString* errorMessage)
                     Callback<ICoreWebView2CreateCoreWebView2ControllerCompletedHandler>(
                         [this](HRESULT controllerResult, ICoreWebView2Controller* controller) -> HRESULT {
                             m_initializing = false;
+                            if (m_pendingHtml.isEmpty()) {
+                                if (controller) {
+                                    controller->Close();
+                                }
+                                return S_OK;
+                            }
                             if (FAILED(controllerResult) || !controller) {
                                 const QString message = QStringLiteral("Failed to create WebView2 controller: %1").arg(hresultMessage(controllerResult));
                                 setLastError(message);
-                                emit unavailable(message);
+                                if (!m_pendingHtml.isEmpty()) {
+                                    emit unavailable(message);
+                                }
                                 return S_OK;
                             }
 
@@ -234,8 +266,7 @@ bool WebView2HtmlView::ensureInitializing(QString* errorMessage)
                             if (m_controller) {
                                 m_controller->put_IsVisible(TRUE);
                             }
-                            navigatePendingHtml();
-                            emit documentLoaded();
+                            navigatePendingHtml(m_loadGuard.observe(m_pendingFilePath));
                             return S_OK;
                         }).Get());
 
@@ -243,7 +274,9 @@ bool WebView2HtmlView::ensureInitializing(QString* errorMessage)
                     const QString message = QStringLiteral("Failed to start WebView2 controller creation: %1").arg(hresultMessage(controllerHr));
                     setLastError(message);
                     m_initializing = false;
-                    emit unavailable(message);
+                    if (!m_pendingHtml.isEmpty()) {
+                        emit unavailable(message);
+                    }
                 }
                 return S_OK;
             }).Get());
@@ -261,14 +294,16 @@ bool WebView2HtmlView::ensureInitializing(QString* errorMessage)
     return true;
 }
 
-void WebView2HtmlView::navigatePendingHtml()
+void WebView2HtmlView::navigatePendingHtml(const PreviewLoadGuard::Token& token)
 {
-    if (!m_webView || !m_ready) {
+    if (!m_webView || !m_ready || m_pendingHtml.isEmpty() || !m_loadGuard.isCurrent(token, m_pendingFilePath)) {
         return;
     }
 
     m_webView->NavigateToString(reinterpret_cast<LPCWSTR>(m_pendingHtml.utf16()));
-    emit documentLoaded();
+    if (m_loadGuard.isCurrent(token, m_pendingFilePath)) {
+        emit documentLoaded();
+    }
 }
 
 void WebView2HtmlView::updateControllerBounds()

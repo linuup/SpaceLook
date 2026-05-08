@@ -1,4 +1,4 @@
-#include "renderers/markup/QtLiteHtmlContainer.h"
+﻿#include "renderers/markup/QtLiteHtmlContainer.h"
 
 #include <algorithm>
 #include <cmath>
@@ -18,6 +18,8 @@
 #include <QScreen>
 #include <QTextBoundaryFinder>
 #include <QUrl>
+
+#include "core/PreviewFileReader.h"
 
 namespace {
 
@@ -463,12 +465,12 @@ void QtLiteHtmlContainer::transform_text(litehtml::string& text, litehtml::text_
 void QtLiteHtmlContainer::import_css(litehtml::string& text, const litehtml::string& url, litehtml::string& baseurl)
 {
     const QString resolvedPath = resolvePath(fromUtf8(url), fromUtf8(baseurl));
-    QFile file(resolvedPath);
-    if (!file.open(QIODevice::ReadOnly)) {
+    QByteArray cssBytes;
+    if (!PreviewFileReader::readAll(resolvedPath, &cssBytes)) {
         text.clear();
         return;
     }
-    text = toUtf8(QString::fromUtf8(file.readAll()));
+    text = toUtf8(QString::fromUtf8(cssBytes));
     baseurl = toUtf8(resolvedPath);
 }
 

@@ -39,3 +39,6 @@ PreView-Files/
 !third_party/mpv/libmpv-2.dll.part1
 !third_party/mpv/libmpv-2.dll.part2
 !third_party/mpv/libmpv-2.dll.part3
+!third_party/7zip/private/
+!third_party/7zip/private/7z.exe
+!third_party/7zip/private/7z.dll

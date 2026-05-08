@@ -1,6 +1,7 @@
-#pragma once
+﻿#pragma once
 
 #include <QObject>
+#include <QString>
 
 class SpaceLookUiSettings : public QObject
 {
@@ -19,6 +20,7 @@ class SpaceLookUiSettings : public QObject
     Q_PROPERTY(bool showMenuExpand READ showMenuExpand WRITE setShowMenuExpand NOTIFY menuVisibilityChanged)
     Q_PROPERTY(bool showMenuClose READ showMenuClose WRITE setShowMenuClose NOTIFY menuVisibilityChanged)
     Q_PROPERTY(bool showMenuMore READ showMenuMore WRITE setShowMenuMore NOTIFY menuVisibilityChanged)
+    Q_PROPERTY(QString language READ language WRITE setLanguage NOTIFY languageChanged)
 
 public:
     static SpaceLookUiSettings& instance();
@@ -51,6 +53,8 @@ public:
     void setShowMenuClose(bool show);
     bool showMenuMore() const;
     void setShowMenuMore(bool show);
+    QString language() const;
+    void setLanguage(const QString& language);
 
 signals:
     void menuButtonSizeChanged();
@@ -60,6 +64,7 @@ signals:
     void performanceModeChanged();
     void autoStartChanged();
     void menuVisibilityChanged();
+    void languageChanged();
 
 private:
     SpaceLookUiSettings();
@@ -67,6 +72,7 @@ private:
     bool updateBoolSetting(bool& field, bool value, const QString& key);
     bool loadAutoStart() const;
     void applyAutoStart(bool enabled);
+    QString normalizedLanguage(const QString& language) const;
 
     int m_menuButtonSize = 38;
     bool m_showMenuBorder = true;
@@ -82,4 +88,5 @@ private:
     bool m_showMenuExpand = true;
     bool m_showMenuClose = true;
     bool m_showMenuMore = true;
+    QString m_language = QStringLiteral("en");
 };

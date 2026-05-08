@@ -1,6 +1,8 @@
-#pragma once
+﻿#pragma once
 
 #include <QWidget>
+
+#include "renderers/PreviewLoadGuard.h"
 
 struct ICoreWebView2;
 struct ICoreWebView2Controller;
@@ -16,6 +18,7 @@ public:
 
     bool setDocumentHtml(const QString& html, const QString& filePath, QString* errorMessage);
     void clearDocument();
+    bool warmUp(QString* errorMessage = nullptr);
     QString lastError() const;
 
     static QString runtimeDownloadUrl();
@@ -31,13 +34,14 @@ protected:
 private:
     bool ensureRuntimeAvailable(QString* errorMessage) const;
     bool ensureInitializing(QString* errorMessage);
-    void navigatePendingHtml();
+    void navigatePendingHtml(const PreviewLoadGuard::Token& token);
     void updateControllerBounds();
     void setLastError(const QString& message);
 
     ICoreWebView2Environment* m_environment = nullptr;
     ICoreWebView2Controller* m_controller = nullptr;
     ICoreWebView2* m_webView = nullptr;
+    PreviewLoadGuard m_loadGuard;
     QString m_pendingHtml;
     QString m_pendingFilePath;
     QString m_lastError;

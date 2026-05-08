@@ -1,4 +1,4 @@
-#include "core/preview_manager.h"
+﻿#include "core/preview_manager.h"
 
 #include "platform/lindesk_hover_client.h"
 #include "core/preview_state.h"

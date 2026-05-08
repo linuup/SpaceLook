@@ -1,4 +1,4 @@
-#include "settings/spacelook_ui_settings.h"
+﻿#include "settings/spacelook_ui_settings.h"
 
 #include <QCoreApplication>
 #include <QDir>
@@ -46,6 +46,7 @@ SpaceLookUiSettings::SpaceLookUiSettings()
     m_showMenuExpand = settings.value(QStringLiteral("ui/menu/show_expand"), true).toBool();
     m_showMenuClose = settings.value(QStringLiteral("ui/menu/show_close"), true).toBool();
     m_showMenuMore = settings.value(QStringLiteral("ui/menu/show_more"), true).toBool();
+    m_language = normalizedLanguage(settings.value(QStringLiteral("ui/language"), QStringLiteral("en")).toString());
     m_autoStart = loadAutoStart();
 }
 
@@ -261,6 +262,25 @@ void SpaceLookUiSettings::setShowMenuMore(bool show)
     emit menuVisibilityChanged();
 }
 
+QString SpaceLookUiSettings::language() const
+{
+    return m_language;
+}
+
+void SpaceLookUiSettings::setLanguage(const QString& language)
+{
+    const QString nextLanguage = normalizedLanguage(language);
+    if (m_language == nextLanguage) {
+        return;
+    }
+
+    m_language = nextLanguage;
+    QSettings settings(settingsFilePath(), QSettings::IniFormat);
+    settings.setValue(QStringLiteral("ui/language"), m_language);
+    settings.sync();
+    emit languageChanged();
+}
+
 void SpaceLookUiSettings::writeBoolSetting(const QString& key, bool value)
 {
     QSettings settings(settingsFilePath(), QSettings::IniFormat);
@@ -299,4 +319,13 @@ void SpaceLookUiSettings::applyAutoStart(bool enabled)
     const QString command = QStringLiteral("\"%1\"").arg(executablePath);
     runSettings.setValue(autoStartValueName(), command);
     runSettings.sync();
+}
+
+QString SpaceLookUiSettings::normalizedLanguage(const QString& language) const
+{
+    const QString normalized = language.trimmed().toLower();
+    if (normalized == QStringLiteral("zh") || normalized == QStringLiteral("zh-cn")) {
+        return QStringLiteral("zh");
+    }
+    return QStringLiteral("en");
 }

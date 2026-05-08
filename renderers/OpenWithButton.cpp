@@ -1,9 +1,8 @@
-#include "renderers/OpenWithButton.h"
+﻿#include "renderers/OpenWithButton.h"
 
 #include "renderers/FluentIconFont.h"
 #include "catalog/open_with_catalog.h"
 #include "core/file_suffix_utils.h"
-
 #include <QCoreApplication>
 #include <QAction>
 #include <QDebug>
@@ -176,7 +175,7 @@ void OpenWithButton::refreshHandlers()
     }
 
     HandlerEntry explorerEntry;
-    explorerEntry.displayName = QStringLiteral("Explorer");
+    explorerEntry.displayName = QCoreApplication::translate("SpaceLook", "Explorer");
     explorerEntry.icon = explorerAppIcon();
     explorerEntry.kind = EntryKind::ExplorerLocation;
     m_handlers.append(explorerEntry);
@@ -241,7 +240,7 @@ void OpenWithButton::rebuildMenu()
         action->setCheckable(true);
         action->setChecked(index == m_currentHandlerIndex);
         if (entry.recommended) {
-            action->setToolTip(QStringLiteral("Recommended application"));
+            action->setToolTip(QCoreApplication::translate("SpaceLook", "Recommended application"));
         }
         connect(action, &QAction::triggered, this, [this, index]() {
             selectHandler(index, true);
@@ -266,7 +265,7 @@ void OpenWithButton::updatePrimaryButton()
     m_primaryButton->setIcon(entry.icon.isNull()
         ? style()->standardIcon(QStyle::SP_DialogOpenButton)
         : entry.icon);
-    m_primaryButton->setToolTip(QStringLiteral("Open with %1").arg(entry.displayName));
+    m_primaryButton->setToolTip(QCoreApplication::translate("SpaceLook", "Open with %1").arg(entry.displayName));
 }
 
 void OpenWithButton::selectHandler(int index, bool launchAfterSelect)
@@ -308,19 +307,19 @@ bool OpenWithButton::launchHandler(int index)
     if (entry.kind == EntryKind::ExplorerLocation) {
         const QFileInfo fileInfo(m_targetPath);
         if (!fileInfo.exists()) {
-            reportStatus(QStringLiteral("The file location is unavailable."));
+            reportStatus(QCoreApplication::translate("SpaceLook", "The file location is unavailable."));
             return false;
         }
 
         const QString nativePath = QDir::toNativeSeparators(fileInfo.absoluteFilePath());
         if (!QProcess::startDetached(QStringLiteral("explorer.exe"),
                                      { QStringLiteral("/select,"), nativePath })) {
-            reportStatus(QStringLiteral("Failed to open file location."));
+            reportStatus(QCoreApplication::translate("SpaceLook", "Failed to open file location."));
             return false;
         }
 
         qDebug().noquote() << QStringLiteral("[SpaceLookOpenWith] Opened Explorer for \"%1\"").arg(nativePath);
-        reportStatus(QStringLiteral("Opened file location"));
+        reportStatus(QCoreApplication::translate("SpaceLook", "Opened file location"));
         if (m_launchSuccessCallback) {
             m_launchSuccessCallback();
         }
@@ -332,20 +331,20 @@ bool OpenWithButton::launchHandler(int index)
 bool OpenWithButton::launchDirectEntry(const HandlerEntry& entry)
 {
     if (entry.executablePath.trimmed().isEmpty()) {
-        reportStatus(QStringLiteral("The application path is unavailable."));
+        reportStatus(QCoreApplication::translate("SpaceLook", "The application path is unavailable."));
         return false;
     }
 
     if (!QProcess::startDetached(entry.executablePath, entry.arguments)) {
         qDebug().noquote() << QStringLiteral("[SpaceLookOpenWith] Direct launch failed for %1 exe=\"%2\" args=%3")
             .arg(entry.displayName, entry.executablePath, entry.arguments.join(QStringLiteral(" | ")));
-        reportStatus(QStringLiteral("Failed to open with %1").arg(entry.displayName));
+        reportStatus(QCoreApplication::translate("SpaceLook", "Failed to open with %1").arg(entry.displayName));
         return false;
     }
 
     qDebug().noquote() << QStringLiteral("[SpaceLookOpenWith] Direct launch %1 exe=\"%2\" path=\"%3\"")
         .arg(entry.displayName, entry.executablePath, m_targetPath);
-    reportStatus(QStringLiteral("Opened with %1").arg(entry.displayName));
+    reportStatus(QCoreApplication::translate("SpaceLook", "Opened with %1").arg(entry.displayName));
     if (m_launchSuccessCallback) {
         m_launchSuccessCallback();
     }

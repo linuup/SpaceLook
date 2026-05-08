@@ -1,4 +1,4 @@
-#include "core/render_type_registry.h"
+﻿#include "core/render_type_registry.h"
 
 #include <QCoreApplication>
 #include <QDir>
@@ -91,7 +91,20 @@ QJsonObject defaultRenderTypeConfig()
                 QStringLiteral("mpg"),
                 QStringLiteral("mpeg"),
                 QStringLiteral("mts"),
-                QStringLiteral("m2ts")
+                QStringLiteral("m2ts"),
+                QStringLiteral("3gp"),
+                QStringLiteral("3g2"),
+                QStringLiteral("asf"),
+                QStringLiteral("f4v"),
+                QStringLiteral("flv"),
+                QStringLiteral("hevc"),
+                QStringLiteral("m2v"),
+                QStringLiteral("mxf"),
+                QStringLiteral("ogv"),
+                QStringLiteral("rm"),
+                QStringLiteral("rmvb"),
+                QStringLiteral("vob"),
+                QStringLiteral("wtv")
             }}
         }},
         {QStringLiteral("media_audio"), QJsonObject{
@@ -380,6 +393,57 @@ QList<QPair<QString, DetectedTypeInfo>> parseMappings(const QJsonObject& root)
     return mappings;
 }
 
+bool mergeMissingDefaultSuffixes(QJsonObject* rootObject)
+{
+    if (!rootObject) {
+        return false;
+    }
+
+    bool changed = false;
+    const QJsonObject defaultRoot = defaultRenderTypeConfig();
+    const QStringList rendererKeys = defaultRoot.keys();
+
+    for (const QString& rendererKey : rendererKeys) {
+        const QJsonObject defaultEntry = defaultRoot.value(rendererKey).toObject();
+        if (!rootObject->contains(rendererKey) || !rootObject->value(rendererKey).isObject()) {
+            rootObject->insert(rendererKey, defaultEntry);
+            changed = true;
+            continue;
+        }
+
+        QJsonObject entry = rootObject->value(rendererKey).toObject();
+        QJsonArray suffixes = entry.value(QStringLiteral("suffixes")).toArray();
+        QStringList existingSuffixes;
+        for (const QJsonValue& suffixValue : suffixes) {
+            const QString suffix = suffixValue.toString().trimmed().toLower();
+            if (!suffix.isEmpty() && !existingSuffixes.contains(suffix)) {
+                existingSuffixes.append(suffix);
+            }
+        }
+
+        const QJsonArray defaultSuffixes = defaultEntry.value(QStringLiteral("suffixes")).toArray();
+        bool entryChanged = false;
+        for (const QJsonValue& suffixValue : defaultSuffixes) {
+            const QString suffix = suffixValue.toString().trimmed().toLower();
+            if (suffix.isEmpty() || existingSuffixes.contains(suffix)) {
+                continue;
+            }
+
+            suffixes.append(suffix);
+            existingSuffixes.append(suffix);
+            entryChanged = true;
+        }
+
+        if (entryChanged) {
+            entry.insert(QStringLiteral("suffixes"), suffixes);
+            rootObject->insert(rendererKey, entry);
+            changed = true;
+        }
+    }
+
+    return changed;
+}
+
 }
 
 RenderTypeRegistry& RenderTypeRegistry::instance()
@@ -418,6 +482,14 @@ void RenderTypeRegistry::load()
             rootObject = document.object();
         }
         file.close();
+    }
+
+    if (mergeMissingDefaultSuffixes(&rootObject)) {
+        if (file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+            const QJsonDocument document(rootObject);
+            file.write(document.toJson(QJsonDocument::Indented));
+            file.close();
+        }
     }
 
     m_suffixMappings = parseMappings(rootObject);

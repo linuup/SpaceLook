@@ -1,4 +1,4 @@
-#include "platform/explorer_item_locator.h"
+﻿#include "platform/explorer_item_locator.h"
 
 #include "core/file_type_detector.h"
 

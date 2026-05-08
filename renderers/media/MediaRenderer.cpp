@@ -1,8 +1,10 @@
-#include "renderers/media/MediaRenderer.h"
+﻿#include "renderers/media/MediaRenderer.h"
 
+#include <QAxObject>
 #include <QBoxLayout>
 #include <QCoreApplication>
 #include <QDebug>
+#include <QDesktopServices>
 #include <QDir>
 #include <QEvent>
 #include <QFileInfo>
@@ -24,6 +26,14 @@
 #include <QVariant>
 #include <QResizeEvent>
 #include <QShowEvent>
+#include <QVideoWidget>
+
+#include <MediaInfo/MediaInfo.h>
+
+#include <Windows.h>
+#include <propkey.h>
+#include <propsys.h>
+#include <shobjidl.h>
 
 #include "renderers/FileTypeIconResolver.h"
 #include "renderers/FluentIconFont.h"
@@ -39,6 +49,58 @@ constexpr int kDefaultMediaVolume = 50;
 constexpr int kMaxMediaVolume = 100;
 constexpr double kMpvVolumeGain = 2.0;
 constexpr int kMaxQtPlayerVolume = 100;
+constexpr const char* kMpvRuntimeHelpUrl = "https://github.com/linuup/SpaceLook/releases/tag/main";
+
+enum class MediaPlaybackPolicy
+{
+    WindowsDefault,
+    WindowsThenExtensionOrMpv,
+    MpvPreferred
+};
+
+struct MediaCodecMetadata
+{
+    QString containerFormat;
+    QString videoCompression;
+    QString videoFourCc;
+    QString videoBitrate;
+    QString videoWidth;
+    QString videoHeight;
+    QString audioFormat;
+    QString audioCompression;
+};
+
+QString mediaInfoStringToQString(const MediaInfoLib::String& value)
+{
+#if defined(UNICODE) || defined(_UNICODE)
+    return QString::fromWCharArray(value.c_str()).trimmed();
+#else
+    return QString::fromUtf8(value.c_str()).trimmed();
+#endif
+}
+
+MediaInfoLib::String mediaInfoParameter(const char* value)
+{
+#if defined(UNICODE) || defined(_UNICODE)
+    return MediaInfoLib::String(reinterpret_cast<const wchar_t*>(QString::fromLatin1(value).utf16()));
+#else
+    return MediaInfoLib::String(value);
+#endif
+}
+
+MediaInfoLib::String mediaInfoPath(const QString& filePath)
+{
+#if defined(UNICODE) || defined(_UNICODE)
+    return MediaInfoLib::String(reinterpret_cast<const wchar_t*>(QDir::toNativeSeparators(filePath).utf16()));
+#else
+    return MediaInfoLib::String(QDir::toNativeSeparators(filePath).toUtf8().constData());
+#endif
+}
+
+QString mediaInfoGet(MediaInfoLib::MediaInfo& mediaInfo, MediaInfoLib::stream_t streamKind, const char* parameter)
+{
+    return mediaInfoStringToQString(mediaInfo.Get(streamKind, 0, mediaInfoParameter(parameter)));
+}
 
 bool isVideoType(const HoveredItemInfo& info)
 {
@@ -50,6 +112,16 @@ bool isAudioType(const HoveredItemInfo& info)
     return info.typeKey == QStringLiteral("audio");
 }
 
+bool isWindowsPlayerFallbackAudioFile(const HoveredItemInfo& info)
+{
+    const QString suffix = QFileInfo(info.filePath).suffix().trimmed().toLower();
+    return suffix == QStringLiteral("aif") ||
+        suffix == QStringLiteral("aiff") ||
+        suffix == QStringLiteral("alac") ||
+        suffix == QStringLiteral("mid") ||
+        suffix == QStringLiteral("midi");
+}
+
 QString displayTitleForMedia(const HoveredItemInfo& info)
 {
     if (!info.fileName.trimmed().isEmpty()) {
@@ -58,7 +130,7 @@ QString displayTitleForMedia(const HoveredItemInfo& info)
     if (!info.title.trimmed().isEmpty()) {
         return info.title;
     }
-    return QStringLiteral("Media Preview");
+    return QCoreApplication::translate("SpaceLook", "Media Preview");
 }
 
 QString playGlyph()
@@ -79,6 +151,447 @@ QString volumeGlyph()
 QString mutedGlyph()
 {
     return FluentIconFont::glyph(0xE74F);
+}
+
+QString propVariantToString(const PROPVARIANT& value)
+{
+    switch (value.vt) {
+    case VT_LPWSTR:
+        return value.pwszVal ? QString::fromWCharArray(value.pwszVal).trimmed() : QString();
+    case VT_BSTR:
+        return value.bstrVal ? QString::fromWCharArray(value.bstrVal).trimmed() : QString();
+    case VT_LPSTR:
+        return value.pszVal ? QString::fromLocal8Bit(value.pszVal).trimmed() : QString();
+    case VT_UI4:
+        return QString::number(value.ulVal);
+    case VT_UI8:
+        return QString::number(value.uhVal.QuadPart);
+    case VT_I4:
+        return QString::number(value.lVal);
+    default:
+        return QString();
+    }
+}
+
+QString shellPropertyString(IPropertyStore* propertyStore, const PROPERTYKEY& key)
+{
+    if (!propertyStore) {
+        return QString();
+    }
+
+    PROPVARIANT value;
+    PropVariantInit(&value);
+    QString result;
+    if (SUCCEEDED(propertyStore->GetValue(key, &value))) {
+        result = propVariantToString(value);
+    }
+    PropVariantClear(&value);
+    return result;
+}
+
+QString fourCcText(const QString& rawValue)
+{
+    bool ok = false;
+    const quint32 fourCc = rawValue.toUInt(&ok);
+    if (!ok || fourCc == 0) {
+        return rawValue.trimmed();
+    }
+
+    QString text;
+    for (int index = 0; index < 4; ++index) {
+        const QChar ch(static_cast<char>((fourCc >> (index * 8)) & 0xff));
+        if (!ch.isPrint()) {
+            return rawValue.trimmed();
+        }
+        text.append(ch);
+    }
+    return text.trimmed();
+}
+
+QString bitrateText(const QString& rawValue)
+{
+    bool ok = false;
+    const double bitsPerSecond = rawValue.toDouble(&ok);
+    if (!ok || bitsPerSecond <= 0.0) {
+        return QString();
+    }
+
+    if (bitsPerSecond >= 1000.0 * 1000.0) {
+        return QStringLiteral("%1 Mbps").arg(QString::number(bitsPerSecond / 1000.0 / 1000.0, 'f', 2));
+    }
+    return QStringLiteral("%1 Kbps").arg(QString::number(bitsPerSecond / 1000.0, 'f', 0));
+}
+
+MediaCodecMetadata mediaInfoCodecMetadataForFile(const QString& filePath)
+{
+    MediaCodecMetadata metadata;
+    const QString cleanPath = filePath.trimmed();
+    if (cleanPath.isEmpty()) {
+        return metadata;
+    }
+
+    MediaInfoLib::MediaInfo mediaInfo;
+    mediaInfo.Option(mediaInfoParameter("ParseUnknownExtensions"), mediaInfoParameter("1"));
+    if (mediaInfo.Open(mediaInfoPath(cleanPath)) == 0) {
+        return metadata;
+    }
+
+    metadata.containerFormat = mediaInfoGet(mediaInfo, MediaInfoLib::Stream_General, "Format");
+    metadata.videoCompression = mediaInfoGet(mediaInfo, MediaInfoLib::Stream_Video, "Format");
+    metadata.videoFourCc = mediaInfoGet(mediaInfo, MediaInfoLib::Stream_Video, "CodecID");
+    metadata.videoBitrate = mediaInfoGet(mediaInfo, MediaInfoLib::Stream_Video, "BitRate/String");
+    metadata.videoWidth = mediaInfoGet(mediaInfo, MediaInfoLib::Stream_Video, "Width");
+    metadata.videoHeight = mediaInfoGet(mediaInfo, MediaInfoLib::Stream_Video, "Height");
+    metadata.audioFormat = mediaInfoGet(mediaInfo, MediaInfoLib::Stream_Audio, "Format");
+    metadata.audioCompression = mediaInfoGet(mediaInfo, MediaInfoLib::Stream_Audio, "CodecID");
+    mediaInfo.Close();
+    return metadata;
+}
+
+MediaCodecMetadata mediaCodecMetadataForFile(const QString& filePath)
+{
+    MediaCodecMetadata metadata = mediaInfoCodecMetadataForFile(filePath);
+    if (!metadata.videoCompression.isEmpty() ||
+        !metadata.videoFourCc.isEmpty() ||
+        !metadata.audioFormat.isEmpty() ||
+        !metadata.audioCompression.isEmpty()) {
+        return metadata;
+    }
+
+    const QString cleanPath = filePath.trimmed();
+    if (cleanPath.isEmpty()) {
+        return metadata;
+    }
+
+    const HRESULT initHr = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+    const bool shouldUninitialize = SUCCEEDED(initHr);
+    if (FAILED(initHr) && initHr != RPC_E_CHANGED_MODE) {
+        return metadata;
+    }
+
+    IPropertyStore* propertyStore = nullptr;
+    const QString nativePath = QDir::toNativeSeparators(cleanPath);
+    const HRESULT storeHr = SHGetPropertyStoreFromParsingName(
+        reinterpret_cast<PCWSTR>(nativePath.utf16()),
+        nullptr,
+        GPS_DEFAULT,
+        IID_PPV_ARGS(&propertyStore));
+    if (FAILED(storeHr) || !propertyStore) {
+        if (shouldUninitialize) {
+            CoUninitialize();
+        }
+        return metadata;
+    }
+
+    metadata.videoCompression = shellPropertyString(propertyStore, PKEY_Video_Compression);
+    metadata.videoFourCc = fourCcText(shellPropertyString(propertyStore, PKEY_Video_FourCC));
+    metadata.videoBitrate = bitrateText(shellPropertyString(propertyStore, PKEY_Video_EncodingBitrate));
+    metadata.videoWidth = shellPropertyString(propertyStore, PKEY_Video_FrameWidth);
+    metadata.videoHeight = shellPropertyString(propertyStore, PKEY_Video_FrameHeight);
+    metadata.audioFormat = shellPropertyString(propertyStore, PKEY_Audio_Format);
+    metadata.audioCompression = shellPropertyString(propertyStore, PKEY_Audio_Compression);
+
+    propertyStore->Release();
+    if (shouldUninitialize) {
+        CoUninitialize();
+    }
+
+    return metadata;
+}
+
+QString codecProbeText(const HoveredItemInfo& info, const MediaCodecMetadata& metadata)
+{
+    return QStringList{
+        QFileInfo(info.filePath).suffix(),
+        metadata.containerFormat,
+        metadata.videoCompression,
+        metadata.videoFourCc,
+        metadata.audioFormat,
+        metadata.audioCompression
+    }.join(QStringLiteral(" ")).toLower();
+}
+
+bool codecTextContainsAny(const QString& text, const QStringList& needles)
+{
+    for (const QString& needle : needles) {
+        if (text.contains(needle, Qt::CaseInsensitive)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool isCodecMissingMediaError(const QString& errorText)
+{
+    const QString lower = errorText.trimmed().toLower();
+    return lower.contains(QStringLiteral("unsupported media")) ||
+        lower.contains(QStringLiteral("codec is missing")) ||
+        lower.contains(QStringLiteral("missing codec")) ||
+        lower.contains(QStringLiteral("codec not found")) ||
+        lower.contains(QStringLiteral("unsupported codec"));
+}
+
+QString normalizedCodecToken(const QString& value)
+{
+    QString token = value.trimmed().toLower();
+    token.remove(QLatin1Char('.'));
+    token.remove(QLatin1Char('-'));
+    token.remove(QLatin1Char('_'));
+    token.remove(QLatin1Char(' '));
+    return token;
+}
+
+QString friendlyVideoCodecName(const MediaCodecMetadata& metadata)
+{
+    const QString probe = codecProbeText(HoveredItemInfo(), metadata);
+    const QString token = normalizedCodecToken(metadata.videoFourCc + QLatin1Char(' ') + metadata.videoCompression);
+
+    if (token.contains(QStringLiteral("h264")) ||
+        token.contains(QStringLiteral("avc")) ||
+        token.contains(QStringLiteral("x264")) ||
+        probe.contains(QStringLiteral("34363248"))) {
+        return QStringLiteral("H.264 video");
+    }
+    if (token.contains(QStringLiteral("hevc")) ||
+        token.contains(QStringLiteral("h265")) ||
+        token.contains(QStringLiteral("hvc1")) ||
+        token.contains(QStringLiteral("hev1"))) {
+        return QStringLiteral("H.265 video");
+    }
+    if (token.contains(QStringLiteral("av1")) ||
+        token.contains(QStringLiteral("av01"))) {
+        return QStringLiteral("AV1 video");
+    }
+    if (token.contains(QStringLiteral("vp9")) ||
+        token.contains(QStringLiteral("vp09"))) {
+        return QStringLiteral("VP9 video");
+    }
+    if (token.contains(QStringLiteral("wmv"))) {
+        return QStringLiteral("WMV video");
+    }
+    if (token.contains(QStringLiteral("avc"))) {
+        return QStringLiteral("H.264 video");
+    }
+    if (token.contains(QStringLiteral("mpg")) ||
+        token.contains(QStringLiteral("mpeg"))) {
+        return QStringLiteral("MPEG video");
+    }
+    if (token.contains(QStringLiteral("theora"))) {
+        return QStringLiteral("Theora video");
+    }
+
+    return QString();
+}
+
+QString friendlyAudioCodecName(const MediaCodecMetadata& metadata)
+{
+    const QString token = normalizedCodecToken(metadata.audioFormat + QLatin1Char(' ') + metadata.audioCompression);
+
+    if (token.contains(QStringLiteral("aac")) ||
+        token.contains(QStringLiteral("00001610"))) {
+        return QStringLiteral("AAC audio");
+    }
+    if (token.contains(QStringLiteral("mp3")) ||
+        token.contains(QStringLiteral("mpeglayer3")) ||
+        token.contains(QStringLiteral("0055"))) {
+        return QStringLiteral("MP3 audio");
+    }
+    if (token.contains(QStringLiteral("opus"))) {
+        return QStringLiteral("Opus audio");
+    }
+    if (token.contains(QStringLiteral("vorbis"))) {
+        return QStringLiteral("Vorbis audio");
+    }
+    if (token.contains(QStringLiteral("flac"))) {
+        return QStringLiteral("FLAC audio");
+    }
+    if (token.contains(QStringLiteral("wma"))) {
+        return QStringLiteral("WMA audio");
+    }
+    if (token.contains(QStringLiteral("pcm"))) {
+        return QStringLiteral("PCM audio");
+    }
+
+    return QString();
+}
+
+QString normalizedDisplayToken(const QString& value)
+{
+    return value.trimmed().replace(QLatin1Char('_'), QLatin1Char(' '));
+}
+
+QString friendlyCodecSummaryForMetadata(const MediaCodecMetadata& metadata)
+{
+    QStringList parts;
+    QString videoCodec = friendlyVideoCodecName(metadata);
+    if (videoCodec.isEmpty() && !metadata.videoCompression.trimmed().isEmpty()) {
+        videoCodec = QStringLiteral("%1 video").arg(normalizedDisplayToken(metadata.videoCompression));
+    }
+    if (!videoCodec.isEmpty()) {
+        parts.append(videoCodec);
+    }
+
+    QString audioCodec = friendlyAudioCodecName(metadata);
+    if (audioCodec.isEmpty() && !metadata.audioFormat.trimmed().isEmpty()) {
+        audioCodec = QStringLiteral("%1 audio").arg(normalizedDisplayToken(metadata.audioFormat));
+    }
+    if (!audioCodec.isEmpty()) {
+        parts.append(audioCodec);
+    }
+
+    if (!metadata.videoWidth.isEmpty() && !metadata.videoHeight.isEmpty()) {
+        parts.append(QStringLiteral("%1x%2").arg(metadata.videoWidth, metadata.videoHeight));
+    }
+
+    if (parts.isEmpty() && !metadata.containerFormat.trimmed().isEmpty()) {
+        parts.append(QStringLiteral("%1 container").arg(normalizedDisplayToken(metadata.containerFormat)));
+    }
+
+    return parts.isEmpty() ? QString() : QCoreApplication::translate("SpaceLook", "Codec: %1").arg(parts.join(QStringLiteral(", ")));
+}
+
+bool isWindowsDefaultVideoCodec(const MediaCodecMetadata& metadata)
+{
+    const QString fourCc = normalizedCodecToken(metadata.videoFourCc);
+    const QString compression = normalizedCodecToken(metadata.videoCompression);
+    return fourCc == QStringLiteral("h264") ||
+        fourCc == QStringLiteral("avc1") ||
+        fourCc == QStringLiteral("avc") ||
+        fourCc == QStringLiteral("x264") ||
+        fourCc == QStringLiteral("wmv1") ||
+        fourCc == QStringLiteral("wmv2") ||
+        fourCc == QStringLiteral("wmv3") ||
+        fourCc == QStringLiteral("wvc1") ||
+        compression.contains(QStringLiteral("h264")) ||
+        compression.contains(QStringLiteral("avc")) ||
+        compression.contains(QStringLiteral("wmv"));
+}
+
+QString playbackPolicyName(MediaPlaybackPolicy policy)
+{
+    switch (policy) {
+    case MediaPlaybackPolicy::WindowsDefault:
+        return QStringLiteral("WindowsDefault");
+    case MediaPlaybackPolicy::WindowsThenExtensionOrMpv:
+        return QStringLiteral("WindowsThenExtensionOrMpv");
+    case MediaPlaybackPolicy::MpvPreferred:
+        return QStringLiteral("MpvPreferred");
+    }
+    return QStringLiteral("Unknown");
+}
+
+QString windowsFailureAdviceForPolicy(MediaPlaybackPolicy policy)
+{
+    switch (policy) {
+    case MediaPlaybackPolicy::WindowsDefault:
+        return QCoreApplication::translate("SpaceLook", "This codec is expected to use the Windows media backend. Check Qt multimedia plugin deployment and Windows media components.");
+    case MediaPlaybackPolicy::WindowsThenExtensionOrMpv:
+        return QCoreApplication::translate("SpaceLook", "Install the matching Windows media extension, such as HEVC, AV1, or VP9, or install the optional mpv enhanced playback runtime. Download help: %1")
+            .arg(QString::fromLatin1(kMpvRuntimeHelpUrl));
+    case MediaPlaybackPolicy::MpvPreferred:
+        return QCoreApplication::translate("SpaceLook", "This codec is usually better supported by the optional mpv enhanced playback runtime. Download help: %1")
+            .arg(QString::fromLatin1(kMpvRuntimeHelpUrl));
+    }
+    return QCoreApplication::translate("SpaceLook", "Check Windows media components or install the optional mpv enhanced playback runtime. Download help: %1")
+        .arg(QString::fromLatin1(kMpvRuntimeHelpUrl));
+}
+
+MediaPlaybackPolicy playbackPolicyForMedia(const HoveredItemInfo& info, const MediaCodecMetadata& metadata)
+{
+    const QString probe = codecProbeText(info, metadata);
+
+    if (isAudioType(info)) {
+        if (codecTextContainsAny(probe, {
+                QStringLiteral("aac"),
+                QStringLiteral("mp3"),
+                QStringLiteral("mpeg layer-3"),
+                QStringLiteral("mpeg layer 3"),
+                QStringLiteral("pcm"),
+                QStringLiteral("wave"),
+                QStringLiteral("wav"),
+                QStringLiteral("aiff"),
+                QStringLiteral("aif"),
+                QStringLiteral("alac"),
+                QStringLiteral("mid"),
+                QStringLiteral("midi")
+            })) {
+            return MediaPlaybackPolicy::WindowsDefault;
+        }
+
+        if (codecTextContainsAny(probe, {
+                QStringLiteral("ape"),
+                QStringLiteral("monkey"),
+                QStringLiteral("opus"),
+                QStringLiteral("vorbis"),
+                QStringLiteral("oga"),
+                QStringLiteral("ogg")
+            })) {
+            return MediaPlaybackPolicy::MpvPreferred;
+        }
+
+        return MediaPlaybackPolicy::WindowsThenExtensionOrMpv;
+    }
+
+    if (isWindowsDefaultVideoCodec(metadata)) {
+        return MediaPlaybackPolicy::WindowsDefault;
+    }
+
+    if (codecTextContainsAny(probe, {
+            QStringLiteral("h.264"),
+            QStringLiteral("h264"),
+            QStringLiteral("avc"),
+            QStringLiteral("avc1"),
+            QStringLiteral("wmv"),
+            QStringLiteral("wmv1"),
+            QStringLiteral("wmv2"),
+            QStringLiteral("wmv3"),
+            QStringLiteral("wvc1")
+        })) {
+        return MediaPlaybackPolicy::WindowsDefault;
+    }
+
+    if (codecTextContainsAny(probe, {
+            QStringLiteral("hevc"),
+            QStringLiteral("h.265"),
+            QStringLiteral("h265"),
+            QStringLiteral("hev1"),
+            QStringLiteral("hvc1"),
+            QStringLiteral("av1"),
+            QStringLiteral("av01"),
+            QStringLiteral("vp9"),
+            QStringLiteral("vp09")
+        })) {
+        return MediaPlaybackPolicy::WindowsThenExtensionOrMpv;
+    }
+
+    if (codecTextContainsAny(probe, {
+            QStringLiteral("prores"),
+            QStringLiteral("apch"),
+            QStringLiteral("apcn"),
+            QStringLiteral("apcs"),
+            QStringLiteral("apco"),
+            QStringLiteral("dnxhd"),
+            QStringLiteral("dnxhr"),
+            QStringLiteral("ffv1"),
+            QStringLiteral("huffyuv"),
+            QStringLiteral("huff"),
+            QStringLiteral("lagarith"),
+            QStringLiteral("lags"),
+            QStringLiteral("theora"),
+            QStringLiteral("realvideo"),
+            QStringLiteral("rv40"),
+            QStringLiteral("rv30"),
+            QStringLiteral("bink"),
+            QStringLiteral("smacker"),
+            QStringLiteral("cineform"),
+            QStringLiteral("dirac"),
+            QStringLiteral("flv1"),
+            QStringLiteral("sorenson")
+        })) {
+        return MediaPlaybackPolicy::MpvPreferred;
+    }
+
+    return MediaPlaybackPolicy::WindowsThenExtensionOrMpv;
 }
 
 enum mpv_format {
@@ -126,6 +639,8 @@ public:
             !setOptionString("input-default-bindings", "no", errorMessage) ||
             !setOptionString("input-vo-keyboard", "no", errorMessage) ||
             !setOptionString("osc", "no", errorMessage) ||
+            !setOptionString("osd-level", "0", errorMessage) ||
+            !setOptionString("osd-bar", "no", errorMessage) ||
             !setOptionString("border", "no", errorMessage) ||
             !setOptionString("keep-open", "yes", errorMessage) ||
             !setOptionString("volume-max", "200", errorMessage) ||
@@ -152,13 +667,17 @@ public:
         return true;
     }
 
-    bool loadFile(const QString& filePath, QString* errorMessage)
+    bool loadFile(const QString& filePath, QString* errorMessage, bool startPaused = true)
     {
         if (!m_handle || !m_command) {
             if (errorMessage) {
                 *errorMessage = QStringLiteral("libmpv is not initialized.");
             }
             return false;
+        }
+
+        if (!setPaused(startPaused)) {
+            qDebug().noquote() << QStringLiteral("[SpaceLookRender] libmpv pre-load pause setup failed");
         }
 
         const QByteArray utf8Path = QDir::toNativeSeparators(filePath).toUtf8();
@@ -225,7 +744,7 @@ public:
 
     bool loadMedia(const QString& filePath, QString* errorMessage, bool startPaused)
     {
-        if (!loadFile(filePath, errorMessage)) {
+        if (!loadFile(filePath, errorMessage, startPaused)) {
             return false;
         }
 
@@ -411,6 +930,173 @@ private:
     mpv_error_string_fn m_errorString = nullptr;
 };
 
+class WindowsMediaPlayerAudioBackend
+{
+public:
+    ~WindowsMediaPlayerAudioBackend()
+    {
+        shutdown();
+    }
+
+    bool load(const QString& filePath, QString* errorMessage)
+    {
+        shutdown();
+
+        m_player = new QAxObject(QStringLiteral("WMPlayer.OCX"));
+        if (!m_player || m_player->isNull()) {
+            shutdown();
+            if (errorMessage) {
+                *errorMessage = QStringLiteral("Windows Media Player runtime is unavailable.");
+            }
+            return false;
+        }
+
+        m_controls = m_player->querySubObject("controls");
+        m_settings = m_player->querySubObject("settings");
+        m_currentMedia = m_player->querySubObject("newMedia(const QString&)", QDir::toNativeSeparators(filePath));
+        if (!m_controls || !m_settings || !m_currentMedia) {
+            shutdown();
+            if (errorMessage) {
+                *errorMessage = QStringLiteral("Windows Media Player could not prepare this audio file.");
+            }
+            return false;
+        }
+
+        m_player->setProperty("uiMode", QStringLiteral("none"));
+        m_player->setProperty("stretchToFit", false);
+        m_player->setProperty("enableContextMenu", false);
+        m_settings->setProperty("autoStart", false);
+        m_settings->setProperty("mute", false);
+        m_settings->setProperty("volume", kDefaultMediaVolume);
+        m_player->setProperty("currentMedia", m_currentMedia->asVariant());
+        m_paused = true;
+        return true;
+    }
+
+    void shutdown()
+    {
+        if (m_controls) {
+            m_controls->dynamicCall("stop()");
+        }
+        delete m_currentMedia;
+        delete m_settings;
+        delete m_controls;
+        delete m_player;
+        m_currentMedia = nullptr;
+        m_settings = nullptr;
+        m_controls = nullptr;
+        m_player = nullptr;
+        m_paused = true;
+        m_volume = kDefaultMediaVolume;
+        m_muted = false;
+    }
+
+    bool isLoaded() const
+    {
+        return m_player && !m_player->isNull() && m_controls && m_settings;
+    }
+
+    bool setPaused(bool paused)
+    {
+        if (!isLoaded()) {
+            return false;
+        }
+
+        m_controls->dynamicCall(paused ? "pause()" : "play()");
+        m_paused = paused;
+        return true;
+    }
+
+    bool paused(bool* pausedState) const
+    {
+        if (!pausedState) {
+            return false;
+        }
+        *pausedState = m_paused;
+        return true;
+    }
+
+    bool durationSeconds(double* duration) const
+    {
+        if (!duration || !m_currentMedia) {
+            return false;
+        }
+        bool ok = false;
+        const double value = m_currentMedia->property("duration").toDouble(&ok);
+        if (!ok || value <= 0.0) {
+            return false;
+        }
+        *duration = value;
+        return true;
+    }
+
+    bool positionSeconds(double* position) const
+    {
+        if (!position || !m_controls) {
+            return false;
+        }
+        bool ok = false;
+        const double value = m_controls->property("currentPosition").toDouble(&ok);
+        if (!ok) {
+            return false;
+        }
+        *position = value;
+        return true;
+    }
+
+    bool seekSeconds(double seconds)
+    {
+        if (!m_controls) {
+            return false;
+        }
+        m_controls->setProperty("currentPosition", qMax(0.0, seconds));
+        return true;
+    }
+
+    bool setMuted(bool muted)
+    {
+        if (!m_settings) {
+            return false;
+        }
+        m_muted = muted;
+        m_settings->setProperty("mute", muted);
+        return true;
+    }
+
+    bool muted(bool* mutedState) const
+    {
+        if (!mutedState) {
+            return false;
+        }
+        *mutedState = m_muted;
+        return true;
+    }
+
+    bool setVolume(int volume)
+    {
+        if (!m_settings) {
+            return false;
+        }
+        m_volume = qBound(0, volume, kMaxMediaVolume);
+        m_settings->setProperty("volume", m_volume);
+        return true;
+    }
+
+    int volume() const
+    {
+        return m_volume;
+    }
+
+private:
+    QAxObject* m_player = nullptr;
+    QAxObject* m_controls = nullptr;
+    QAxObject* m_settings = nullptr;
+    QAxObject* m_currentMedia = nullptr;
+    bool m_paused = true;
+    bool m_muted = false;
+    int m_volume = kDefaultMediaVolume;
+};
+
 MediaRenderer::MediaRenderer(QWidget* parent)
     : QWidget(parent)
     , m_headerRow(new QWidget(this))
@@ -421,7 +1107,9 @@ MediaRenderer::MediaRenderer(QWidget* parent)
     , m_pathTitleLabel(new QLabel(this))
     , m_pathValueLabel(new QLabel(this))
     , m_openWithButton(new OpenWithButton(this))
-    , m_statusLabel(new QLabel(this))
+    , m_statusRow(new QWidget(this))
+    , m_statusLabel(new QLabel(m_statusRow))
+    , m_mpvHelpButton(new QPushButton(m_statusRow))
     , m_stageCard(new QWidget(this))
     , m_stageLayout(new QVBoxLayout(m_stageCard))
     , m_controlsCard(new QWidget(this))
@@ -430,6 +1118,7 @@ MediaRenderer::MediaRenderer(QWidget* parent)
     , m_audioPlaceholder(new QLabel(m_mediaViewport))
     , m_videoPlaceholder(new QLabel(m_mediaViewport))
     , m_videoHost(new QWidget(m_mediaViewport))
+    , m_qtVideoWidget(new QVideoWidget(m_mediaViewport))
     , m_playPauseButton(new QPushButton(m_controlsCard))
     , m_volumeButton(new QPushButton(m_controlsCard))
     , m_positionLabel(new QLabel(m_controlsCard))
@@ -439,6 +1128,7 @@ MediaRenderer::MediaRenderer(QWidget* parent)
     , m_volumeSlider(new QSlider(Qt::Horizontal, m_controlsCard))
     , m_videoPollTimer(new QTimer(this))
     , m_mpvBackend(new InternalMpvVideoBackend())
+    , m_windowsAudioBackend(new WindowsMediaPlayerAudioBackend())
 {
     setAttribute(Qt::WA_StyledBackground, true);
     setObjectName(QStringLiteral("MediaRendererRoot"));
@@ -450,7 +1140,9 @@ MediaRenderer::MediaRenderer(QWidget* parent)
     m_pathTitleLabel->setObjectName(QStringLiteral("MediaPathTitle"));
     m_pathValueLabel->setObjectName(QStringLiteral("MediaPathValue"));
     m_openWithButton->setObjectName(QStringLiteral("MediaOpenWithButton"));
+    m_statusRow->setObjectName(QStringLiteral("MediaStatusRow"));
     m_statusLabel->setObjectName(QStringLiteral("MediaStatus"));
+    m_mpvHelpButton->setObjectName(QStringLiteral("MediaMpvHelpButton"));
     m_stageCard->setObjectName(QStringLiteral("MediaStage"));
     m_controlsCard->setObjectName(QStringLiteral("MediaControlsCard"));
     m_mediaViewport->setObjectName(QStringLiteral("MediaViewport"));
@@ -458,6 +1150,7 @@ MediaRenderer::MediaRenderer(QWidget* parent)
     m_audioPlaceholder->setObjectName(QStringLiteral("MediaAudioPlaceholder"));
     m_videoPlaceholder->setObjectName(QStringLiteral("MediaVideoPlaceholder"));
     m_videoHost->setObjectName(QStringLiteral("MediaVideoHost"));
+    m_qtVideoWidget->setObjectName(QStringLiteral("MediaQtVideoWidget"));
     m_playPauseButton->setObjectName(QStringLiteral("MediaPlayPause"));
     m_volumeButton->setObjectName(QStringLiteral("MediaVolumeButton"));
     m_volumeValueLabel->setObjectName(QStringLiteral("MediaVolumeValue"));
@@ -470,7 +1163,7 @@ MediaRenderer::MediaRenderer(QWidget* parent)
     rootLayout->setContentsMargins(12, 0, 12, 12);
     rootLayout->setSpacing(8);
     rootLayout->addWidget(m_headerRow);
-    rootLayout->addWidget(m_statusLabel);
+    rootLayout->addWidget(m_statusRow);
     rootLayout->addWidget(m_stageCard, 1);
 
     auto* headerLayout = new QHBoxLayout(m_headerRow);
@@ -484,23 +1177,30 @@ MediaRenderer::MediaRenderer(QWidget* parent)
     pathLayout->setSpacing(8);
     pathLayout->addWidget(m_pathValueLabel, 1);
 
+    auto* statusLayout = new QHBoxLayout(m_statusRow);
+    statusLayout->setContentsMargins(0, 0, 0, 0);
+    statusLayout->setSpacing(8);
+    statusLayout->addWidget(m_statusLabel, 1);
+    statusLayout->addWidget(m_mpvHelpButton);
+
     m_stageLayout->setContentsMargins(12, 12, 12, 12);
     m_stageLayout->setSpacing(10);
     auto* viewportLayout = new QStackedLayout(m_mediaViewport);
     viewportLayout->setStackingMode(QStackedLayout::StackAll);
     viewportLayout->setContentsMargins(0, 0, 0, 0);
     viewportLayout->addWidget(m_videoPlaceholder);
+    viewportLayout->addWidget(m_qtVideoWidget);
     viewportLayout->addWidget(m_videoHost);
     viewportLayout->addWidget(m_audioPlaceholder);
     viewportLayout->addWidget(m_centerOverlayLabel);
     m_stageLayout->addWidget(m_mediaViewport, 1);
 
     auto* controlsShellLayout = new QVBoxLayout(m_controlsCard);
-    controlsShellLayout->setContentsMargins(14, 10, 14, 10);
+    controlsShellLayout->setContentsMargins(12, 8, 12, 8);
     controlsShellLayout->setSpacing(0);
 
     auto* controlsLayout = new QHBoxLayout();
-    controlsLayout->setSpacing(10);
+    controlsLayout->setSpacing(8);
     controlsLayout->addWidget(m_playPauseButton);
     controlsLayout->addWidget(m_positionLabel);
     controlsLayout->addWidget(m_positionSlider, 1);
@@ -553,6 +1253,9 @@ MediaRenderer::MediaRenderer(QWidget* parent)
     m_videoHost->setAutoFillBackground(false);
     m_videoHost->hide();
     m_videoHost->installEventFilter(this);
+    m_qtVideoWidget->hide();
+    m_qtVideoWidget->installEventFilter(this);
+    m_qtVideoWidget->setAspectRatioMode(Qt::KeepAspectRatio);
 
     m_positionSlider->setRange(0, 0);
     m_positionLabel->setText(QStringLiteral("00:00"));
@@ -562,17 +1265,22 @@ MediaRenderer::MediaRenderer(QWidget* parent)
     m_positionSlider->installEventFilter(this);
     m_volumeSlider->setRange(0, kMaxMediaVolume);
     m_volumeSlider->setValue(m_audioVolume);
-    m_volumeSlider->setFixedWidth(108);
-    m_playPauseButton->setFixedSize(44, 44);
-    m_volumeButton->setFixedSize(36, 36);
+    m_volumeSlider->setFixedWidth(76);
+    m_playPauseButton->setFixedSize(38, 38);
+    m_volumeButton->setFixedSize(34, 34);
     m_playPauseButton->setCursor(Qt::PointingHandCursor);
     m_volumeButton->setCursor(Qt::PointingHandCursor);
     m_positionSlider->setCursor(Qt::PointingHandCursor);
     m_volumeSlider->setCursor(Qt::PointingHandCursor);
-    m_playPauseButton->setToolTip(QStringLiteral("Play or pause"));
-    m_volumeButton->setToolTip(QStringLiteral("Mute or restore volume"));
+    m_playPauseButton->setToolTip(QCoreApplication::translate("SpaceLook", "Play or pause"));
+    m_volumeButton->setToolTip(QCoreApplication::translate("SpaceLook", "Mute or restore volume"));
+    m_mpvHelpButton->setText(QCoreApplication::translate("SpaceLook", "Get MPV Plugin"));
+    m_mpvHelpButton->setCursor(Qt::PointingHandCursor);
+    m_mpvHelpButton->setToolTip(QCoreApplication::translate("SpaceLook", "Open SpaceLook MPV plugin download page"));
     PreviewStateVisuals::prepareStatusLabel(m_statusLabel);
+    m_statusRow->hide();
     m_statusLabel->hide();
+    m_mpvHelpButton->hide();
     m_playPauseButton->setText(playGlyph());
     m_volumeButton->setText(volumeGlyph());
     m_volumeValueLabel->setText(QString::number(m_audioVolume));
@@ -585,6 +1293,10 @@ MediaRenderer::MediaRenderer(QWidget* parent)
 
     connect(m_volumeButton, &QPushButton::clicked, this, [this]() {
         toggleVolumePopup();
+    });
+
+    connect(m_mpvHelpButton, &QPushButton::clicked, this, []() {
+        QDesktopServices::openUrl(QUrl(QString::fromLatin1(kMpvRuntimeHelpUrl)));
     });
 
     connect(m_volumeSlider, &QSlider::valueChanged, this, [this](int value) {
@@ -605,6 +1317,32 @@ MediaRenderer::MediaRenderer(QWidget* parent)
     });
 
     connect(m_videoPollTimer, &QTimer::timeout, this, [this]() {
+        if (m_usingWindowsAudioFallback && m_windowsAudioBackend && m_windowsAudioBackend->isLoaded()) {
+            double durationSeconds = 0.0;
+            if (m_windowsAudioBackend->durationSeconds(&durationSeconds)) {
+                m_positionSlider->setRange(0, qMax(0, static_cast<int>(durationSeconds * 1000.0)));
+                m_durationLabel->setText(formatTime(static_cast<qint64>(durationSeconds * 1000.0)));
+            }
+
+            if (!m_isSeeking) {
+                double positionSeconds = 0.0;
+                if (m_windowsAudioBackend->positionSeconds(&positionSeconds)) {
+                    const qint64 positionMilliseconds = static_cast<qint64>(positionSeconds * 1000.0);
+                    m_positionSlider->setValue(static_cast<int>(positionMilliseconds));
+                    m_positionLabel->setText(formatTime(positionMilliseconds));
+                    m_videoPreviewReady = true;
+                }
+            }
+
+            bool paused = true;
+            if (m_windowsAudioBackend->paused(&paused)) {
+                m_mpvPaused = paused;
+            }
+            updatePlaybackButton();
+            updateCenterOverlay();
+            return;
+        }
+
         if (!m_usingMpvPlayback || !m_mpvBackend || !m_mpvBackend->isLoaded()) {
             return;
         }
@@ -622,6 +1360,9 @@ MediaRenderer::MediaRenderer(QWidget* parent)
                 m_positionSlider->setValue(static_cast<int>(positionMilliseconds));
                 m_positionLabel->setText(formatTime(positionMilliseconds));
                 m_videoPreviewReady = true;
+                if (!m_mpvPaused) {
+                    m_videoStartedPlayback = true;
+                }
             }
         }
 
@@ -647,6 +1388,8 @@ MediaRenderer::MediaRenderer(QWidget* parent)
 MediaRenderer::~MediaRenderer()
 {
     unload();
+    delete m_windowsAudioBackend;
+    m_windowsAudioBackend = nullptr;
     delete m_mpvBackend;
     m_mpvBackend = nullptr;
 }
@@ -669,6 +1412,16 @@ bool MediaRenderer::eventFilter(QObject* watched, QEvent* event)
     }
 
     if (watched == m_videoHost && event && m_usingMpvVideo) {
+        if (event->type() == QEvent::MouseButtonPress) {
+            auto* mouseEvent = static_cast<QMouseEvent*>(event);
+            if (mouseEvent->button() == Qt::LeftButton) {
+                togglePlayback();
+                return true;
+            }
+        }
+    }
+
+    if (watched == m_qtVideoWidget && event && isVideoType(m_info) && !m_usingMpvPlayback) {
         if (event->type() == QEvent::MouseButtonPress) {
             auto* mouseEvent = static_cast<QMouseEvent*>(event);
             if (mouseEvent->button() == Qt::LeftButton) {
@@ -743,12 +1496,25 @@ QWidget* MediaRenderer::widget()
     return this;
 }
 
+void MediaRenderer::warmUp()
+{
+    ensureAudioBackend();
+    m_videoHost->winId();
+    m_qtVideoWidget->winId();
+}
+
 void MediaRenderer::load(const HoveredItemInfo& info)
 {
     m_info = info;
     m_mpvPaused = true;
     m_videoPreviewReady = false;
+    m_videoStartedPlayback = false;
+    m_usingWindowsAudioFallback = false;
+    m_triedMpvVideoFallback = false;
+    m_triedMpvAudioFallback = false;
+    m_allowMpvFallbackForCurrentMedia = false;
     m_videoHost->hide();
+    m_qtVideoWidget->hide();
     m_videoPlaceholder->hide();
     m_audioPlaceholder->hide();
     m_centerOverlayLabel->hide();
@@ -758,7 +1524,7 @@ void MediaRenderer::load(const HoveredItemInfo& info)
     m_titleLabel->setText(displayTitleForMedia(info));
     m_titleLabel->setCopyText(m_titleLabel->text());
     m_iconLabel->setPixmap(FileTypeIconResolver::pixmapForInfo(info, m_iconLabel->contentsRect().size()));
-    m_pathValueLabel->setText(info.filePath.trimmed().isEmpty() ? QStringLiteral("(Unavailable)") : info.filePath);
+    m_pathValueLabel->setText(info.filePath.trimmed().isEmpty() ? QCoreApplication::translate("SpaceLook", "(Unavailable)") : info.filePath);
     m_openWithButton->setTargetContext(info.filePath, info.typeKey);
 
     m_positionSlider->setValue(0);
@@ -766,40 +1532,37 @@ void MediaRenderer::load(const HoveredItemInfo& info)
     m_positionLabel->setText(QStringLiteral("00:00"));
     m_durationLabel->setText(QStringLiteral("00:00"));
 
+    const MediaCodecMetadata codecMetadata = mediaCodecMetadataForFile(info.filePath);
+    const MediaPlaybackPolicy playbackPolicy = playbackPolicyForMedia(info, codecMetadata);
+    m_currentCodecSummary = friendlyCodecSummaryForMetadata(codecMetadata);
+    m_allowMpvFallbackForCurrentMedia = true;
+    qDebug().noquote() << QStringLiteral("[SpaceLookRender] Media codec policy=%1 summary=\"%2\" path=\"%3\"")
+        .arg(playbackPolicyName(playbackPolicy), m_currentCodecSummary, info.filePath);
+
     if (isVideoType(info)) {
         destroyAudioBackend();
-        ensureVideoBackend();
-        m_usingMpvPlayback = true;
-
-        if (!m_mpvBackend || !m_mpvBackend->isLoaded()) {
-            updateStatusLabel(QStringLiteral("libmpv video backend is unavailable."));
-            updateMediaUi();
-            updatePlaybackButton();
-            updateVolumeButton();
-            updateVolumePopup();
-            updateCenterOverlay();
+        if (tryStartMpvVideo()) {
             return;
         }
 
-        QString errorMessage;
-        if (!m_mpvBackend->loadFile(info.filePath, &errorMessage)) {
-            updateStatusLabel(errorMessage);
-            updateMediaUi();
-            updatePlaybackButton();
-            updateVolumeButton();
-            updateVolumePopup();
-            updateCenterOverlay();
+        destroyVideoBackend();
+        ensureAudioBackend();
+        m_usingMpvPlayback = false;
+        m_usingMpvVideo = false;
+        m_videoPreviewReady = false;
+
+        if (!m_player) {
+            updateStatusLabel(mpvInstallHint(QCoreApplication::translate("SpaceLook", "Windows media playback backend is unavailable.")));
             return;
         }
 
-        m_videoMuted = false;
-        m_videoVolume = kDefaultMediaVolume;
-        m_mpvBackend->setMuted(false);
-        m_mpvBackend->setVolume(static_cast<double>(m_videoVolume) * kMpvVolumeGain);
-        m_mpvBackend->setPaused(true);
-        m_mpvPaused = true;
-        updateStatusLabel(QString());
-        m_videoPollTimer->start();
+        m_player->stop();
+        m_player->setVideoOutput(m_qtVideoWidget);
+        m_player->setMuted(false);
+        m_player->setVolume(qMin(kDefaultMediaVolume, kMaxQtPlayerVolume));
+        m_audioVolume = kDefaultMediaVolume;
+        m_player->setMedia(QUrl::fromLocalFile(info.filePath));
+        updateStatusLabel(QCoreApplication::translate("SpaceLook", "Video ready. Click play to start."));
         updateMediaUi();
         updatePlaybackButton();
         updateVolumeButton();
@@ -808,35 +1571,8 @@ void MediaRenderer::load(const HoveredItemInfo& info)
         return;
     }
 
-    ensureVideoBackend();
-    if (m_mpvBackend && m_mpvBackend->isLoaded()) {
-        destroyAudioBackend();
-        m_usingMpvPlayback = true;
-        m_usingMpvVideo = false;
-
-        QString errorMessage;
-        if (!m_mpvBackend->loadMedia(info.filePath, &errorMessage, true)) {
-            updateStatusLabel(errorMessage);
-            updateMediaUi();
-            updatePlaybackButton();
-            updateVolumeButton();
-            updateVolumePopup();
-            updateCenterOverlay();
-            return;
-        }
-
-        m_videoMuted = false;
-        m_videoVolume = kDefaultMediaVolume;
-        m_mpvBackend->setMuted(false);
-        m_mpvBackend->setVolume(static_cast<double>(m_videoVolume) * kMpvVolumeGain);
-        m_mpvPaused = true;
-        m_videoPollTimer->start();
-        updateStatusLabel(QString());
-        updateMediaUi();
-        updatePlaybackButton();
-        updateVolumeButton();
-        updateVolumePopup();
-        updateCenterOverlay();
+    destroyAudioBackend();
+    if (playbackPolicy == MediaPlaybackPolicy::MpvPreferred && tryStartMpvAudio()) {
         return;
     }
 
@@ -844,7 +1580,7 @@ void MediaRenderer::load(const HoveredItemInfo& info)
     ensureAudioBackend();
     m_usingMpvPlayback = false;
     if (!m_player) {
-        updateStatusLabel(QStringLiteral("Audio backend is unavailable."));
+        updateStatusLabel(mpvInstallHint(QCoreApplication::translate("SpaceLook", "Audio backend is unavailable.")));
         updateMediaUi();
         updatePlaybackButton();
         updateCenterOverlay();
@@ -855,7 +1591,7 @@ void MediaRenderer::load(const HoveredItemInfo& info)
     m_player->setMuted(false);
     m_player->setVolume(qMin(m_audioVolume, kMaxQtPlayerVolume));
     m_player->setMedia(QUrl::fromLocalFile(info.filePath));
-    updateStatusLabel(QString());
+    updateStatusLabel(QCoreApplication::translate("SpaceLook", "Audio ready. Click play to start."));
     updateMediaUi();
     updatePlaybackButton();
     updateVolumeButton();
@@ -867,15 +1603,24 @@ void MediaRenderer::unload()
 {
     destroyAudioBackend();
     destroyVideoBackend();
+    if (m_windowsAudioBackend) {
+        m_windowsAudioBackend->shutdown();
+    }
     m_info = HoveredItemInfo();
     m_mpvPaused = true;
     m_videoPreviewReady = false;
+    m_videoStartedPlayback = false;
+    m_usingWindowsAudioFallback = false;
+    m_triedMpvVideoFallback = false;
+    m_triedMpvAudioFallback = false;
+    m_allowMpvFallbackForCurrentMedia = false;
+    m_currentCodecSummary.clear();
     m_videoMuted = true;
     m_positionSlider->setValue(0);
     m_positionSlider->setRange(0, 0);
     m_positionLabel->setText(QStringLiteral("00:00"));
     m_durationLabel->setText(QStringLiteral("00:00"));
-    PreviewStateVisuals::clearStatus(m_statusLabel);
+    updateStatusLabel(QString());
     m_pathValueLabel->clear();
     m_openWithButton->setTargetContext(QString(), QString());
     m_audioPlaceholder->clear();
@@ -883,6 +1628,7 @@ void MediaRenderer::unload()
     m_videoPlaceholder->clear();
     m_videoPlaceholder->hide();
     m_videoHost->hide();
+    m_qtVideoWidget->hide();
     m_centerOverlayLabel->hide();
     updateVolumeButton();
     updateVolumePopup();
@@ -954,15 +1700,34 @@ void MediaRenderer::applyChrome()
         "  border-radius: 4px;"
         "  padding: 8px 12px;"
         "}"
+        "#MediaMpvHelpButton {"
+        "  background: #0078d4;"
+        "  color: #ffffff;"
+        "  border: 1px solid #0078d4;"
+        "  border-radius: 10px;"
+        "  padding: 8px 14px;"
+        "  min-width: 76px;"
+        "  font-family: 'Segoe UI Rounded';"
+        "  font-size: 12px;"
+        "  font-weight: 700;"
+        "}"
+        "#MediaMpvHelpButton:hover {"
+        "  background: #106ebe;"
+        "  border-color: #106ebe;"
+        "}"
+        "#MediaMpvHelpButton:pressed {"
+        "  background: #005a9e;"
+        "  border-color: #005a9e;"
+        "}"
         "#MediaStage {"
         "  background: #111111;"
         "  border: 1px solid #d0d0d0;"
         "  border-radius: 8px;"
         "}"
         "#MediaControlsCard {"
-        "  background: rgba(250, 250, 250, 0.94);"
-        "  border: 1px solid rgba(255, 255, 255, 0.68);"
-        "  border-radius: 6px;"
+        "  background: rgba(248, 250, 253, 0.94);"
+        "  border: 1px solid rgba(213, 223, 235, 0.92);"
+        "  border-radius: 12px;"
         "}"
         "#MediaViewport {"
         "  background: transparent;"
@@ -979,91 +1744,99 @@ void MediaRenderer::applyChrome()
         "  color: rgba(255, 255, 255, 0.92);"
         "}"
         "#MediaPlayPause {"
-        "  background: #0078d4;"
-        "  color: #ffffff;"
-        "  border: 1px solid #0078d4;"
-        "  border-radius: 22px;"
-        "  min-width: 44px;"
-        "  min-height: 44px;"
+        "  background: rgba(255, 255, 255, 0.72);"
+        "  color: #005fb8;"
+        "  border: 1px solid rgba(208, 221, 235, 0.95);"
+        "  border-radius: 10px;"
+        "  min-width: 38px;"
+        "  min-height: 38px;"
         "  padding: 0px;"
         "}"
         "#MediaPlayPause:hover {"
-        "  background: #106ebe;"
-        "  border-color: #106ebe;"
+        "  background: rgba(235, 246, 255, 1.0);"
+        "  border-color: rgba(154, 205, 255, 0.95);"
+        "  color: #005a9e;"
         "}"
         "#MediaPlayPause:pressed {"
-        "  background: #005a9e;"
-        "  border-color: #005a9e;"
+        "  background: rgba(211, 235, 255, 1.0);"
+        "  border-color: rgba(96, 171, 245, 1.0);"
+        "  color: #004578;"
         "}"
         "#MediaVolumeButton {"
-        "  background: transparent;"
-        "  color: #1f1f1f;"
-        "  border: 1px solid transparent;"
-        "  border-radius: 4px;"
-        "  min-width: 36px;"
-        "  min-height: 36px;"
+        "  background: rgba(255, 255, 255, 0.54);"
+        "  color: #243548;"
+        "  border: 1px solid rgba(208, 221, 235, 0.82);"
+        "  border-radius: 9px;"
+        "  min-width: 34px;"
+        "  min-height: 34px;"
         "  padding: 0px;"
         "}"
         "#MediaVolumeButton:hover {"
-        "  background: #e5e5e5;"
-        "  border-color: #e5e5e5;"
+        "  background: rgba(235, 246, 255, 1.0);"
+        "  border-color: rgba(154, 205, 255, 0.95);"
+        "  color: #005a9e;"
         "}"
         "#MediaVolumeButton:pressed {"
-        "  background: #d0d0d0;"
-        "  border-color: #d0d0d0;"
+        "  background: rgba(211, 235, 255, 1.0);"
+        "  border-color: rgba(96, 171, 245, 1.0);"
+        "  color: #004578;"
         "}"
         "#MediaVolumeValue {"
-        "  color: #4c4c4c;"
+        "  color: #586678;"
+        "  background: rgba(255, 255, 255, 0.58);"
+        "  border: 1px solid rgba(208, 221, 235, 0.72);"
+        "  border-radius: 8px;"
         "  font-family: 'Segoe UI Rounded';"
         "  font-size: 12px;"
-        "  min-width: 28px;"
+        "  min-width: 34px;"
+        "  padding: 5px 7px;"
         "}"
         "#MediaTimeLabel {"
-        "  color: #4c4c4c;"
+        "  color: #586678;"
         "  min-width: 48px;"
         "}"
         "#MediaSlider::groove:horizontal {"
-        "  height: 3px;"
-        "  border-radius: 1px;"
-        "  background: #c8c8c8;"
+        "  height: 4px;"
+        "  border-radius: 2px;"
+        "  background: rgba(196, 207, 219, 0.92);"
         "}"
         "#MediaSlider::sub-page:horizontal {"
-        "  border-radius: 1px;"
+        "  border-radius: 2px;"
         "  background: #0078d4;"
         "}"
         "#MediaSlider::add-page:horizontal {"
-        "  border-radius: 1px;"
-        "  background: #c8c8c8;"
+        "  border-radius: 2px;"
+        "  background: rgba(196, 207, 219, 0.92);"
         "}"
         "#MediaSlider::handle:horizontal {"
         "  background: #0078d4;"
-        "  border: 2px solid #ffffff;"
-        "  width: 14px;"
-        "  margin: -7px 0;"
-        "  border-radius: 7px;"
+        "  border: 2px solid rgba(255, 255, 255, 0.96);"
+        "  width: 12px;"
+        "  margin: -6px 0;"
+        "  border-radius: 6px;"
         "}"
         "#MediaSlider::handle:horizontal:hover {"
         "  background: #106ebe;"
         "}"
         "#MediaVolumeSlider::groove:horizontal {"
         "  height: 3px;"
-        "  border-radius: 1px;"
-        "  background: #c8c8c8;"
+        "  border-radius: 2px;"
+        "  background: rgba(196, 207, 219, 0.92);"
         "}"
         "#MediaVolumeSlider::sub-page:horizontal {"
-        "  border-radius: 1px;"
+        "  border-radius: 2px;"
         "  background: #0078d4;"
         "}"
         "#MediaVolumeSlider::add-page:horizontal {"
-        "  border-radius: 1px;"
-        "  background: #c8c8c8;"
+        "  border-radius: 2px;"
+        "  background: rgba(196, 207, 219, 0.92);"
         "}"
         "#MediaVolumeSlider::handle:horizontal {"
         "  background: #0078d4;"
-        "  border: 2px solid #ffffff;"
-        "  width: 12px;"
-        "  margin: -7px 0;"
-        "  border-radius: 6px;"
+        "  border: 2px solid rgba(255, 255, 255, 0.96);"
+        "  width: 10px;"
+        "  margin: -5px 0;"
+        "  border-radius: 5px;"
         "}"
     );
 
@@ -1118,7 +1891,61 @@ void MediaRenderer::ensureAudioBackend()
         m_durationLabel->setText(formatTime(duration));
     });
 
-    connect(m_player, &QMediaPlayer::stateChanged, this, [this]() {
+    connect(m_player, &QMediaPlayer::mediaStatusChanged, this, [this](QMediaPlayer::MediaStatus status) {
+        if (m_usingMpvPlayback) {
+            return;
+        }
+
+        qDebug().noquote() << QStringLiteral("[SpaceLookRender] Qt media status=%1 path=\"%2\" error=\"%3\"")
+            .arg(static_cast<int>(status))
+            .arg(m_info.filePath, m_player ? m_player->errorString() : QString());
+
+        if (status == QMediaPlayer::LoadedMedia || status == QMediaPlayer::BufferedMedia) {
+            m_videoPreviewReady = true;
+            updateStatusLabel(QString());
+            updateMediaUi();
+            updatePlaybackButton();
+            updateVolumeButton();
+            updateVolumePopup();
+            updateCenterOverlay();
+            return;
+        }
+
+        if (status == QMediaPlayer::InvalidMedia && isVideoType(m_info)) {
+            const QString errorText = m_player && !m_player->errorString().trimmed().isEmpty()
+                ? m_player->errorString()
+                : QCoreApplication::translate("SpaceLook", "Windows media backend could not parse this video.");
+            if (isCodecMissingMediaError(errorText)) {
+                updateStatusLabel(mpvInstallHint(errorText));
+                updateMediaUi();
+                updatePlaybackButton();
+                updateVolumeButton();
+                updateVolumePopup();
+                updateCenterOverlay();
+                return;
+            }
+            if (m_allowMpvFallbackForCurrentMedia) {
+                fallbackToMpvVideo(errorText);
+                return;
+            }
+            updateStatusLabel(windowsBackendFailureMessage(errorText));
+        }
+        if (status == QMediaPlayer::InvalidMedia && isAudioType(m_info)) {
+            const QString errorText = m_player && !m_player->errorString().trimmed().isEmpty()
+                ? m_player->errorString()
+                : QCoreApplication::translate("SpaceLook", "Windows media backend could not parse this audio file.");
+            if (isWindowsPlayerFallbackAudioFile(m_info) && tryStartWindowsAudioFallback(errorText)) {
+                return;
+            }
+            fallbackToMpvAudio(errorText);
+        }
+    });
+
+    connect(m_player, &QMediaPlayer::stateChanged, this, [this](QMediaPlayer::State state) {
+        if (state == QMediaPlayer::PlayingState) {
+            m_videoStartedPlayback = true;
+            updateMediaUi();
+        }
         updatePlaybackButton();
         updateCenterOverlay();
     });
@@ -1137,21 +1964,63 @@ void MediaRenderer::ensureAudioBackend()
     connect(m_player, QOverload<QMediaPlayer::Error>::of(&QMediaPlayer::error), this, [this](QMediaPlayer::Error) {
         const QString errorText = m_player && !m_player->errorString().trimmed().isEmpty()
             ? m_player->errorString()
-            : QStringLiteral("Audio preview failed to load.");
-        qDebug().noquote() << QStringLiteral("[SpaceLookRender] Audio backend error path=\"%1\" message=\"%2\"")
+            : QCoreApplication::translate("SpaceLook", "Media preview failed to load.");
+        qDebug().noquote() << QStringLiteral("[SpaceLookRender] Media backend error path=\"%1\" message=\"%2\"")
             .arg(m_info.filePath, errorText);
+        if (isVideoType(m_info) && !m_usingMpvPlayback) {
+            if (isCodecMissingMediaError(errorText)) {
+                updateStatusLabel(mpvInstallHint(errorText));
+                updateMediaUi();
+                updatePlaybackButton();
+                updateVolumeButton();
+                updateVolumePopup();
+                updateCenterOverlay();
+                return;
+            }
+            if (m_allowMpvFallbackForCurrentMedia) {
+                fallbackToMpvVideo(errorText);
+                return;
+            }
+            updateStatusLabel(windowsBackendFailureMessage(errorText));
+            return;
+        }
+        if (isAudioType(m_info) && !m_usingMpvPlayback && m_allowMpvFallbackForCurrentMedia) {
+            if (isWindowsPlayerFallbackAudioFile(m_info) && tryStartWindowsAudioFallback(errorText)) {
+                return;
+            }
+            fallbackToMpvAudio(errorText);
+            return;
+        }
+        if (isAudioType(m_info) && !m_usingMpvPlayback && isCodecMissingMediaError(errorText)) {
+            updateStatusLabel(mpvInstallHint(errorText));
+            updateMediaUi();
+            updatePlaybackButton();
+            updateVolumeButton();
+            updateVolumePopup();
+            updateCenterOverlay();
+            return;
+        }
+        if (isAudioType(m_info) && !m_usingMpvPlayback) {
+            updateStatusLabel(windowsBackendFailureMessage(errorText));
+            return;
+        }
         updateStatusLabel(errorText);
     });
 }
 
 void MediaRenderer::destroyAudioBackend()
 {
+    m_videoPollTimer->stop();
     m_usingMpvPlayback = false;
+    m_usingWindowsAudioFallback = false;
     if (m_player) {
         m_player->stop();
         m_player->setMedia(QUrl());
         m_player->deleteLater();
         m_player = nullptr;
+    }
+    if (m_windowsAudioBackend) {
+        m_windowsAudioBackend->shutdown();
     }
     m_audioPlaceholder->hide();
 }
@@ -1179,8 +2048,10 @@ void MediaRenderer::destroyVideoBackend()
     m_videoPollTimer->stop();
     m_usingMpvVideo = false;
     m_usingMpvPlayback = false;
+    m_usingWindowsAudioFallback = false;
     m_mpvPaused = true;
     m_videoPreviewReady = false;
+    m_videoStartedPlayback = false;
     if (m_mpvBackend) {
         m_mpvBackend->shutdown();
     }
@@ -1189,8 +2060,284 @@ void MediaRenderer::destroyVideoBackend()
     m_centerOverlayLabel->hide();
 }
 
+bool MediaRenderer::tryStartMpvVideo()
+{
+    if (!isVideoType(m_info)) {
+        return false;
+    }
+
+    ensureVideoBackend();
+    m_usingMpvPlayback = true;
+    m_usingMpvVideo = true;
+
+    if (!m_mpvBackend || !m_mpvBackend->isLoaded()) {
+        return false;
+    }
+
+    QString errorMessage;
+    if (!m_mpvBackend->loadFile(m_info.filePath, &errorMessage)) {
+        qDebug().noquote() << QStringLiteral("[SpaceLookRender] libmpv video load failed path=\"%1\" message=\"%2\"")
+            .arg(m_info.filePath, errorMessage);
+        return false;
+    }
+
+    m_videoMuted = false;
+    m_videoVolume = kDefaultMediaVolume;
+    m_mpvBackend->setMuted(false);
+    m_mpvBackend->setVolume(static_cast<double>(m_videoVolume) * kMpvVolumeGain);
+    m_mpvBackend->setPaused(true);
+    m_mpvPaused = true;
+    updateStatusLabel(QString());
+    m_videoPollTimer->start();
+    updateMediaUi();
+    updatePlaybackButton();
+    updateVolumeButton();
+    updateVolumePopup();
+    updateCenterOverlay();
+    return true;
+}
+
+bool MediaRenderer::tryStartMpvAudio()
+{
+    if (!isAudioType(m_info)) {
+        return false;
+    }
+
+    ensureVideoBackend();
+    m_usingMpvPlayback = true;
+    m_usingMpvVideo = false;
+
+    if (!m_mpvBackend || !m_mpvBackend->isLoaded()) {
+        return false;
+    }
+
+    QString errorMessage;
+    if (!m_mpvBackend->loadMedia(m_info.filePath, &errorMessage, true)) {
+        qDebug().noquote() << QStringLiteral("[SpaceLookRender] libmpv audio load failed path=\"%1\" message=\"%2\"")
+            .arg(m_info.filePath, errorMessage);
+        return false;
+    }
+
+    m_videoMuted = false;
+    m_videoVolume = kDefaultMediaVolume;
+    m_mpvBackend->setMuted(false);
+    m_mpvBackend->setVolume(static_cast<double>(m_videoVolume) * kMpvVolumeGain);
+    m_mpvPaused = true;
+    m_videoPollTimer->start();
+    updateStatusLabel(QString());
+    updateMediaUi();
+    updatePlaybackButton();
+    updateVolumeButton();
+    updateVolumePopup();
+    updateCenterOverlay();
+    return true;
+}
+
+bool MediaRenderer::tryStartWindowsAudioFallback(const QString& reason)
+{
+    if (!isAudioType(m_info) || !isWindowsPlayerFallbackAudioFile(m_info) || !m_windowsAudioBackend) {
+        return false;
+    }
+
+    if (m_player) {
+        m_player->stop();
+        m_player->setMedia(QUrl());
+    }
+
+    QString errorMessage;
+    if (!m_windowsAudioBackend->load(m_info.filePath, &errorMessage)) {
+        qDebug().noquote() << QStringLiteral("[SpaceLookRender] Windows Media Player audio fallback failed path=\"%1\" reason=\"%2\" message=\"%3\"")
+            .arg(m_info.filePath, reason, errorMessage);
+        return false;
+    }
+
+    m_usingMpvPlayback = false;
+    m_usingMpvVideo = false;
+    m_usingWindowsAudioFallback = true;
+    m_mpvPaused = true;
+    m_videoPreviewReady = true;
+    m_videoStartedPlayback = false;
+    m_audioVolume = kDefaultMediaVolume;
+    m_windowsAudioBackend->setMuted(false);
+    m_windowsAudioBackend->setVolume(m_audioVolume);
+    m_videoPollTimer->start();
+    updateStatusLabel(QString());
+    updateMediaUi();
+    updatePlaybackButton();
+    updateVolumeButton();
+    updateVolumePopup();
+    updateCenterOverlay();
+    return true;
+}
+
+QString MediaRenderer::mpvInstallHint(const QString& reason) const
+{
+    const QString cleanReason = reason.trimmed().isEmpty()
+        ? QCoreApplication::translate("SpaceLook", "Windows media backend could not parse this media file.")
+        : reason.trimmed();
+    QString codecSummary = m_currentCodecSummary.trimmed();
+    if (codecSummary.isEmpty() && !m_info.filePath.trimmed().isEmpty()) {
+        codecSummary = friendlyCodecSummaryForMetadata(mediaCodecMetadataForFile(m_info.filePath));
+    }
+    if (codecSummary.isEmpty()) {
+        return QCoreApplication::translate("SpaceLook", "%1\nInstall the optional mpv enhanced playback runtime to preview this media format.")
+            .arg(cleanReason);
+    }
+    return QCoreApplication::translate("SpaceLook", "%1\n%2\nInstall the optional mpv enhanced playback runtime to preview this media format.")
+        .arg(cleanReason, codecSummary);
+}
+
+QString MediaRenderer::windowsBackendFailureMessage(const QString& reason) const
+{
+    const QString cleanReason = reason.trimmed().isEmpty()
+        ? QCoreApplication::translate("SpaceLook", "Windows media backend could not parse this media file.")
+        : reason.trimmed();
+    QString codecSummary = m_currentCodecSummary.trimmed();
+    if (codecSummary.isEmpty() && !m_info.filePath.trimmed().isEmpty()) {
+        codecSummary = friendlyCodecSummaryForMetadata(mediaCodecMetadataForFile(m_info.filePath));
+    }
+    if (codecSummary.isEmpty()) {
+        return QCoreApplication::translate("SpaceLook", "%1\nThis codec is expected to use the Windows media backend, so mpv is not required for this file. Check Qt multimedia plugin deployment and Windows media components.")
+            .arg(cleanReason);
+    }
+    return QCoreApplication::translate("SpaceLook", "%1\n%2\nThis codec is expected to use the Windows media backend, so mpv is not required for this file. Check Qt multimedia plugin deployment and Windows media components.")
+        .arg(cleanReason, codecSummary);
+}
+
+bool MediaRenderer::isMpvInstallHintMessage(const QString& message) const
+{
+    return message.contains(QStringLiteral("mpv enhanced playback runtime"), Qt::CaseInsensitive) ||
+        isCodecMissingMediaError(message);
+}
+
+void MediaRenderer::fallbackToMpvVideo(const QString& reason)
+{
+    if (!isVideoType(m_info) || m_triedMpvVideoFallback) {
+        updateStatusLabel(mpvInstallHint(reason));
+        updateMediaUi();
+        updatePlaybackButton();
+        updateVolumeButton();
+        updateVolumePopup();
+        updateCenterOverlay();
+        return;
+    }
+
+    m_triedMpvVideoFallback = true;
+    if (m_player) {
+        m_player->stop();
+        m_player->setMedia(QUrl());
+    }
+    if (m_windowsAudioBackend) {
+        m_windowsAudioBackend->shutdown();
+    }
+    m_usingWindowsAudioFallback = false;
+
+    ensureVideoBackend();
+    m_usingMpvPlayback = true;
+    m_usingMpvVideo = true;
+
+    if (!m_mpvBackend || !m_mpvBackend->isLoaded()) {
+        updateStatusLabel(mpvInstallHint(reason));
+        updateMediaUi();
+        updatePlaybackButton();
+        updateVolumeButton();
+        updateVolumePopup();
+        updateCenterOverlay();
+        return;
+    }
+
+    QString errorMessage;
+    if (!m_mpvBackend->loadFile(m_info.filePath, &errorMessage)) {
+        updateStatusLabel(mpvInstallHint(errorMessage));
+        updateMediaUi();
+        updatePlaybackButton();
+        updateVolumeButton();
+        updateVolumePopup();
+        updateCenterOverlay();
+        return;
+    }
+
+    m_videoMuted = false;
+    m_videoVolume = kDefaultMediaVolume;
+    m_mpvBackend->setMuted(false);
+    m_mpvBackend->setVolume(static_cast<double>(m_videoVolume) * kMpvVolumeGain);
+    m_mpvBackend->setPaused(true);
+    m_mpvPaused = true;
+    updateStatusLabel(QString());
+    m_videoPollTimer->start();
+    updateMediaUi();
+    updatePlaybackButton();
+    updateVolumeButton();
+    updateVolumePopup();
+    updateCenterOverlay();
+}
+
+void MediaRenderer::fallbackToMpvAudio(const QString& reason)
+{
+    if (!isAudioType(m_info) || m_triedMpvAudioFallback) {
+        updateStatusLabel(mpvInstallHint(reason));
+        updateMediaUi();
+        updatePlaybackButton();
+        updateVolumeButton();
+        updateVolumePopup();
+        updateCenterOverlay();
+        return;
+    }
+
+    m_triedMpvAudioFallback = true;
+    if (m_player) {
+        m_player->stop();
+        m_player->setMedia(QUrl());
+    }
+
+    ensureVideoBackend();
+    m_usingMpvPlayback = true;
+    m_usingMpvVideo = false;
+
+    if (!m_mpvBackend || !m_mpvBackend->isLoaded()) {
+        updateStatusLabel(mpvInstallHint(reason));
+        updateMediaUi();
+        updatePlaybackButton();
+        updateVolumeButton();
+        updateVolumePopup();
+        updateCenterOverlay();
+        return;
+    }
+
+    QString errorMessage;
+    if (!m_mpvBackend->loadMedia(m_info.filePath, &errorMessage, true)) {
+        updateStatusLabel(mpvInstallHint(errorMessage));
+        updateMediaUi();
+        updatePlaybackButton();
+        updateVolumeButton();
+        updateVolumePopup();
+        updateCenterOverlay();
+        return;
+    }
+
+    m_videoMuted = false;
+    m_videoVolume = kDefaultMediaVolume;
+    m_mpvBackend->setMuted(false);
+    m_mpvBackend->setVolume(static_cast<double>(m_videoVolume) * kMpvVolumeGain);
+    m_mpvPaused = true;
+    m_videoPollTimer->start();
+    updateStatusLabel(QString());
+    updateMediaUi();
+    updatePlaybackButton();
+    updateVolumeButton();
+    updateVolumePopup();
+    updateCenterOverlay();
+}
+
 void MediaRenderer::seekToSliderValue(int value)
 {
+    if (m_usingWindowsAudioFallback) {
+        if (m_windowsAudioBackend && m_windowsAudioBackend->isLoaded()) {
+            m_windowsAudioBackend->seekSeconds(static_cast<double>(value) / 1000.0);
+        }
+        return;
+    }
+
     if (m_usingMpvPlayback) {
         if (m_mpvBackend && m_mpvBackend->isLoaded()) {
             m_mpvBackend->seekSeconds(static_cast<double>(value) / 1000.0);
@@ -1205,6 +2352,25 @@ void MediaRenderer::seekToSliderValue(int value)
 
 void MediaRenderer::togglePlayback()
 {
+    if (m_usingWindowsAudioFallback) {
+        if (!m_windowsAudioBackend || !m_windowsAudioBackend->isLoaded()) {
+            return;
+        }
+
+        bool paused = m_mpvPaused;
+        if (m_windowsAudioBackend->paused(&paused)) {
+            if (m_windowsAudioBackend->setPaused(!paused)) {
+                m_mpvPaused = !paused;
+                if (!m_mpvPaused) {
+                    m_videoStartedPlayback = true;
+                }
+                updatePlaybackButton();
+                updateCenterOverlay();
+            }
+        }
+        return;
+    }
+
     if (m_usingMpvPlayback) {
         if (!m_mpvBackend || !m_mpvBackend->isLoaded()) {
             return;
@@ -1214,6 +2380,10 @@ void MediaRenderer::togglePlayback()
         if (m_mpvBackend->paused(&paused)) {
             if (m_mpvBackend->setPaused(!paused)) {
                 m_mpvPaused = !paused;
+                if (!m_mpvPaused) {
+                    m_videoStartedPlayback = true;
+                    updateMediaUi();
+                }
                 updatePlaybackButton();
                 updateCenterOverlay();
             }
@@ -1228,6 +2398,7 @@ void MediaRenderer::togglePlayback()
     if (m_player->state() == QMediaPlayer::PlayingState) {
         m_player->pause();
     } else {
+        m_videoStartedPlayback = true;
         m_player->play();
     }
     updateCenterOverlay();
@@ -1254,6 +2425,17 @@ void MediaRenderer::setVolumeLevel(int value)
         return;
     }
 
+    if (m_usingWindowsAudioFallback) {
+        m_audioVolume = clampedValue;
+        if (m_windowsAudioBackend && m_windowsAudioBackend->isLoaded()) {
+            m_windowsAudioBackend->setMuted(clampedValue == 0);
+            m_windowsAudioBackend->setVolume(clampedValue);
+        }
+        updateVolumeButton();
+        updateVolumePopup();
+        return;
+    }
+
     m_audioVolume = clampedValue;
     if (m_player) {
         m_player->setMuted(clampedValue == 0);
@@ -1267,6 +2449,14 @@ int MediaRenderer::currentVolumeLevel() const
 {
     if (m_usingMpvPlayback) {
         return m_videoMuted ? 0 : m_videoVolume;
+    }
+
+    if (m_usingWindowsAudioFallback) {
+        bool muted = false;
+        if (m_windowsAudioBackend && m_windowsAudioBackend->muted(&muted) && muted) {
+            return 0;
+        }
+        return m_windowsAudioBackend ? m_windowsAudioBackend->volume() : m_audioVolume;
     }
 
     if (!m_player) {
@@ -1323,6 +2513,11 @@ int MediaRenderer::sliderValueForMousePosition(QSlider* slider, const QPoint& po
 
 void MediaRenderer::updatePlaybackButton()
 {
+    if (m_usingWindowsAudioFallback) {
+        m_playPauseButton->setText(m_mpvPaused ? playGlyph() : pauseGlyph());
+        return;
+    }
+
     if (m_usingMpvPlayback) {
         m_playPauseButton->setText(m_mpvPaused ? playGlyph() : pauseGlyph());
         return;
@@ -1344,6 +2539,7 @@ void MediaRenderer::updateVolumeButton()
 void MediaRenderer::updateVolumePopup()
 {
     const int volume = currentVolumeLevel();
+    m_volumeSlider->setVisible(true);
     const bool sliderWasBlocked = m_volumeSlider->blockSignals(true);
     m_volumeSlider->setValue(volume);
     m_volumeSlider->blockSignals(sliderWasBlocked);
@@ -1353,8 +2549,10 @@ void MediaRenderer::updateVolumePopup()
 void MediaRenderer::updateMediaUi()
 {
     const bool video = isVideoType(m_info);
-    m_videoHost->setVisible(video);
-    m_videoPlaceholder->setVisible(video && shouldShowVideoPlaceholder());
+    const bool showVideoPlaceholder = video && shouldShowVideoPlaceholder();
+    m_videoHost->setVisible(video && m_usingMpvPlayback && !showVideoPlaceholder);
+    m_qtVideoWidget->setVisible(video && !m_usingMpvPlayback && !showVideoPlaceholder);
+    m_videoPlaceholder->setVisible(showVideoPlaceholder);
     m_audioPlaceholder->setVisible(!video);
 
     if (!video) {
@@ -1371,7 +2569,7 @@ void MediaRenderer::updateMediaUi()
 
 void MediaRenderer::syncVideoViewportGeometry()
 {
-    if (!m_mediaViewport || !m_videoHost || !m_videoPlaceholder) {
+    if (!m_mediaViewport || !m_videoHost || !m_qtVideoWidget || !m_videoPlaceholder) {
         return;
     }
 
@@ -1383,6 +2581,9 @@ void MediaRenderer::syncVideoViewportGeometry()
     if (m_videoHost->geometry() != viewportRect) {
         m_videoHost->setGeometry(viewportRect);
     }
+    if (m_qtVideoWidget->geometry() != viewportRect) {
+        m_qtVideoWidget->setGeometry(viewportRect);
+    }
     if (m_videoPlaceholder->geometry() != viewportRect) {
         m_videoPlaceholder->setGeometry(viewportRect);
     }
@@ -1392,6 +2593,8 @@ void MediaRenderer::syncVideoViewportGeometry()
 
     m_videoHost->updateGeometry();
     m_videoHost->update();
+    m_qtVideoWidget->updateGeometry();
+    m_qtVideoWidget->update();
     m_videoPlaceholder->updateGeometry();
     m_videoPlaceholder->update();
     m_audioPlaceholder->updateGeometry();
@@ -1402,10 +2605,29 @@ void MediaRenderer::updateStatusLabel(const QString& message)
 {
     if (message.trimmed().isEmpty()) {
         PreviewStateVisuals::clearStatus(m_statusLabel);
+        if (m_mpvHelpButton) {
+            m_mpvHelpButton->hide();
+        }
+        if (m_statusRow) {
+            m_statusRow->hide();
+        }
         return;
     }
 
-    PreviewStateVisuals::showStatus(m_statusLabel, QStringLiteral("%1\n%2").arg(message, m_info.filePath));
+    QString displayMessage = message;
+    if (isCodecMissingMediaError(displayMessage) &&
+        !displayMessage.contains(QStringLiteral("Codec:"), Qt::CaseInsensitive)) {
+        displayMessage = mpvInstallHint(displayMessage);
+    }
+
+    if (m_statusRow) {
+        m_statusRow->show();
+    }
+    if (m_mpvHelpButton) {
+        m_mpvHelpButton->setVisible(isMpvInstallHintMessage(displayMessage));
+    }
+    qDebug().noquote() << QStringLiteral("[SpaceLookRender] Media status message=\"%1\"").arg(displayMessage);
+    PreviewStateVisuals::showStatus(m_statusLabel, displayMessage);
 }
 
 QString MediaRenderer::formatTime(qint64 milliseconds) const
@@ -1434,6 +2656,10 @@ bool MediaRenderer::isMutedState() const
 
 bool MediaRenderer::isPlaybackPaused() const
 {
+    if (m_usingWindowsAudioFallback) {
+        return m_mpvPaused;
+    }
+
     if (m_usingMpvPlayback) {
         return m_mpvPaused;
     }
@@ -1453,10 +2679,10 @@ bool MediaRenderer::shouldShowVideoPlaceholder() const
     }
 
     if (!m_usingMpvPlayback) {
-        return isPlaybackPaused();
+        return !m_videoPreviewReady || !m_videoStartedPlayback;
     }
 
-    return m_mpvPaused || !m_videoPreviewReady;
+    return !m_videoPreviewReady || !m_videoStartedPlayback;
 }
 
 void MediaRenderer::updateCenterOverlay()

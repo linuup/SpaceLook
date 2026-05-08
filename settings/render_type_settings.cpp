@@ -1,4 +1,4 @@
-#include "settings/render_type_settings.h"
+﻿#include "settings/render_type_settings.h"
 
 #include <QFile>
 #include <QJsonArray>

@@ -1,4 +1,4 @@
-#include "renderers/summary/ArchiveRenderer.h"
+﻿#include "renderers/summary/ArchiveRenderer.h"
 
 #include <QDebug>
 #include <QCoreApplication>
@@ -10,9 +10,17 @@
 #include <QHeaderView>
 #include <QHBoxLayout>
 #include <QIcon>
+#include <QImageReader>
 #include <QLabel>
 #include <QProcess>
+#include <QRegularExpression>
+#include <QScrollArea>
+#include <QSet>
+#include <QSplitter>
+#include <QStackedWidget>
 #include <QStyle>
+#include <QTextCodec>
+#include <QTextEdit>
 #include <QTimer>
 #include <QToolButton>
 #include <QTreeWidget>
@@ -51,6 +59,84 @@ QIcon iconForArchiveEntry(const QString& entryPath, bool isDirectory)
     return FileTypeIconResolver::iconForInfo(info);
 }
 
+bool isPreviewableTextEntry(const QString& entryPath)
+{
+    const QString suffix = QFileInfo(entryPath).suffix().toLower();
+    static const QSet<QString> suffixes = {
+        QStringLiteral("txt"), QStringLiteral("log"), QStringLiteral("md"), QStringLiteral("markdown"),
+        QStringLiteral("json"), QStringLiteral("jsonc"), QStringLiteral("xml"), QStringLiteral("yaml"),
+        QStringLiteral("yml"), QStringLiteral("toml"), QStringLiteral("ini"), QStringLiteral("conf"),
+        QStringLiteral("config"), QStringLiteral("cfg"), QStringLiteral("env"), QStringLiteral("csv"),
+        QStringLiteral("tsv"), QStringLiteral("properties"), QStringLiteral("html"), QStringLiteral("htm"),
+        QStringLiteral("css"), QStringLiteral("scss"), QStringLiteral("sass"), QStringLiteral("less"),
+        QStringLiteral("js"), QStringLiteral("mjs"), QStringLiteral("cjs"), QStringLiteral("jsx"),
+        QStringLiteral("ts"), QStringLiteral("tsx"), QStringLiteral("vue"), QStringLiteral("svelte"),
+        QStringLiteral("py"), QStringLiteral("rb"), QStringLiteral("php"), QStringLiteral("sh"),
+        QStringLiteral("bash"), QStringLiteral("zsh"), QStringLiteral("fish"), QStringLiteral("ps1"),
+        QStringLiteral("sql"), QStringLiteral("c"), QStringLiteral("cc"), QStringLiteral("cpp"),
+        QStringLiteral("cxx"), QStringLiteral("h"), QStringLiteral("hpp"), QStringLiteral("cs"),
+        QStringLiteral("java"), QStringLiteral("kt"), QStringLiteral("swift"), QStringLiteral("go"),
+        QStringLiteral("rs"), QStringLiteral("qss"), QStringLiteral("qml"), QStringLiteral("pro"),
+        QStringLiteral("pri"), QStringLiteral("cmake"), QStringLiteral("gitignore"), QStringLiteral("gitattributes")
+    };
+    return suffixes.contains(suffix);
+}
+
+bool isPreviewableImageEntry(const QString& entryPath)
+{
+    const QString suffix = QFileInfo(entryPath).suffix().toLower();
+    static const QSet<QString> suffixes = {
+        QStringLiteral("png"), QStringLiteral("jpg"), QStringLiteral("jpeg"), QStringLiteral("jpe"),
+        QStringLiteral("bmp"), QStringLiteral("dib"), QStringLiteral("gif"), QStringLiteral("webp"),
+        QStringLiteral("tif"), QStringLiteral("tiff"), QStringLiteral("svg"), QStringLiteral("ico"),
+        QStringLiteral("tga")
+    };
+    return suffixes.contains(suffix);
+}
+
+QString archiveSizeText(qint64 size)
+{
+    if (size < 0) {
+        return QString();
+    }
+    if (size < 1024) {
+        return QStringLiteral("%1 B").arg(size);
+    }
+    if (size < 1024 * 1024) {
+        return QStringLiteral("%1 KB").arg(QString::number(size / 1024.0, 'f', 1));
+    }
+    if (size < 1024ll * 1024ll * 1024ll) {
+        return QStringLiteral("%1 MB").arg(QString::number(size / 1024.0 / 1024.0, 'f', 1));
+    }
+    return QStringLiteral("%1 GB").arg(QString::number(size / 1024.0 / 1024.0 / 1024.0, 'f', 1));
+}
+
+QString textFromArchiveBytes(const QByteArray& data)
+{
+    if (data.startsWith("\xEF\xBB\xBF")) {
+        return QString::fromUtf8(data.constData() + 3, data.size() - 3);
+    }
+    if (data.size() >= 2) {
+        const uchar first = static_cast<uchar>(data.at(0));
+        const uchar second = static_cast<uchar>(data.at(1));
+        if (first == 0xff && second == 0xfe) {
+            return QString::fromUtf16(reinterpret_cast<const char16_t*>(data.constData() + 2), (data.size() - 2) / 2);
+        }
+        if (first == 0xfe && second == 0xff) {
+            QTextCodec* codec = QTextCodec::codecForName("UTF-16BE");
+            return codec ? codec->toUnicode(data.constData() + 2, data.size() - 2) : QString::fromUtf8(data);
+        }
+    }
+    QTextCodec::ConverterState state;
+    QTextCodec* utf8 = QTextCodec::codecForName("UTF-8");
+    const QString decoded = utf8 ? utf8->toUnicode(data.constData(), data.size(), &state) : QString::fromUtf8(data);
+    if (state.invalidChars == 0) {
+        return decoded;
+    }
+    QTextCodec* localCodec = QTextCodec::codecForLocale();
+    return localCodec ? localCodec->toUnicode(data) : QString::fromLocal8Bit(data);
+}
+
 QString bundledSevenZipPath()
 {
     const QString applicationDir = QCoreApplication::applicationDirPath();
@@ -58,9 +144,9 @@ QString bundledSevenZipPath()
         QDir(applicationDir).filePath(QStringLiteral("7zip/7z.exe")),
         QDir(applicationDir).filePath(QStringLiteral("7z.exe")),
 #ifdef SPACELOOK_PROJECT_DIR
-        QDir(QStringLiteral(SPACELOOK_PROJECT_DIR)).filePath(QStringLiteral("third_party/7zip/runtime/7z.exe")),
+        QDir(QStringLiteral(SPACELOOK_PROJECT_DIR)).filePath(QStringLiteral("third_party/7zip/private/7z.exe")),
 #endif
-        QDir(QDir::currentPath()).filePath(QStringLiteral("third_party/7zip/runtime/7z.exe"))
+        QDir(QDir::currentPath()).filePath(QStringLiteral("third_party/7zip/private/7z.exe"))
     };
 
     for (const QString& candidate : candidates) {
@@ -69,7 +155,7 @@ QString bundledSevenZipPath()
         }
     }
 
-    return QStringLiteral("7z");
+    return QString();
 }
 
 }
@@ -85,7 +171,13 @@ ArchiveRenderer::ArchiveRenderer(QWidget* parent)
     , m_pathValueLabel(new QLabel(this))
     , m_openWithButton(new OpenWithButton(this))
     , m_statusLabel(new QLabel(this))
-    , m_treeWidget(new QTreeWidget(this))
+    , m_contentSplitter(new QSplitter(Qt::Horizontal, this))
+    , m_treeWidget(new QTreeWidget(m_contentSplitter))
+    , m_previewStack(new QStackedWidget(m_contentSplitter))
+    , m_emptyPreviewLabel(new QLabel(m_previewStack))
+    , m_textPreview(new QTextEdit(m_previewStack))
+    , m_imageScrollArea(new QScrollArea(m_previewStack))
+    , m_imagePreview(new QLabel(m_imageScrollArea))
 {
     setAttribute(Qt::WA_StyledBackground, true);
     setObjectName(QStringLiteral("ArchiveRendererRoot"));
@@ -98,14 +190,20 @@ ArchiveRenderer::ArchiveRenderer(QWidget* parent)
     m_pathValueLabel->setObjectName(QStringLiteral("ArchivePathValue"));
     m_openWithButton->setObjectName(QStringLiteral("ArchiveOpenWithButton"));
     m_statusLabel->setObjectName(QStringLiteral("ArchiveStatus"));
+    m_contentSplitter->setObjectName(QStringLiteral("ArchiveContentSplitter"));
     m_treeWidget->setObjectName(QStringLiteral("ArchiveTree"));
+    m_previewStack->setObjectName(QStringLiteral("ArchivePreviewStack"));
+    m_emptyPreviewLabel->setObjectName(QStringLiteral("ArchiveEmptyPreview"));
+    m_textPreview->setObjectName(QStringLiteral("ArchiveTextPreview"));
+    m_imageScrollArea->setObjectName(QStringLiteral("ArchiveImageScrollArea"));
+    m_imagePreview->setObjectName(QStringLiteral("ArchiveImagePreview"));
 
     auto* layout = new QVBoxLayout(this);
     layout->setContentsMargins(12, 0, 12, 12);
     layout->setSpacing(12);
     layout->addWidget(m_headerRow);
     layout->addWidget(m_statusLabel);
-    layout->addWidget(m_treeWidget, 1);
+    layout->addWidget(m_contentSplitter, 1);
 
     auto* headerLayout = new QHBoxLayout(m_headerRow);
     headerLayout->setContentsMargins(0, 0, 0, 0);
@@ -130,15 +228,42 @@ ArchiveRenderer::ArchiveRenderer(QWidget* parent)
     PreviewStateVisuals::prepareStatusLabel(m_statusLabel);
     m_statusLabel->hide();
 
-    m_treeWidget->setColumnCount(1);
-    m_treeWidget->setHeaderLabel(QStringLiteral("Archive contents"));
+    m_treeWidget->setColumnCount(4);
+    m_treeWidget->setHeaderLabels({
+        QCoreApplication::translate("SpaceLook", "Name"),
+        QCoreApplication::translate("SpaceLook", "Size"),
+        QCoreApplication::translate("SpaceLook", "Packed"),
+        QCoreApplication::translate("SpaceLook", "Modified")
+    });
     m_treeWidget->header()->setStretchLastSection(true);
     m_treeWidget->header()->setSectionResizeMode(0, QHeaderView::Stretch);
+    m_treeWidget->header()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
+    m_treeWidget->header()->setSectionResizeMode(2, QHeaderView::ResizeToContents);
+    m_treeWidget->header()->setSectionResizeMode(3, QHeaderView::ResizeToContents);
     m_treeWidget->setRootIsDecorated(true);
-    m_treeWidget->setUniformRowHeights(true);
+    m_treeWidget->setUniformRowHeights(false);
     m_treeWidget->setAlternatingRowColors(false);
     m_treeWidget->setAnimated(true);
     m_treeWidget->setIndentation(20);
+
+    m_emptyPreviewLabel->setAlignment(Qt::AlignCenter);
+    m_emptyPreviewLabel->setWordWrap(true);
+    m_emptyPreviewLabel->setText(QCoreApplication::translate("SpaceLook", "Select a text or image file inside the archive to preview it."));
+    m_textPreview->setReadOnly(true);
+    m_textPreview->setLineWrapMode(QTextEdit::NoWrap);
+    m_imagePreview->setAlignment(Qt::AlignCenter);
+    m_imagePreview->setBackgroundRole(QPalette::Base);
+    m_imageScrollArea->setWidget(m_imagePreview);
+    m_imageScrollArea->setWidgetResizable(true);
+    m_imageScrollArea->setAlignment(Qt::AlignCenter);
+    m_previewStack->addWidget(m_emptyPreviewLabel);
+    m_previewStack->addWidget(m_textPreview);
+    m_previewStack->addWidget(m_imageScrollArea);
+    m_contentSplitter->addWidget(m_treeWidget);
+    m_contentSplitter->addWidget(m_previewStack);
+    m_contentSplitter->setStretchFactor(0, 3);
+    m_contentSplitter->setStretchFactor(1, 2);
+    m_contentSplitter->setSizes({ 620, 420 });
 
     m_openWithButton->setStatusCallback([this](const QString& message) {
         showStatusMessage(message);
@@ -162,7 +287,10 @@ ArchiveRenderer::ArchiveRenderer(QWidget* parent)
         }
         if (item->data(0, Qt::UserRole).toBool()) {
             item->setExpanded(!item->isExpanded());
+            clearEntryPreview();
+            return;
         }
+        previewArchiveEntry(item);
     });
 
     applyChrome();
@@ -204,13 +332,13 @@ void ArchiveRenderer::load(const HoveredItemInfo& info)
 
     qDebug().noquote() << QStringLiteral("[SpaceLookRender] ArchiveRenderer load path=\"%1\"").arg(info.filePath);
 
-    m_titleLabel->setText(info.title.isEmpty() ? QStringLiteral("Archive Preview") : info.title);
+    m_titleLabel->setText(info.title.isEmpty() ? QCoreApplication::translate("SpaceLook", "Archive Preview") : info.title);
     m_titleLabel->setCopyText(m_titleLabel->text());
     m_iconLabel->setPixmap(FileTypeIconResolver::pixmapForInfo(info, m_iconLabel->contentsRect().size()));
-    m_pathValueLabel->setText(info.filePath.trimmed().isEmpty() ? QStringLiteral("(Unavailable)") : info.filePath);
+    m_pathValueLabel->setText(info.filePath.trimmed().isEmpty() ? QCoreApplication::translate("SpaceLook", "(Unavailable)") : info.filePath);
     m_openWithButton->setTargetContext(info.filePath, info.typeKey);
     m_treeWidget->clear();
-    PreviewStateVisuals::showStatus(m_statusLabel, QStringLiteral("Loading archive contents..."), PreviewStateVisuals::Kind::Loading);
+    PreviewStateVisuals::showStatus(m_statusLabel, QCoreApplication::translate("SpaceLook", "Loading archive contents..."), PreviewStateVisuals::Kind::Loading);
 
     auto* watcher = new QFutureWatcher<ArchiveLoadResult>(this);
     connect(watcher, &QFutureWatcher<ArchiveLoadResult>::finished, this, [this, watcher, loadToken, cancelToken]() {
@@ -231,11 +359,11 @@ void ArchiveRenderer::load(const HoveredItemInfo& info)
 
         populateTree(result.entries);
         if (result.entries.isEmpty()) {
-            PreviewStateVisuals::showStatus(m_statusLabel, QStringLiteral("The archive is empty."), PreviewStateVisuals::Kind::Empty);
+            PreviewStateVisuals::showStatus(m_statusLabel, QCoreApplication::translate("SpaceLook", "The archive is empty."), PreviewStateVisuals::Kind::Empty);
         } else {
             PreviewStateVisuals::showStatus(
                 m_statusLabel,
-                QStringLiteral("Loaded %1 entries. Click folders to expand.").arg(result.entries.size()),
+                QCoreApplication::translate("SpaceLook", "Loaded %1 entries. Click folders to expand.").arg(result.entries.size()),
                 PreviewStateVisuals::Kind::Success);
         }
 
@@ -253,9 +381,11 @@ void ArchiveRenderer::load(const HoveredItemInfo& info)
 void ArchiveRenderer::unload()
 {
     cancelPreviewTask(m_cancelToken);
+    cancelPreviewTask(m_entryPreviewCancelToken);
     m_loadGuard.cancel();
     notifyLoadingState(false);
     m_treeWidget->clear();
+    clearEntryPreview();
     m_pathValueLabel->clear();
     m_openWithButton->setTargetContext(QString(), QString());
     PreviewStateVisuals::clearStatus(m_statusLabel);
@@ -359,6 +489,33 @@ void ArchiveRenderer::applyChrome()
         "  padding: 8px 10px;"
         "  font-family: 'Segoe UI Rounded';"
         "}"
+        "#ArchivePreviewStack {"
+        "  background: #f7fafd;"
+        "  border: 1px solid #ccd6e2;"
+        "  border-radius: 18px;"
+        "}"
+        "#ArchiveEmptyPreview {"
+        "  color: #5b7188;"
+        "  padding: 24px;"
+        "  background: transparent;"
+        "}"
+        "#ArchiveTextPreview {"
+        "  background: #fbfdff;"
+        "  color: #102c45;"
+        "  border: 1px solid #ccd6e2;"
+        "  border-radius: 18px;"
+        "  padding: 12px;"
+        "  selection-background-color: rgba(0, 120, 212, 0.24);"
+        "}"
+        "#ArchiveImageScrollArea {"
+        "  background: #fbfdff;"
+        "  border: 1px solid #ccd6e2;"
+        "  border-radius: 18px;"
+        "}"
+        "#ArchiveImagePreview {"
+        "  background: transparent;"
+        "  color: #5b7188;"
+        "}"
         "#ArchiveTree QScrollBar:vertical {"
         "  background: rgba(232, 238, 245, 0.8);"
         "  border: none;"
@@ -419,11 +576,17 @@ void ArchiveRenderer::applyChrome()
     m_pathTitleLabel->setFont(metaFont);
     m_pathValueLabel->setFont(metaFont);
     m_statusLabel->setFont(metaFont);
+    m_emptyPreviewLabel->setFont(metaFont);
 
     QFont treeFont;
     treeFont.setFamily(QStringLiteral("Segoe UI Rounded"));
     treeFont.setPixelSize(13);
     m_treeWidget->setFont(treeFont);
+
+    QFont previewFont;
+    previewFont.setFamily(QStringLiteral("Cascadia Mono"));
+    previewFont.setPixelSize(12);
+    m_textPreview->setFont(previewFont);
 }
 
 void ArchiveRenderer::showStatusMessage(const QString& message)
@@ -444,6 +607,7 @@ void ArchiveRenderer::showStatusMessage(const QString& message)
 void ArchiveRenderer::populateTree(const QVector<ArchiveEntry>& entries)
 {
     m_treeWidget->clear();
+    clearEntryPreview();
 
     QHash<QString, QTreeWidgetItem*> folderItems;
     for (const ArchiveEntry& entry : entries) {
@@ -472,8 +636,13 @@ void ArchiveRenderer::populateTree(const QVector<ArchiveEntry>& entries)
 
             auto* item = new QTreeWidgetItem();
             item->setText(0, part);
+            item->setText(1, entry.sizeText.isEmpty() ? archiveSizeText(entry.size) : entry.sizeText);
+            item->setText(2, entry.packedSizeText);
+            item->setText(3, entry.modifiedText);
             item->setIcon(0, iconForArchiveEntry(currentPath, false));
             item->setData(0, Qt::UserRole, false);
+            item->setData(0, Qt::UserRole + 1, currentPath);
+            item->setData(0, Qt::UserRole + 2, QVariant::fromValue(entry.size));
             if (parentItem) {
                 parentItem->addChild(item);
             } else {
@@ -487,6 +656,92 @@ void ArchiveRenderer::populateTree(const QVector<ArchiveEntry>& entries)
             item->setExpanded(false);
         }
     }
+}
+
+void ArchiveRenderer::clearEntryPreview(const QString& message)
+{
+    cancelPreviewTask(m_entryPreviewCancelToken);
+    m_textPreview->clear();
+    m_imagePreview->clear();
+    m_emptyPreviewLabel->setText(message.trimmed().isEmpty()
+        ? QCoreApplication::translate("SpaceLook", "Select a text or image file inside the archive to preview it.")
+        : message);
+    m_previewStack->setCurrentWidget(m_emptyPreviewLabel);
+}
+
+void ArchiveRenderer::previewArchiveEntry(QTreeWidgetItem* item)
+{
+    if (!item) {
+        clearEntryPreview();
+        return;
+    }
+
+    const QString entryPath = item->data(0, Qt::UserRole + 1).toString();
+    const bool isDirectory = item->data(0, Qt::UserRole).toBool();
+    if (entryPath.trimmed().isEmpty() || isDirectory) {
+        clearEntryPreview();
+        return;
+    }
+
+    if (!isPreviewableTextEntry(entryPath) && !isPreviewableImageEntry(entryPath)) {
+        clearEntryPreview(QCoreApplication::translate("SpaceLook", "Preview is available for text and image files inside the archive."));
+        return;
+    }
+
+    const qint64 size = item->data(0, Qt::UserRole + 2).toLongLong();
+    if (size > 8ll * 1024ll * 1024ll) {
+        clearEntryPreview(QCoreApplication::translate("SpaceLook", "This archive entry is too large for inline preview."));
+        return;
+    }
+
+    clearEntryPreview(QCoreApplication::translate("SpaceLook", "Loading entry preview..."));
+    const PreviewCancellationToken cancelToken = makePreviewCancellationToken();
+    m_entryPreviewCancelToken = cancelToken;
+
+    ArchiveEntry entry;
+    entry.path = entryPath;
+    entry.size = size;
+    auto* watcher = new QFutureWatcher<EntryPreviewResult>(this);
+    connect(watcher, &QFutureWatcher<EntryPreviewResult>::finished, this, [this, watcher, cancelToken, requestedPath = entryPath]() {
+        watcher->deleteLater();
+        if (previewCancellationRequested(cancelToken)) {
+            return;
+        }
+
+        const EntryPreviewResult result = watcher->result();
+        if (result.entryPath != requestedPath) {
+            return;
+        }
+
+        if (!result.success) {
+            clearEntryPreview(result.statusMessage);
+            return;
+        }
+
+        if (result.isImage) {
+            QPixmap pixmap;
+            if (!pixmap.loadFromData(result.data)) {
+                clearEntryPreview(QCoreApplication::translate("SpaceLook", "This image entry could not be decoded."));
+                return;
+            }
+            m_imagePreview->setPixmap(pixmap);
+            m_imagePreview->resize(pixmap.size());
+            m_previewStack->setCurrentWidget(m_imageScrollArea);
+            return;
+        }
+
+        if (result.isText) {
+            m_textPreview->setPlainText(textFromArchiveBytes(result.data));
+            m_previewStack->setCurrentWidget(m_textPreview);
+            return;
+        }
+
+        clearEntryPreview(QCoreApplication::translate("SpaceLook", "Preview is available for text and image files inside the archive."));
+    });
+
+    watcher->setFuture(QtConcurrent::run([this, archivePath = m_info.filePath, entry, cancelToken]() {
+        return loadEntryPreview(archivePath, entry, cancelToken);
+    }));
 }
 
 QTreeWidgetItem* ArchiveRenderer::ensureFolderItem(const QString& folderPath,
@@ -523,13 +778,13 @@ ArchiveRenderer::ArchiveLoadResult ArchiveRenderer::loadArchiveEntries(const QSt
 {
     ArchiveLoadResult result;
     if (previewCancellationRequested(cancelToken)) {
-        result.statusMessage = QStringLiteral("Archive preview was canceled.");
+        result.statusMessage = QCoreApplication::translate("SpaceLook", "Archive preview was canceled.");
         return result;
     }
 
     const QString trimmedPath = filePath.trimmed();
     if (trimmedPath.isEmpty()) {
-        result.statusMessage = QStringLiteral("Archive path is unavailable.");
+        result.statusMessage = QCoreApplication::translate("SpaceLook", "Archive path is unavailable.");
         return result;
     }
 
@@ -540,7 +795,7 @@ ArchiveRenderer::ArchiveLoadResult ArchiveRenderer::loadArchiveEntries(const QSt
         process.start();
         if (!process.waitForStarted(5000)) {
             if (errorMessage) {
-                *errorMessage = QStringLiteral("Failed to start archive listing tool: %1").arg(program);
+                *errorMessage = QCoreApplication::translate("SpaceLook", "Failed to start archive listing tool: %1").arg(program);
             }
             return false;
         }
@@ -552,7 +807,7 @@ ArchiveRenderer::ArchiveLoadResult ArchiveRenderer::loadArchiveEntries(const QSt
                 process.kill();
                 process.waitForFinished(1000);
                 if (errorMessage) {
-                    *errorMessage = QStringLiteral("Archive preview was canceled.");
+                    *errorMessage = QCoreApplication::translate("SpaceLook", "Archive preview was canceled.");
                 }
                 return false;
             }
@@ -564,7 +819,7 @@ ArchiveRenderer::ArchiveLoadResult ArchiveRenderer::loadArchiveEntries(const QSt
             process.kill();
             process.waitForFinished(3000);
             if (errorMessage) {
-                *errorMessage = QStringLiteral("Timed out while reading archive contents.");
+                *errorMessage = QCoreApplication::translate("SpaceLook", "Timed out while reading archive contents.");
             }
             return false;
         }
@@ -577,7 +832,7 @@ ArchiveRenderer::ArchiveLoadResult ArchiveRenderer::loadArchiveEntries(const QSt
         if (process.exitStatus() != QProcess::NormalExit || process.exitCode() != 0) {
             if (errorMessage) {
                 *errorMessage = stdError.isEmpty()
-                    ? QStringLiteral("This archive format could not be listed.")
+                    ? QCoreApplication::translate("SpaceLook", "This archive format could not be listed.")
                     : stdError;
             }
             return false;
@@ -588,7 +843,13 @@ ArchiveRenderer::ArchiveLoadResult ArchiveRenderer::loadArchiveEntries(const QSt
 
     QByteArray sevenZipOutput;
     QString sevenZipError;
-    if (runProcess(bundledSevenZipPath(),
+    const QString sevenZipPath = bundledSevenZipPath();
+    if (sevenZipPath.isEmpty()) {
+        result.statusMessage = QCoreApplication::translate("SpaceLook", "Bundled 7-Zip runtime was not found.");
+        return result;
+    }
+
+    if (runProcess(sevenZipPath,
                    { QStringLiteral("l"), QStringLiteral("-slt"), QStringLiteral("-ba"), QStringLiteral("-sccUTF-8"), QDir::toNativeSeparators(trimmedPath) },
                    &sevenZipOutput,
                    &sevenZipError)) {
@@ -599,7 +860,7 @@ ArchiveRenderer::ArchiveLoadResult ArchiveRenderer::loadArchiveEntries(const QSt
         for (const QString& rawLine : lines) {
             if (previewCancellationRequested(cancelToken)) {
                 result.entries.clear();
-                result.statusMessage = QStringLiteral("Archive preview was canceled.");
+                result.statusMessage = QCoreApplication::translate("SpaceLook", "Archive preview was canceled.");
                 return result;
             }
 
@@ -617,6 +878,28 @@ ArchiveRenderer::ArchiveLoadResult ArchiveRenderer::loadArchiveEntries(const QSt
 
             if (hasCurrentEntry && rawLine.startsWith(QStringLiteral("Folder = "))) {
                 currentEntry.isDirectory = rawLine.mid(QStringLiteral("Folder = ").size()).trimmed() == QStringLiteral("+");
+                continue;
+            }
+
+            if (hasCurrentEntry && rawLine.startsWith(QStringLiteral("Size = "))) {
+                bool ok = false;
+                const qint64 size = rawLine.mid(QStringLiteral("Size = ").size()).trimmed().toLongLong(&ok);
+                if (ok) {
+                    currentEntry.size = size;
+                    currentEntry.sizeText = archiveSizeText(size);
+                }
+                continue;
+            }
+
+            if (hasCurrentEntry && rawLine.startsWith(QStringLiteral("Packed Size = "))) {
+                bool ok = false;
+                const qint64 packedSize = rawLine.mid(QStringLiteral("Packed Size = ").size()).trimmed().toLongLong(&ok);
+                currentEntry.packedSizeText = ok ? archiveSizeText(packedSize) : QString();
+                continue;
+            }
+
+            if (hasCurrentEntry && rawLine.startsWith(QStringLiteral("Modified = "))) {
+                currentEntry.modifiedText = rawLine.mid(QStringLiteral("Modified = ").size()).trimmed();
             }
         }
 
@@ -659,7 +942,7 @@ ArchiveRenderer::ArchiveLoadResult ArchiveRenderer::loadArchiveEntries(const QSt
     for (const QString& rawLine : lines) {
         if (previewCancellationRequested(cancelToken)) {
             result.entries.clear();
-            result.statusMessage = QStringLiteral("Archive preview was canceled.");
+            result.statusMessage = QCoreApplication::translate("SpaceLook", "Archive preview was canceled.");
             return result;
         }
 
@@ -674,6 +957,89 @@ ArchiveRenderer::ArchiveLoadResult ArchiveRenderer::loadArchiveEntries(const QSt
         result.entries.append(entry);
     }
 
+    result.success = true;
+    return result;
+}
+
+ArchiveRenderer::EntryPreviewResult ArchiveRenderer::loadEntryPreview(const QString& archivePath,
+                                                                      const ArchiveEntry& entry,
+                                                                      const PreviewCancellationToken& cancelToken) const
+{
+    EntryPreviewResult result;
+    result.entryPath = entry.path;
+    result.isText = isPreviewableTextEntry(entry.path);
+    result.isImage = isPreviewableImageEntry(entry.path);
+
+    if (previewCancellationRequested(cancelToken)) {
+        result.statusMessage = QCoreApplication::translate("SpaceLook", "Entry preview was canceled.");
+        return result;
+    }
+
+    const QString sevenZipPath = bundledSevenZipPath();
+    if (sevenZipPath.isEmpty()) {
+        result.statusMessage = QCoreApplication::translate("SpaceLook", "Bundled 7-Zip runtime was not found.");
+        return result;
+    }
+
+    QProcess process;
+    process.setProgram(sevenZipPath);
+    process.setArguments({
+        QStringLiteral("e"),
+        QStringLiteral("-so"),
+        QStringLiteral("-sccUTF-8"),
+        QDir::toNativeSeparators(archivePath),
+        entry.path
+    });
+    process.start();
+    if (!process.waitForStarted(5000)) {
+        result.statusMessage = QCoreApplication::translate("SpaceLook", "Failed to start archive extraction tool.");
+        return result;
+    }
+
+    QByteArray data;
+    QElapsedTimer timeout;
+    timeout.start();
+    while (!process.waitForFinished(100)) {
+        data += process.readAllStandardOutput();
+        if (data.size() > 8 * 1024 * 1024) {
+            process.kill();
+            process.waitForFinished(1000);
+            result.statusMessage = QCoreApplication::translate("SpaceLook", "This archive entry is too large for inline preview.");
+            return result;
+        }
+
+        if (previewCancellationRequested(cancelToken)) {
+            process.kill();
+            process.waitForFinished(1000);
+            result.statusMessage = QCoreApplication::translate("SpaceLook", "Entry preview was canceled.");
+            return result;
+        }
+
+        if (timeout.elapsed() <= 15000) {
+            continue;
+        }
+
+        process.kill();
+        process.waitForFinished(3000);
+        result.statusMessage = QCoreApplication::translate("SpaceLook", "Timed out while extracting archive entry.");
+        return result;
+    }
+
+    data += process.readAllStandardOutput();
+    const QString stdError = QString::fromLocal8Bit(process.readAllStandardError()).trimmed();
+    if (process.exitStatus() != QProcess::NormalExit || process.exitCode() != 0) {
+        result.statusMessage = stdError.isEmpty()
+            ? QCoreApplication::translate("SpaceLook", "This archive entry could not be extracted.")
+            : stdError;
+        return result;
+    }
+
+    if (data.isEmpty()) {
+        result.statusMessage = QCoreApplication::translate("SpaceLook", "This archive entry is empty.");
+        return result;
+    }
+
+    result.data = data;
     result.success = true;
     return result;
 }

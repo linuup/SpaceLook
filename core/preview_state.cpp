@@ -1,4 +1,4 @@
-#include "core/preview_state.h"
+﻿#include "core/preview_state.h"
 
 PreviewState::PreviewState(QObject* parent)
     : QObject(parent)

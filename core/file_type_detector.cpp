@@ -1,8 +1,10 @@
-#include "core/file_type_detector.h"
+﻿#include "core/file_type_detector.h"
 #include "core/file_suffix_utils.h"
+#include "core/PreviewFileReader.h"
 #include "core/render_type_registry.h"
 
 #include <QDir>
+#include <QFile>
 #include <QFileInfo>
 #include <QDebug>
 #include <QStringList>
@@ -67,6 +69,33 @@ QString windowTextForWindow(HWND hwnd)
     }
 
     return QString::fromWCharArray(buffer, length);
+}
+
+bool looksLikeMpegTransportStream(const QFileInfo& fileInfo)
+{
+    if (fileInfo.suffix().compare(QStringLiteral("ts"), Qt::CaseInsensitive) != 0) {
+        return false;
+    }
+
+    QByteArray sample;
+    if (!PreviewFileReader::readPrefix(fileInfo.absoluteFilePath(), 1024, &sample)) {
+        return false;
+    }
+
+    if (sample.size() < 376) {
+        return false;
+    }
+
+    auto hasSyncPattern = [&sample](int offset, int packetSize) {
+        for (int index = offset; index < sample.size(); index += packetSize) {
+            if (sample.at(index) != char(0x47)) {
+                return false;
+            }
+        }
+        return sample.size() > offset + packetSize;
+    };
+
+    return hasSyncPattern(0, 188) || hasSyncPattern(4, 192);
 }
 
 QString executableNameForWindow(HWND hwnd)
@@ -495,7 +524,7 @@ QString resolveShortcutTarget(const QString& shortcutPath)
     }
 
     const std::wstring nativePath = QDir::toNativeSeparators(shortcutPath).toStdWString();
-    hr = persistFile->Load(nativePath.c_str(), STGM_READ);
+    hr = persistFile->Load(nativePath.c_str(), STGM_READ | STGM_SHARE_DENY_NONE);
     if (FAILED(hr)) {
         persistFile->Release();
         shellLink->Release();
@@ -1120,6 +1149,13 @@ DetectedTypeInfo FileTypeDetector::detectTypeInfo(const QString& filePath, bool 
 
     const QString suffix = FileSuffixUtils::fullSuffix(fileInfo);
     const QStringList suffixCandidates = FileSuffixUtils::suffixCandidates(fileInfo);
+
+    if (looksLikeMpegTransportStream(fileInfo)) {
+        info.typeKey = QStringLiteral("video");
+        info.typeDetails = QStringLiteral("MPEG transport stream video file.");
+        info.rendererName = QStringLiteral("media");
+        return info;
+    }
 
     if (const auto detectedInfo = RenderTypeRegistry::instance().detectTypeInfoForSuffixCandidates(suffixCandidates)) {
         info = *detectedInfo;

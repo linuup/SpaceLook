@@ -1,4 +1,4 @@
-#include "renderers/QmlShellRenderer.h"
+﻿#include "renderers/QmlShellRenderer.h"
 
 #include <QDebug>
 #include <QVariantMap>

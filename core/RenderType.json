@@ -56,7 +56,20 @@
       "mpg",
       "mpeg",
       "mts",
-      "m2ts"
+      "m2ts",
+      "3gp",
+      "3g2",
+      "asf",
+      "f4v",
+      "flv",
+      "hevc",
+      "m2v",
+      "mxf",
+      "ogv",
+      "rm",
+      "rmvb",
+      "vob",
+      "wtv"
     ]
   },
   "media_audio": {

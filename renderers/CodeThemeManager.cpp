@@ -1,4 +1,4 @@
-#include "renderers/CodeThemeManager.h"
+﻿#include "renderers/CodeThemeManager.h"
 
 #include <QCoreApplication>
 #include <QDir>

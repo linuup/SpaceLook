@@ -1,6 +1,7 @@
 #include "renderers/document/DocumentRenderer.h"
 
 #include <algorithm>
+#include <QCoreApplication>
 #include <utility>
 
 #include <QCryptographicHash>
@@ -51,6 +52,45 @@ struct WorksheetPreview
     QVector<QVector<QString>> rows;
     bool truncated = false;
 };
+
+QString officePreviewHandlerGuidForSuffix(const QString& suffix)
+{
+    const QString lowerSuffix = suffix.trimmed().toLower();
+    if (lowerSuffix == QStringLiteral("doc") ||
+        lowerSuffix == QStringLiteral("docx") ||
+        lowerSuffix == QStringLiteral("docm") ||
+        lowerSuffix == QStringLiteral("dot") ||
+        lowerSuffix == QStringLiteral("dotx") ||
+        lowerSuffix == QStringLiteral("dotm") ||
+        lowerSuffix == QStringLiteral("rtf")) {
+        return QStringLiteral("{84F66100-FF7C-4fb4-B0C0-02CD7FB668FE}");
+    }
+
+    if (lowerSuffix == QStringLiteral("xls") ||
+        lowerSuffix == QStringLiteral("xlsx") ||
+        lowerSuffix == QStringLiteral("xlsm") ||
+        lowerSuffix == QStringLiteral("xlsb") ||
+        lowerSuffix == QStringLiteral("xlt") ||
+        lowerSuffix == QStringLiteral("xltx") ||
+        lowerSuffix == QStringLiteral("xltm") ||
+        lowerSuffix == QStringLiteral("csv")) {
+        return QStringLiteral("{00020827-0000-0000-C000-000000000046}");
+    }
+
+    if (lowerSuffix == QStringLiteral("ppt") ||
+        lowerSuffix == QStringLiteral("pptx") ||
+        lowerSuffix == QStringLiteral("pptm") ||
+        lowerSuffix == QStringLiteral("pps") ||
+        lowerSuffix == QStringLiteral("ppsx") ||
+        lowerSuffix == QStringLiteral("ppsm") ||
+        lowerSuffix == QStringLiteral("pot") ||
+        lowerSuffix == QStringLiteral("potx") ||
+        lowerSuffix == QStringLiteral("potm")) {
+        return QStringLiteral("{65235197-874B-4A07-BDC5-E65EA825B7187}");
+    }
+
+    return QString();
+}
 
 QString attributeValue(const QXmlStreamAttributes& attributes, const QStringList& names)
 {
@@ -161,7 +201,7 @@ QString fileTitleForPreview(const HoveredItemInfo& info)
     if (!info.title.trimmed().isEmpty()) {
         return info.title;
     }
-    return QStringLiteral("Document Preview");
+    return QCoreApplication::translate("SpaceLook", "Document Preview");
 }
 
 QString powerShellLiteral(const QString& value)
@@ -206,7 +246,7 @@ bool runPowerShellScript(const QString& script,
 {
     if (previewCancellationRequested(cancelToken)) {
         if (errorMessage) {
-            *errorMessage = QStringLiteral("Legacy Office conversion was canceled.");
+            *errorMessage = QCoreApplication::translate("SpaceLook", "Legacy Office conversion was canceled.");
         }
         return false;
     }
@@ -224,7 +264,7 @@ bool runPowerShellScript(const QString& script,
     process.start();
     if (!process.waitForStarted(5000)) {
         if (errorMessage) {
-            *errorMessage = QStringLiteral("Failed to start PowerShell for legacy Office conversion.");
+            *errorMessage = QCoreApplication::translate("SpaceLook", "Failed to start PowerShell for legacy Office conversion.");
         }
         return false;
     }
@@ -236,7 +276,7 @@ bool runPowerShellScript(const QString& script,
             process.kill();
             process.waitForFinished(3000);
             if (errorMessage) {
-                *errorMessage = QStringLiteral("Legacy Office conversion was canceled.");
+                *errorMessage = QCoreApplication::translate("SpaceLook", "Legacy Office conversion was canceled.");
             }
             return false;
         }
@@ -248,7 +288,7 @@ bool runPowerShellScript(const QString& script,
         process.kill();
         process.waitForFinished(3000);
         if (errorMessage) {
-            *errorMessage = QStringLiteral("Legacy Office conversion timed out.");
+            *errorMessage = QCoreApplication::translate("SpaceLook", "Legacy Office conversion timed out.");
         }
         return false;
     }
@@ -262,7 +302,7 @@ bool runPowerShellScript(const QString& script,
                 details = stdOut;
             }
             if (details.isEmpty()) {
-                details = QStringLiteral("Unknown conversion error.");
+                details = QCoreApplication::translate("SpaceLook", "Unknown conversion error.");
             }
             *errorMessage = details;
         }
@@ -293,7 +333,7 @@ QString legacyOfficeConversionScript(const QString& inputPath,
             "  $word=New-Object -ComObject Word.Application;"
             "  $word.Visible=$false;"
             "  $word.DisplayAlerts=0;"
-            "  $document=$word.Documents.Open($inputPath,$false,$true);"
+            "  $document=$word.Documents.Open($inputPath,$false,$true,$false,'','','',$false,'','', $false,$false,$false,$false);"
             "  $document.SaveAs2($outputPath,16);"
             "} finally {"
             "  if ($document -ne $null) { $document.Close($false) | Out-Null; [void][Runtime.InteropServices.Marshal]::ReleaseComObject($document) }"
@@ -317,7 +357,7 @@ QString legacyOfficeConversionScript(const QString& inputPath,
             "  $excel=New-Object -ComObject Excel.Application;"
             "  $excel.Visible=$false;"
             "  $excel.DisplayAlerts=$false;"
-            "  $workbook=$excel.Workbooks.Open($inputPath,0,$true);"
+            "  $workbook=$excel.Workbooks.Open($inputPath,0,$true,5,'','',$true);"
             "  $workbook.SaveAs($outputPath,51);"
             "} finally {"
             "  if ($workbook -ne $null) { $workbook.Close($false) | Out-Null; [void][Runtime.InteropServices.Marshal]::ReleaseComObject($workbook) }"
@@ -339,7 +379,7 @@ QString legacyOfficeConversionScript(const QString& inputPath,
             "$presentation=$null;"
             "try {"
             "  $powerPoint=New-Object -ComObject PowerPoint.Application;"
-            "  $presentation=$powerPoint.Presentations.Open($inputPath,$false,$true,$false);"
+            "  $presentation=$powerPoint.Presentations.Open($inputPath,$true,$false,$false);"
             "  $presentation.SaveAs($outputPath,24);"
             "} finally {"
             "  if ($presentation -ne $null) { $presentation.Close() | Out-Null; [void][Runtime.InteropServices.Marshal]::ReleaseComObject($presentation) }"
@@ -385,7 +425,7 @@ OfficePreviewResult buildDocxPreview(QZipReader& zip)
     OfficePreviewResult result;
     const QByteArray documentXml = zip.fileData(QStringLiteral("word/document.xml"));
     if (documentXml.isEmpty()) {
-        result.statusMessage = QStringLiteral("The DOCX file does not contain word/document.xml.");
+        result.statusMessage = QCoreApplication::translate("SpaceLook", "The DOCX file does not contain word/document.xml.");
         return result;
     }
 
@@ -399,7 +439,7 @@ OfficePreviewResult buildDocxPreview(QZipReader& zip)
     }
 
     if (xml.hasError()) {
-        result.statusMessage = QStringLiteral("Failed to parse the DOCX XML content.");
+        result.statusMessage = QCoreApplication::translate("SpaceLook", "Failed to parse the DOCX XML content.");
         return result;
     }
 
@@ -604,14 +644,14 @@ OfficePreviewResult buildXlsxPreview(QZipReader& zip)
     const QByteArray workbookXml = zip.fileData(QStringLiteral("xl/workbook.xml"));
     const QByteArray relsXml = zip.fileData(QStringLiteral("xl/_rels/workbook.xml.rels"));
     if (workbookXml.isEmpty() || relsXml.isEmpty()) {
-        result.statusMessage = QStringLiteral("The XLSX file is missing workbook metadata.");
+        result.statusMessage = QCoreApplication::translate("SpaceLook", "The XLSX file is missing workbook metadata.");
         return result;
     }
 
     const QVector<QString> sharedStrings = parseSharedStrings(zip.fileData(QStringLiteral("xl/sharedStrings.xml")));
     const QVector<QPair<QString, QString>> sheets = parseWorkbookSheets(workbookXml, relsXml);
     if (sheets.isEmpty()) {
-        result.statusMessage = QStringLiteral("No worksheet data was found in this XLSX file.");
+        result.statusMessage = QCoreApplication::translate("SpaceLook", "No worksheet data was found in this XLSX file.");
         return result;
     }
 
@@ -658,7 +698,7 @@ OfficePreviewResult buildXlsxPreview(QZipReader& zip)
     }
 
     if (truncated) {
-        result.statusMessage = QStringLiteral("Spreadsheet preview is limited to the first 80 rows and 12 columns per sheet.");
+        result.statusMessage = QCoreApplication::translate("SpaceLook", "Spreadsheet preview is limited to the first 80 rows and 12 columns per sheet.");
     }
 
     result.html = htmlPage(body);
@@ -686,7 +726,7 @@ OfficePreviewResult buildPptxPreview(QZipReader& zip)
     });
 
     if (slidePaths.isEmpty()) {
-        result.statusMessage = QStringLiteral("No slide XML files were found in this PPTX document.");
+        result.statusMessage = QCoreApplication::translate("SpaceLook", "No slide XML files were found in this PPTX document.");
         return result;
     }
 
@@ -729,7 +769,7 @@ OfficePreviewResult buildOfficePreview(const QString& filePath, const PreviewCan
 {
     OfficePreviewResult result;
     if (previewCancellationRequested(cancelToken)) {
-        result.statusMessage = QStringLiteral("Office preview was canceled.");
+        result.statusMessage = QCoreApplication::translate("SpaceLook", "Office preview was canceled.");
         return result;
     }
 
@@ -744,33 +784,33 @@ OfficePreviewResult buildOfficePreview(const QString& filePath, const PreviewCan
 
     QZipReader zip(filePath);
     if (!zip.exists() || !zip.isReadable()) {
-        result.statusMessage = QStringLiteral("Failed to read the Office container.");
+        result.statusMessage = QCoreApplication::translate("SpaceLook", "Failed to read the Office container.");
         return result;
     }
 
     if (suffix == QStringLiteral("docx")) {
         if (previewCancellationRequested(cancelToken)) {
-            result.statusMessage = QStringLiteral("Office preview was canceled.");
+            result.statusMessage = QCoreApplication::translate("SpaceLook", "Office preview was canceled.");
             return result;
         }
         return buildDocxPreview(zip);
     }
     if (suffix == QStringLiteral("xlsx")) {
         if (previewCancellationRequested(cancelToken)) {
-            result.statusMessage = QStringLiteral("Office preview was canceled.");
+            result.statusMessage = QCoreApplication::translate("SpaceLook", "Office preview was canceled.");
             return result;
         }
         return buildXlsxPreview(zip);
     }
     if (suffix == QStringLiteral("pptx")) {
         if (previewCancellationRequested(cancelToken)) {
-            result.statusMessage = QStringLiteral("Office preview was canceled.");
+            result.statusMessage = QCoreApplication::translate("SpaceLook", "Office preview was canceled.");
             return result;
         }
         return buildPptxPreview(zip);
     }
 
-    result.statusMessage = QStringLiteral("This Office format is not supported by the current Qt parser.");
+    result.statusMessage = QCoreApplication::translate("SpaceLook", "This Office format is not supported by the current Qt parser.");
     return result;
 }
 
@@ -778,7 +818,7 @@ OfficePreviewResult buildLegacyOfficePreview(const QString& filePath, const Prev
 {
     OfficePreviewResult result;
     if (previewCancellationRequested(cancelToken)) {
-        result.statusMessage = QStringLiteral("Legacy Office preview was canceled.");
+        result.statusMessage = QCoreApplication::translate("SpaceLook", "Legacy Office preview was canceled.");
         return result;
     }
 
@@ -786,7 +826,7 @@ OfficePreviewResult buildLegacyOfficePreview(const QString& filePath, const Prev
     const QString suffix = sourceInfo.suffix().toLower();
     const QString convertedSuffix = legacyOfficeConvertedSuffix(suffix);
     if (convertedSuffix.isEmpty()) {
-        result.statusMessage = QStringLiteral("This legacy Office format is not supported by the conversion pipeline.");
+        result.statusMessage = QCoreApplication::translate("SpaceLook", "This legacy Office format is not supported by the conversion pipeline.");
         return result;
     }
 
@@ -801,18 +841,18 @@ OfficePreviewResult buildLegacyOfficePreview(const QString& filePath, const Prev
     if (!QFileInfo::exists(convertedPath)) {
         const QString script = legacyOfficeConversionScript(filePath, convertedPath, suffix);
         if (script.trimmed().isEmpty()) {
-            result.statusMessage = QStringLiteral("Legacy Office conversion is unavailable for this format.");
+            result.statusMessage = QCoreApplication::translate("SpaceLook", "Legacy Office conversion is unavailable for this format.");
             return result;
         }
 
         QString conversionError;
         if (!runPowerShellScript(script, cancelToken, &conversionError) || !QFileInfo::exists(convertedPath)) {
             result.statusMessage = conversionError.trimmed().isEmpty()
-                ? QStringLiteral("Legacy Office conversion failed. Microsoft Office may be unavailable on this system.")
-                : QStringLiteral("Legacy Office conversion failed: %1").arg(conversionError.trimmed());
+                ? QCoreApplication::translate("SpaceLook", "Legacy Office conversion failed. Microsoft Office may be unavailable on this system.")
+                : QCoreApplication::translate("SpaceLook", "Legacy Office conversion failed: %1").arg(conversionError.trimmed());
             result.html = PreviewStateVisuals::htmlStatePage(
-                QStringLiteral("Legacy Office Preview Unavailable"),
-                QStringLiteral("The selected file uses an older Office binary format.\nSpaceLook tried to convert it through local Microsoft Office automation, and that conversion did not complete."),
+                QCoreApplication::translate("SpaceLook", "Legacy Office Preview Unavailable"),
+                QCoreApplication::translate("SpaceLook", "The selected file uses an older Office binary format.\nSpaceLook tried to convert it through local Microsoft Office automation, and that conversion did not complete."),
                 PreviewStateVisuals::Kind::Error);
             result.success = true;
             return result;
@@ -820,13 +860,13 @@ OfficePreviewResult buildLegacyOfficePreview(const QString& filePath, const Prev
     }
 
     if (previewCancellationRequested(cancelToken)) {
-        result.statusMessage = QStringLiteral("Legacy Office preview was canceled.");
+        result.statusMessage = QCoreApplication::translate("SpaceLook", "Legacy Office preview was canceled.");
         return result;
     }
 
     result = buildOfficePreview(convertedPath, cancelToken);
     if (result.success) {
-        result.statusMessage = QStringLiteral("Converted legacy %1 to %2 for preview.")
+        result.statusMessage = QCoreApplication::translate("SpaceLook", "Converted legacy %1 to %2 for preview.")
             .arg(suffix.toUpper(), convertedSuffix.toUpper());
     }
     return result;
@@ -932,6 +972,14 @@ QWidget* DocumentRenderer::widget()
     return this;
 }
 
+void DocumentRenderer::warmUp()
+{
+    m_previewHandlerHost->warmUp();
+    officePreviewHandlerGuidForSuffix(QStringLiteral("docx"));
+    officePreviewHandlerGuidForSuffix(QStringLiteral("xlsx"));
+    officePreviewHandlerGuidForSuffix(QStringLiteral("pptx"));
+}
+
 bool DocumentRenderer::reportsLoadingState() const
 {
     return true;
@@ -956,12 +1004,25 @@ void DocumentRenderer::load(const HoveredItemInfo& info)
     m_titleLabel->setText(fileTitleForPreview(info));
     m_titleLabel->setCopyText(m_titleLabel->text());
     m_iconLabel->setPixmap(FileTypeIconResolver::pixmapForInfo(info, m_iconLabel->contentsRect().size()));
-    m_pathValueLabel->setText(info.filePath.trimmed().isEmpty() ? QStringLiteral("(Unavailable)") : info.filePath);
+    m_pathValueLabel->setText(info.filePath.trimmed().isEmpty() ? QCoreApplication::translate("SpaceLook", "(Unavailable)") : info.filePath);
     m_openWithButton->setTargetContext(info.filePath, info.typeKey);
     m_textBrowser->clear();
     m_previewHandlerHost->unload();
 
     m_contentStack->setCurrentWidget(m_previewHandlerHost);
+    QString officeHandlerError;
+    const QString officeHandlerGuid = officePreviewHandlerGuidForSuffix(QFileInfo(info.filePath).suffix());
+    if (!officeHandlerGuid.isEmpty() && m_previewHandlerHost->openFileWithHandler(info.filePath, officeHandlerGuid, &officeHandlerError)) {
+        PreviewStateVisuals::clearStatus(m_statusLabel);
+        notifyLoadingState(false);
+        return;
+    }
+
+    if (!officeHandlerGuid.isEmpty()) {
+        qDebug().noquote() << QStringLiteral("[SpaceLookRender] Office Preview Handler unavailable, trying registered handler path=\"%1\" clsid=%2 reason=\"%3\"")
+            .arg(info.filePath, officeHandlerGuid, officeHandlerError);
+    }
+
     QString handlerError;
     if (m_previewHandlerHost->openFile(info.filePath, &handlerError)) {
         PreviewStateVisuals::clearStatus(m_statusLabel);
@@ -971,15 +1032,15 @@ void DocumentRenderer::load(const HoveredItemInfo& info)
 
     qDebug().noquote() << QStringLiteral("[SpaceLookRender] Windows Preview Handler unavailable, falling back to Qt parser path=\"%1\" reason=\"%2\"")
         .arg(info.filePath, handlerError);
-    loadWithQtParser(info, loadToken, handlerError);
+    loadWithQtParser(info, loadToken, QString());
 }
 
 void DocumentRenderer::loadWithQtParser(const HoveredItemInfo& info, const PreviewLoadGuard::Token& loadToken, const QString& handlerError)
 {
     m_contentStack->setCurrentWidget(m_textBrowser);
     const QString loadingMessage = handlerError.trimmed().isEmpty()
-        ? QStringLiteral("Parsing Office document...")
-        : QStringLiteral("Windows Preview Handler unavailable. Falling back to built in parser...");
+        ? QCoreApplication::translate("SpaceLook", "Parsing Office document...")
+        : QCoreApplication::translate("SpaceLook", "Windows Preview Handler unavailable. Falling back to built in parser...");
     PreviewStateVisuals::showStatus(m_statusLabel, loadingMessage, PreviewStateVisuals::Kind::Loading);
     m_textBrowser->setHtml(loadingHtmlPage(fileTitleForPreview(info), loadingMessage));
 
@@ -1017,8 +1078,8 @@ void DocumentRenderer::loadWithQtParser(const HoveredItemInfo& info, const Previ
             m_textBrowser->setHtml(preview.html);
         } else {
             m_textBrowser->setHtml(PreviewStateVisuals::htmlStatePage(
-                QStringLiteral("Preview Unavailable"),
-                QStringLiteral("The Office document could not be parsed by the current Qt based preview pipeline."),
+                QCoreApplication::translate("SpaceLook", "Preview Unavailable"),
+                QCoreApplication::translate("SpaceLook", "The Office document could not be parsed by the current Qt based preview pipeline."),
                 PreviewStateVisuals::Kind::Error));
         }
         notifyLoadingState(false);

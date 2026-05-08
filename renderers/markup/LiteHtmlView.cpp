@@ -1,4 +1,4 @@
-#include "renderers/markup/LiteHtmlView.h"
+﻿#include "renderers/markup/LiteHtmlView.h"
 
 #include <QDesktopServices>
 #include <QMouseEvent>

@@ -18,6 +18,7 @@ public:
     virtual QWidget* widget() = 0;
     virtual void load(const HoveredItemInfo& info) = 0;
     virtual void unload() = 0;
+    virtual void warmUp() {}
     virtual bool reportsLoadingState() const { return false; }
     virtual void setLoadingStateCallback(std::function<void(bool)> callback) { (void)callback; }
     virtual void setSummaryFallbackCallback(std::function<void(const HoveredItemInfo&, const QString&)> callback) { (void)callback; }

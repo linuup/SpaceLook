@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include <QByteArray>
 #include <QImage>
@@ -19,6 +19,7 @@ public:
     int pageCount() const;
     QSizeF pageSizePoints(int pageIndex) const;
     QImage renderPage(int pageIndex, double scale, QColor background, QString* errorMessage) const;
+    QString pageText(int pageIndex) const;
 
 private:
     QString renderErrorMessage(QString* errorMessage) const;

@@ -1,6 +1,7 @@
 #include "widgets/SpaceLookWindow.h"
 
 #include "core/preview_state.h"
+#include "settings/app_translator.h"
 #include "settings/render_type_settings.h"
 #include "settings/spacelook_ui_settings.h"
 #include "renderers/OpenWithButton.h"
@@ -21,6 +22,7 @@
 #include <QIcon>
 #include <QMetaObject>
 #include <QMouseEvent>
+#include <QKeyEvent>
 #include <QPainterPath>
 #include <QPoint>
 #include <QProcess>
@@ -100,7 +102,24 @@ public:
 protected:
     void mousePressEvent(QMouseEvent* event) override
     {
-        if (event && event->button() == Qt::LeftButton && shouldStartWindowDrag(event->pos())) {
+        if (!event) {
+            QQuickView::mousePressEvent(event);
+            return;
+        }
+
+        if (event->button() == Qt::LeftButton) {
+            const Qt::Edges edges = resizeEdgesForPosition(event->pos());
+            if (edges != Qt::Edges()) {
+                m_resizing = true;
+                m_activeResizeEdges = edges;
+                m_resizeStartGlobalPos = event->globalPos();
+                m_resizeStartGeometry = geometry();
+                event->accept();
+                return;
+            }
+        }
+
+        if (event->button() == Qt::LeftButton && shouldStartWindowDrag(event->pos())) {
             m_dragging = true;
             m_dragOffset = event->globalPos() - position();
             event->accept();
@@ -112,18 +131,68 @@ protected:
 
     void mouseMoveEvent(QMouseEvent* event) override
     {
+        if (!event) {
+            QQuickView::mouseMoveEvent(event);
+            return;
+        }
+
+        if (m_resizing) {
+            QRect nextGeometry = m_resizeStartGeometry;
+            const QPoint delta = event->globalPos() - m_resizeStartGlobalPos;
+
+            if (m_activeResizeEdges.testFlag(Qt::LeftEdge)) {
+                nextGeometry.setLeft(nextGeometry.left() + delta.x());
+            } else if (m_activeResizeEdges.testFlag(Qt::RightEdge)) {
+                nextGeometry.setRight(nextGeometry.right() + delta.x());
+            }
+
+            if (m_activeResizeEdges.testFlag(Qt::TopEdge)) {
+                nextGeometry.setTop(nextGeometry.top() + delta.y());
+            } else if (m_activeResizeEdges.testFlag(Qt::BottomEdge)) {
+                nextGeometry.setBottom(nextGeometry.bottom() + delta.y());
+            }
+
+            constexpr int kMinSettingsWidth = 640;
+            constexpr int kMinSettingsHeight = 420;
+            const int minW = qMax(minimumWidth(), kMinSettingsWidth);
+            const int minH = qMax(minimumHeight(), kMinSettingsHeight);
+
+            if (nextGeometry.width() < minW) {
+                if (m_activeResizeEdges.testFlag(Qt::LeftEdge)) {
+                    nextGeometry.setLeft(nextGeometry.right() - minW + 1);
+                } else {
+                    nextGeometry.setRight(nextGeometry.left() + minW - 1);
+                }
+            }
+            if (nextGeometry.height() < minH) {
+                if (m_activeResizeEdges.testFlag(Qt::TopEdge)) {
+                    nextGeometry.setTop(nextGeometry.bottom() - minH + 1);
+                } else {
+                    nextGeometry.setBottom(nextGeometry.top() + minH - 1);
+                }
+            }
+
+            setGeometry(nextGeometry);
+            event->accept();
+            return;
+        }
+
         if (m_dragging && event) {
             setPosition(event->globalPos() - m_dragOffset);
             event->accept();
             return;
         }
 
+        updateCursorForPosition(event->pos());
         QQuickView::mouseMoveEvent(event);
     }
 
     void mouseReleaseEvent(QMouseEvent* event) override
     {
         m_dragging = false;
+        m_resizing = false;
+        m_activeResizeEdges = Qt::Edges();
+        updateCursorForPosition(mapFromGlobal(QCursor::pos()));
         QQuickView::mouseReleaseEvent(event);
     }
 
@@ -150,8 +219,59 @@ private:
         return true;
     }
 
+    Qt::Edges resizeEdgesForPosition(const QPoint& localPos) const
+    {
+        if (visibility() == QWindow::Maximized) {
+            return Qt::Edges();
+        }
+
+        const QRect resizeRect(QPoint(0, 0), size());
+        const QRect grabRect = resizeRect.adjusted(-kResizeGripMargin, -kResizeGripMargin,
+                                                   kResizeGripMargin, kResizeGripMargin);
+        if (!grabRect.contains(localPos)) {
+            return Qt::Edges();
+        }
+
+        Qt::Edges edges;
+        if (qAbs(localPos.x() - resizeRect.left()) <= kResizeGripMargin) {
+            edges |= Qt::LeftEdge;
+        } else if (qAbs(localPos.x() - resizeRect.right()) <= kResizeGripMargin) {
+            edges |= Qt::RightEdge;
+        }
+
+        if (qAbs(localPos.y() - resizeRect.top()) <= kResizeGripMargin) {
+            edges |= Qt::TopEdge;
+        } else if (qAbs(localPos.y() - resizeRect.bottom()) <= kResizeGripMargin) {
+            edges |= Qt::BottomEdge;
+        }
+
+        return edges;
+    }
+
+    void updateCursorForPosition(const QPoint& localPos)
+    {
+        const Qt::Edges edges = resizeEdgesForPosition(localPos);
+        if ((edges.testFlag(Qt::TopEdge) && edges.testFlag(Qt::LeftEdge))
+            || (edges.testFlag(Qt::BottomEdge) && edges.testFlag(Qt::RightEdge))) {
+            setCursor(Qt::SizeFDiagCursor);
+        } else if ((edges.testFlag(Qt::TopEdge) && edges.testFlag(Qt::RightEdge))
+            || (edges.testFlag(Qt::BottomEdge) && edges.testFlag(Qt::LeftEdge))) {
+            setCursor(Qt::SizeBDiagCursor);
+        } else if (edges.testFlag(Qt::LeftEdge) || edges.testFlag(Qt::RightEdge)) {
+            setCursor(Qt::SizeHorCursor);
+        } else if (edges.testFlag(Qt::TopEdge) || edges.testFlag(Qt::BottomEdge)) {
+            setCursor(Qt::SizeVerCursor);
+        } else {
+            unsetCursor();
+        }
+    }
+
     bool m_dragging = false;
+    bool m_resizing = false;
     QPoint m_dragOffset;
+    QPoint m_resizeStartGlobalPos;
+    QRect m_resizeStartGeometry;
+    Qt::Edges m_activeResizeEdges = Qt::Edges();
 };
 
 SettingsQuickView* g_settingsWindow = nullptr;
@@ -828,9 +948,15 @@ void SpaceLookWindow::showSettingsWindow()
     g_settingsWindow->rootContext()->setContextProperty(QStringLiteral("uiSettings"), &SpaceLookUiSettings::instance());
     g_settingsWindow->rootContext()->setContextProperty(QStringLiteral("renderTypeSettings"), &RenderTypeSettings::instance());
     g_settingsWindow->rootContext()->setContextProperty(QStringLiteral("settingsWindow"), this);
+    connect(&AppTranslator::instance(), &AppTranslator::languageChanged, g_settingsWindow, [window = g_settingsWindow]() {
+        if (window && window->engine()) {
+            window->engine()->retranslate();
+            window->setTitle(QCoreApplication::translate("SpaceLook", "Settings"));
+        }
+    });
     g_settingsWindow->setColor(Qt::transparent);
     g_settingsWindow->setIcon(SPACELOOKAppIcon());
-    g_settingsWindow->setTitle(QStringLiteral("Settings"));
+    g_settingsWindow->setTitle(QCoreApplication::translate("SpaceLook", "Settings"));
     g_settingsWindow->setFlags(settingsWindowFlags());
     g_settingsWindow->setResizeMode(QQuickView::SizeRootObjectToView);
     g_settingsWindow->engine()->clearComponentCache();
@@ -883,6 +1009,17 @@ void SpaceLookWindow::requestSettingsWindowClose()
         qDebug().noquote() << QStringLiteral("[SpaceLookSettings] close requested");
         g_settingsWindow->close();
     }
+}
+
+void SpaceLookWindow::keyPressEvent(QKeyEvent* event)
+{
+    if (event && event->key() == Qt::Key_Escape) {
+        hidePreview();
+        event->accept();
+        return;
+    }
+
+    QWidget::keyPressEvent(event);
 }
 
 void SpaceLookWindow::hideEvent(QHideEvent* event)

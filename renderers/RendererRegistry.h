@@ -17,6 +17,7 @@ public:
     QList<IPreviewRenderer*> renderers() const;
     IPreviewRenderer* rendererById(const QString& rendererId) const;
     IPreviewRenderer* rendererFor(const HoveredItemInfo& info) const;
+    void warmUpHeavyRenderers() const;
 
 private:
     std::vector<std::unique_ptr<IPreviewRenderer>> m_renderers;
