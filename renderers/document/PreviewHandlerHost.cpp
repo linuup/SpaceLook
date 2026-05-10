@@ -1,11 +1,10 @@
-﻿#include "renderers/document/PreviewHandlerHost.h"
+#include "renderers/document/PreviewHandlerHost.h"
 
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif
 #include <windows.h>
 #include <objbase.h>
-#include <shlwapi.h>
 #include <shobjidl.h>
 
 #include <QDebug>
@@ -102,18 +101,6 @@ QString previewHandlerGuidForExtension(const QString& extension)
     return readRegistryDefaultValue(systemAssociationKey);
 }
 
-bool registryKeyExists(const QString& subKey)
-{
-    HKEY key = nullptr;
-    const std::wstring nativeSubKey = subKey.toStdWString();
-    const LONG result = RegOpenKeyExW(HKEY_CLASSES_ROOT, nativeSubKey.c_str(), 0, KEY_READ, &key);
-    if (result == ERROR_SUCCESS) {
-        RegCloseKey(key);
-        return true;
-    }
-    return false;
-}
-
 }
 
 PreviewHandlerHost::PreviewHandlerHost(QWidget* parent)
@@ -143,60 +130,6 @@ PreviewHandlerHost::~PreviewHandlerHost()
 
 bool PreviewHandlerHost::openFile(const QString& filePath, QString* errorMessage)
 {
-    const QFileInfo fileInfo(filePath);
-    const QString handlerGuid = previewHandlerGuidForExtension(QStringLiteral(".") + fileInfo.suffix());
-    if (handlerGuid.isEmpty()) {
-        if (errorMessage) {
-            *errorMessage = QStringLiteral("No Windows Preview Handler is registered for this file format.");
-        }
-        return false;
-    }
-
-    return openFileWithHandlerGuid(filePath, handlerGuid, QStringLiteral("Windows Preview Handler"), false, errorMessage);
-}
-
-bool PreviewHandlerHost::openFileWithHandler(const QString& filePath, const QString& handlerGuid, QString* errorMessage)
-{
-    const QString cleanGuid = handlerGuid.trimmed();
-    if (cleanGuid.isEmpty()) {
-        if (errorMessage) {
-            *errorMessage = QStringLiteral("The requested Preview Handler CLSID is empty.");
-        }
-        return false;
-    }
-
-    return openFileWithHandlerGuid(filePath, cleanGuid, QStringLiteral("requested Preview Handler"), true, errorMessage);
-}
-
-void PreviewHandlerHost::warmUp()
-{
-    QString ignoredError;
-    ensureComInitialized(&ignoredError);
-    winId();
-}
-
-bool PreviewHandlerHost::openFileWithHandlerGuid(const QString& filePath,
-                                                 const QString& handlerGuid,
-                                                 const QString& handlerLabel,
-                                                 bool requireRegistration,
-                                                 QString* errorMessage)
-{
-    const QString cleanGuid = handlerGuid.trimmed();
-    if (cleanGuid.isEmpty()) {
-        if (errorMessage) {
-            *errorMessage = QStringLiteral("The %1 CLSID is empty.").arg(handlerLabel);
-        }
-        return false;
-    }
-
-    const QString clsidKey = QStringLiteral("CLSID\\%1").arg(cleanGuid);
-    if (requireRegistration && !registryKeyExists(clsidKey)) {
-        if (errorMessage) {
-            *errorMessage = QStringLiteral("The %1 is not registered: %2").arg(handlerLabel, cleanGuid);
-        }
-        return false;
-    }
-
     unload();
 
     if (!ensureComInitialized(errorMessage)) {
@@ -211,11 +144,19 @@ bool PreviewHandlerHost::openFileWithHandlerGuid(const QString& filePath,
         return false;
     }
 
+    const QString handlerGuid = previewHandlerGuidForExtension(QStringLiteral(".") + fileInfo.suffix());
+    if (handlerGuid.isEmpty()) {
+        if (errorMessage) {
+            *errorMessage = QStringLiteral("No Windows Preview Handler is registered for this Office format.");
+        }
+        return false;
+    }
+
     CLSID clsid = {};
-    HRESULT hr = CLSIDFromString(reinterpret_cast<LPCOLESTR>(cleanGuid.utf16()), &clsid);
+    HRESULT hr = CLSIDFromString(reinterpret_cast<LPCOLESTR>(handlerGuid.utf16()), &clsid);
     if (FAILED(hr)) {
         if (errorMessage) {
-            *errorMessage = QStringLiteral("The %1 CLSID is invalid: %2").arg(handlerLabel, cleanGuid);
+            *errorMessage = QStringLiteral("The registered Preview Handler CLSID is invalid: %1").arg(handlerGuid);
         }
         return false;
     }
@@ -224,59 +165,29 @@ bool PreviewHandlerHost::openFileWithHandlerGuid(const QString& filePath,
     hr = CoCreateInstance(clsid, nullptr, CLSCTX_INPROC_SERVER | CLSCTX_LOCAL_SERVER, IID_IUnknown, reinterpret_cast<void**>(&unknown));
     if (FAILED(hr) || !unknown) {
         if (errorMessage) {
-            *errorMessage = QStringLiteral("Failed to activate %1 %2: %3")
-                .arg(handlerLabel, cleanGuid, hresultMessage(hr));
+            *errorMessage = QStringLiteral("Failed to activate Windows Preview Handler %1: %2")
+                .arg(handlerGuid, hresultMessage(hr));
+        }
+        return false;
+    }
+
+    IInitializeWithFile* fileInitializer = nullptr;
+    hr = unknown->QueryInterface(IID_IInitializeWithFile, reinterpret_cast<void**>(&fileInitializer));
+    if (FAILED(hr) || !fileInitializer) {
+        unknown->Release();
+        if (errorMessage) {
+            *errorMessage = QStringLiteral("The registered Preview Handler does not support file initialization.");
         }
         return false;
     }
 
     const QString nativePath = QDir::toNativeSeparators(fileInfo.absoluteFilePath());
-    bool initialized = false;
-    QString initializationError;
-
-    IInitializeWithStream* streamInitializer = nullptr;
-    hr = unknown->QueryInterface(IID_IInitializeWithStream, reinterpret_cast<void**>(&streamInitializer));
-    if (SUCCEEDED(hr) && streamInitializer) {
-        IStream* stream = nullptr;
-        const HRESULT streamHr = SHCreateStreamOnFileEx(
-            reinterpret_cast<LPCWSTR>(nativePath.utf16()),
-            STGM_READ | STGM_SHARE_DENY_NONE,
-            FILE_ATTRIBUTE_NORMAL,
-            FALSE,
-            nullptr,
-            &stream);
-        if (SUCCEEDED(streamHr) && stream) {
-            hr = streamInitializer->Initialize(stream, STGM_READ | STGM_SHARE_DENY_NONE);
-            stream->Release();
-            initialized = SUCCEEDED(hr);
-            if (!initialized) {
-                initializationError = hresultMessage(hr);
-            }
-        } else {
-            initializationError = hresultMessage(streamHr);
-        }
-        streamInitializer->Release();
-    }
-
-    if (!initialized) {
-        IInitializeWithFile* fileInitializer = nullptr;
-        hr = unknown->QueryInterface(IID_IInitializeWithFile, reinterpret_cast<void**>(&fileInitializer));
-        if (SUCCEEDED(hr) && fileInitializer) {
-            hr = fileInitializer->Initialize(reinterpret_cast<LPCWSTR>(nativePath.utf16()), STGM_READ | STGM_SHARE_DENY_NONE);
-            fileInitializer->Release();
-            initialized = SUCCEEDED(hr);
-            if (!initialized) {
-                initializationError = hresultMessage(hr);
-            }
-        }
-    }
-
-    if (!initialized) {
+    hr = fileInitializer->Initialize(reinterpret_cast<LPCWSTR>(nativePath.utf16()), STGM_READ);
+    fileInitializer->Release();
+    if (FAILED(hr)) {
         unknown->Release();
         if (errorMessage) {
-            *errorMessage = initializationError.isEmpty()
-                ? QStringLiteral("The %1 does not support shared file initialization.").arg(handlerLabel)
-                : QStringLiteral("The %1 failed to open the file: %2").arg(handlerLabel, initializationError);
+            *errorMessage = QStringLiteral("Windows Preview Handler failed to open the file: %1").arg(hresultMessage(hr));
         }
         return false;
     }
@@ -285,7 +196,7 @@ bool PreviewHandlerHost::openFileWithHandlerGuid(const QString& filePath,
     unknown->Release();
     if (FAILED(hr) || !m_previewHandler) {
         if (errorMessage) {
-            *errorMessage = QStringLiteral("The %1 COM object is not a Preview Handler.").arg(handlerLabel);
+            *errorMessage = QStringLiteral("The registered COM object is not a Preview Handler.");
         }
         return false;
     }
@@ -301,14 +212,14 @@ bool PreviewHandlerHost::openFileWithHandlerGuid(const QString& filePath,
     if (FAILED(hr)) {
         unload();
         if (errorMessage) {
-            *errorMessage = QStringLiteral("The %1 failed to render the preview: %2").arg(handlerLabel, hresultMessage(hr));
+            *errorMessage = QStringLiteral("Windows Preview Handler failed to render the preview: %1").arg(hresultMessage(hr));
         }
         return false;
     }
 
-    m_activeHandlerGuid = cleanGuid;
-    qDebug().noquote() << QStringLiteral("[SpaceLookRender] %1 loaded clsid=%2 path=\"%3\"")
-        .arg(handlerLabel, cleanGuid, fileInfo.absoluteFilePath());
+    m_activeHandlerGuid = handlerGuid;
+    qDebug().noquote() << QStringLiteral("[SpaceLookRender] Windows Preview Handler loaded clsid=%1 path=\"%2\"")
+        .arg(handlerGuid, fileInfo.absoluteFilePath());
     return true;
 }
 

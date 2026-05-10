@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include <functional>
 
@@ -7,7 +7,6 @@
 
 #include "core/hovered_item_info.h"
 #include "renderers/IPreviewRenderer.h"
-#include "renderers/PreviewCancellationToken.h"
 #include "renderers/PreviewLoadGuard.h"
 
 class QLabel;
@@ -30,7 +29,6 @@ public:
     QWidget* widget() override;
     void load(const HoveredItemInfo& info) override;
     void unload() override;
-    void warmUp() override;
     bool reportsLoadingState() const override;
     void setLoadingStateCallback(std::function<void(bool)> callback) override;
 
@@ -42,7 +40,6 @@ private:
 
     HoveredItemInfo m_info;
     PreviewLoadGuard m_loadGuard;
-    PreviewCancellationToken m_cancelToken;
     std::function<void(bool)> m_loadingStateCallback;
     QWidget* m_headerRow = nullptr;
     QLabel* m_iconLabel = nullptr;

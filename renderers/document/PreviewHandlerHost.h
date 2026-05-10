@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include <QString>
 #include <QWidget>
@@ -14,9 +14,7 @@ public:
     ~PreviewHandlerHost() override;
 
     bool openFile(const QString& filePath, QString* errorMessage);
-    bool openFileWithHandler(const QString& filePath, const QString& handlerGuid, QString* errorMessage);
     void unload();
-    void warmUp();
     QString activeHandlerGuid() const;
 
 protected:
@@ -24,7 +22,6 @@ protected:
 
 private:
     bool ensureComInitialized(QString* errorMessage);
-    bool openFileWithHandlerGuid(const QString& filePath, const QString& handlerGuid, const QString& handlerLabel, bool requireRegistration, QString* errorMessage);
     void updatePreviewRect();
 
     IPreviewHandler* m_previewHandler = nullptr;
