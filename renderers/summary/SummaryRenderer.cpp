@@ -47,6 +47,9 @@ bool shouldShowSummaryStatus(const HoveredItemInfo& info)
         message.contains(QStringLiteral("no object")) ||
         message.contains(QStringLiteral("outside explorer")) ||
         message.contains(QStringLiteral("outside the desktop")) ||
+        message.contains(QStringLiteral("current spacelook process")) ||
+        message.contains(QStringLiteral("preview handler")) ||
+        message.contains(QStringLiteral("registered as")) ||
         message.contains(QStringLiteral("warning")) ||
         message.contains(QStringLiteral("truncated"));
 }

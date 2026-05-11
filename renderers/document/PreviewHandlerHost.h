@@ -5,6 +5,16 @@
 
 struct IPreviewHandler;
 
+struct PreviewHandlerOpenResult
+{
+    bool success = false;
+    QString message;
+    QString handlerGuid;
+    QString processArchitecture;
+    QString registeredArchitecture;
+    bool architectureMismatch = false;
+};
+
 class PreviewHandlerHost : public QWidget
 {
     Q_OBJECT
@@ -14,7 +24,9 @@ public:
     ~PreviewHandlerHost() override;
 
     bool openFile(const QString& filePath, QString* errorMessage);
+    PreviewHandlerOpenResult openFileDetailed(const QString& filePath);
     void unload();
+    void warmUp();
     QString activeHandlerGuid() const;
 
 protected:
@@ -25,6 +37,6 @@ private:
     void updatePreviewRect();
 
     IPreviewHandler* m_previewHandler = nullptr;
-    bool m_comInitialized = false;
+    bool m_comInitializedHere = false;
     QString m_activeHandlerGuid;
 };

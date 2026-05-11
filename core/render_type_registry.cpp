@@ -303,11 +303,18 @@ QJsonObject defaultRenderTypeConfig()
             {QStringLiteral("suffixes"), QJsonArray{
                 QStringLiteral("doc"),
                 QStringLiteral("docx"),
-                QStringLiteral("rtf"),
+                QStringLiteral("docm"),
+                QStringLiteral("odt"),
                 QStringLiteral("xls"),
                 QStringLiteral("xlsx"),
+                QStringLiteral("xlsm"),
+                QStringLiteral("xlsb"),
+                QStringLiteral("ods"),
                 QStringLiteral("ppt"),
-                QStringLiteral("pptx")
+                QStringLiteral("pptx"),
+                QStringLiteral("odp"),
+                QStringLiteral("vsd"),
+                QStringLiteral("vsdx")
             }}
         }},
         {QStringLiteral("certificate"), QJsonObject{

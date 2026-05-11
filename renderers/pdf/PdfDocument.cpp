@@ -14,6 +14,16 @@ namespace {
 constexpr int kPdfiumBitmapFormatBgra = 4;
 constexpr int kRenderFlags = FPDF_ANNOT | FPDF_LCD_TEXT;
 
+void releaseByteArrayStorage(QByteArray* data)
+{
+    if (!data) {
+        return;
+    }
+
+    QByteArray empty;
+    data->swap(empty);
+}
+
 }
 
 PdfDocument::PdfDocument()
@@ -43,7 +53,7 @@ bool PdfDocument::load(const QString& filePath, QString* errorMessage)
         if (errorMessage) {
             *errorMessage = QStringLiteral("The PDF file is empty or could not be read.");
         }
-        m_fileData.clear();
+        releaseByteArrayStorage(&m_fileData);
         return false;
     }
 
@@ -56,7 +66,7 @@ bool PdfDocument::load(const QString& filePath, QString* errorMessage)
         if (errorMessage) {
             *errorMessage = PdfiumBridge::instance().errorString(errorCode);
         }
-        m_fileData.clear();
+        releaseByteArrayStorage(&m_fileData);
         return false;
     }
 
@@ -80,7 +90,7 @@ void PdfDocument::unload()
     }
     m_document = nullptr;
     m_filePath.clear();
-    m_fileData.clear();
+    releaseByteArrayStorage(&m_fileData);
     m_pageCount = 0;
 }
 

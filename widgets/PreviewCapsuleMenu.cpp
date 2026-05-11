@@ -308,7 +308,7 @@ PreviewCapsuleMenu::PreviewCapsuleMenu(QWidget* parent)
         { MenuAction::Copy, QStringLiteral("PreviewCopyButton"), FluentIconFont::glyph(0xE8C8), QStringLiteral("Copy path") },
         { MenuAction::Ocr, QStringLiteral("PreviewOcrButton"), FluentIconFont::glyph(0xE722), QStringLiteral("OCR screen area") },
         { MenuAction::Refresh, QStringLiteral("PreviewRefreshButton"), FluentIconFont::glyph(0xE72C), QStringLiteral("Refresh preview") },
-        { MenuAction::Expand, QStringLiteral("PreviewExpandButton"), collapsedPreviewGlyph(), QStringLiteral("Expand preview") },
+        { MenuAction::Expand, QStringLiteral("PreviewExpandButton"), collapsedPreviewGlyph(), QStringLiteral("Maximize preview") },
         { MenuAction::Close, QStringLiteral("PreviewCloseButton"), FluentIconFont::glyph(0xE711), QStringLiteral("Close preview") },
         { MenuAction::More, QStringLiteral("PreviewMoreButton"), FluentIconFont::glyph(0xE713), QStringLiteral("Show settings") }
     };
@@ -726,6 +726,6 @@ void PreviewCapsuleMenu::syncExpandState(bool expanded)
     expandButton->setText(expanded ? expandedPreviewGlyph() : collapsedPreviewGlyph());
     expandButton->setToolTip(expanded
         ? QStringLiteral("Restore preview size")
-        : QStringLiteral("Expand preview"));
+        : QStringLiteral("Maximize preview"));
     expandButton->update();
 }

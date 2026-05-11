@@ -1,5 +1,7 @@
 ﻿#include "renderers/pdf/PdfViewWidget.h"
 
+#include <QGuiApplication>
+#include <QMouseEvent>
 #include <QPainter>
 #include <QResizeEvent>
 #include <QScrollBar>
@@ -14,6 +16,8 @@ namespace {
 constexpr int kPageMargin = 24;
 constexpr int kPageSpacing = 18;
 constexpr int kMaxReadablePageWidth = 1120;
+constexpr int kRenderedPageCacheMargin = 480;
+constexpr qsizetype kRenderedPageCacheBudgetBytes = 96 * 1024 * 1024;
 constexpr double kMinZoom = 0.25;
 constexpr double kMaxZoom = 4.0;
 
@@ -36,36 +40,43 @@ PdfViewWidget::PdfViewWidget(QWidget* parent)
         viewport()->update();
     });
     m_loadingTimer->start(120);
+    viewport()->setMouseTracking(true);
+    updatePanCursor();
 }
 
 void PdfViewWidget::setDocument(PdfDocument* document)
 {
     m_document = document;
-    m_renderedPages.clear();
+    clearRenderedPages();
     m_pageSizesPoints.clear();
     if (m_document && m_document->isLoaded()) {
         for (int pageIndex = 0; pageIndex < m_document->pageCount(); ++pageIndex) {
             m_pageSizesPoints.append(m_document->pageSizePoints(pageIndex));
         }
         m_zoomFactor = fitPageHeightZoom();
+        m_autoFitZoom = true;
         m_currentPageIndex = m_pageSizesPoints.isEmpty() ? -1 : 0;
     } else {
         m_zoomFactor = 1.0;
+        m_autoFitZoom = true;
         m_currentPageIndex = -1;
     }
     updateLayout();
     updateCurrentPageFromScroll();
+    updatePanCursor();
 }
 
 void PdfViewWidget::clearDocument()
 {
     m_document = nullptr;
-    m_renderedPages.clear();
+    clearRenderedPages();
     m_pageSizesPoints.clear();
     m_zoomFactor = 1.0;
+    m_autoFitZoom = true;
     m_currentPageIndex = -1;
     updateLayout();
     emit currentPageChanged(-1, 0);
+    updatePanCursor();
 }
 
 void PdfViewWidget::resetZoomToFitWidth()
@@ -73,6 +84,7 @@ void PdfViewWidget::resetZoomToFitWidth()
     if (!m_document || !m_document->isLoaded()) {
         return;
     }
+    m_autoFitZoom = false;
     setZoomFactor(fitWidthZoom());
 }
 
@@ -84,7 +96,8 @@ void PdfViewWidget::setZoomFactor(double factor)
     }
 
     m_zoomFactor = clamped;
-    m_renderedPages.clear();
+    m_autoFitZoom = false;
+    clearRenderedPages();
     updateLayout();
     emit zoomFactorChanged(m_zoomFactor);
 }
@@ -166,10 +179,11 @@ void PdfViewWidget::resizeEvent(QResizeEvent* event)
 
     QAbstractScrollArea::resizeEvent(event);
 
-    if (m_document && m_document->isLoaded() &&
+    if (m_autoFitZoom &&
+        m_document && m_document->isLoaded() &&
         (previousViewportWidth != viewport()->width() || previousViewportHeight != viewport()->height())) {
         m_zoomFactor = fitPageHeightZoom();
-        m_renderedPages.clear();
+        clearRenderedPages();
         horizontalScrollBar()->setValue(0);
     }
     updateLayout();
@@ -178,6 +192,13 @@ void PdfViewWidget::resizeEvent(QResizeEvent* event)
 void PdfViewWidget::wheelEvent(QWheelEvent* event)
 {
     if (event->modifiers().testFlag(Qt::ControlModifier)) {
+        const bool zoomingIn = event->angleDelta().y() > 0;
+        if ((zoomingIn && m_zoomFactor >= kMaxZoom) ||
+            (!zoomingIn && m_zoomFactor <= kMinZoom)) {
+            event->accept();
+            return;
+        }
+
         const double nextZoom = event->angleDelta().y() > 0
             ? m_zoomFactor * 1.1
             : m_zoomFactor / 1.1;
@@ -187,6 +208,62 @@ void PdfViewWidget::wheelEvent(QWheelEvent* event)
     }
 
     QAbstractScrollArea::wheelEvent(event);
+}
+
+void PdfViewWidget::mousePressEvent(QMouseEvent* event)
+{
+    if (event &&
+        event->button() == Qt::LeftButton &&
+        event->modifiers().testFlag(Qt::ControlModifier) &&
+        canPanView()) {
+        m_panning = true;
+        m_lastPanGlobalPos = event->globalPos();
+        updatePanCursor();
+        event->accept();
+        return;
+    }
+
+    QAbstractScrollArea::mousePressEvent(event);
+}
+
+void PdfViewWidget::mouseMoveEvent(QMouseEvent* event)
+{
+    if (event && m_panning) {
+        const QPoint delta = event->globalPos() - m_lastPanGlobalPos;
+        m_lastPanGlobalPos = event->globalPos();
+        horizontalScrollBar()->setValue(horizontalScrollBar()->value() - delta.x());
+        verticalScrollBar()->setValue(verticalScrollBar()->value() - delta.y());
+        event->accept();
+        return;
+    }
+
+    updatePanCursor();
+    QAbstractScrollArea::mouseMoveEvent(event);
+}
+
+void PdfViewWidget::mouseReleaseEvent(QMouseEvent* event)
+{
+    if (event && event->button() == Qt::LeftButton && m_panning) {
+        m_panning = false;
+        updatePanCursor();
+        event->accept();
+        return;
+    }
+
+    QAbstractScrollArea::mouseReleaseEvent(event);
+}
+
+void PdfViewWidget::leaveEvent(QEvent* event)
+{
+    if (!m_panning) {
+        viewport()->unsetCursor();
+    }
+    QAbstractScrollArea::leaveEvent(event);
+}
+
+void PdfViewWidget::clearRenderedPages()
+{
+    QHash<int, PdfRenderedPage>().swap(m_renderedPages);
 }
 
 void PdfViewWidget::updateLayout()
@@ -204,6 +281,7 @@ void PdfViewWidget::updateLayout()
     verticalScrollBar()->setRange(0, qMax(0, contentHeight() - viewport()->height()));
     updateCurrentPageFromScroll();
     viewport()->update();
+    updatePanCursor();
 }
 
 void PdfViewWidget::renderVisiblePages()
@@ -217,10 +295,15 @@ void PdfViewWidget::renderVisiblePages()
         verticalScrollBar()->value(),
         viewport()->width(),
         viewport()->height());
+    const QRect keepRect = visibleRect.adjusted(-kRenderedPageCacheMargin,
+                                                -kRenderedPageCacheMargin,
+                                                kRenderedPageCacheMargin,
+                                                kRenderedPageCacheMargin);
+    pruneRenderedPages(keepRect);
 
     for (int pageIndex = 0; pageIndex < m_pageSizesPoints.size(); ++pageIndex) {
         const QRect targetRect = pageRect(pageIndex);
-        if (!targetRect.intersects(visibleRect.adjusted(-120, -120, 120, 120))) {
+        if (!targetRect.intersects(keepRect)) {
             continue;
         }
 
@@ -229,6 +312,7 @@ void PdfViewWidget::renderVisiblePages()
         if (pageIt != m_renderedPages.constEnd() &&
             pageIt->pixelSize == requiredSize &&
             !pageIt->image.isNull()) {
+            m_renderedPages[pageIndex].lastUsed = ++m_renderSerial;
             continue;
         }
 
@@ -236,11 +320,76 @@ void PdfViewWidget::renderVisiblePages()
         PdfRenderedPage renderedPage;
         renderedPage.image = m_document->renderPage(pageIndex, m_zoomFactor, Qt::white, &errorMessage);
         renderedPage.pixelSize = requiredSize;
+        renderedPage.lastUsed = ++m_renderSerial;
         if (!renderedPage.image.isNull()) {
             m_renderedPages.insert(pageIndex, renderedPage);
+            enforceRenderedPageBudget(visibleRect);
         }
         Q_UNUSED(errorMessage);
     }
+}
+
+void PdfViewWidget::pruneRenderedPages(const QRect& keepRect)
+{
+    for (auto it = m_renderedPages.begin(); it != m_renderedPages.end();) {
+        if (pageRect(it.key()).intersects(keepRect)) {
+            ++it;
+        } else {
+            it = m_renderedPages.erase(it);
+        }
+    }
+}
+
+void PdfViewWidget::enforceRenderedPageBudget(const QRect& visibleRect)
+{
+    while (renderedPageCacheBytes() > kRenderedPageCacheBudgetBytes && m_renderedPages.size() > 1) {
+        auto victim = m_renderedPages.end();
+        int victimDistance = -1;
+        quint64 victimLastUsed = 0;
+
+        for (auto it = m_renderedPages.begin(); it != m_renderedPages.end(); ++it) {
+            const QRect rect = pageRect(it.key());
+            if (rect.intersects(visibleRect)) {
+                continue;
+            }
+
+            const int distance = rect.bottom() < visibleRect.top()
+                ? visibleRect.top() - rect.bottom()
+                : rect.top() - visibleRect.bottom();
+            if (victim == m_renderedPages.end() ||
+                distance > victimDistance ||
+                (distance == victimDistance && it->lastUsed < victimLastUsed)) {
+                victim = it;
+                victimDistance = distance;
+                victimLastUsed = it->lastUsed;
+            }
+        }
+
+        if (victim == m_renderedPages.end()) {
+            for (auto it = m_renderedPages.begin(); it != m_renderedPages.end(); ++it) {
+                if (victim == m_renderedPages.end() || it->lastUsed < victimLastUsed) {
+                    victim = it;
+                    victimLastUsed = it->lastUsed;
+                }
+            }
+        }
+
+        if (victim == m_renderedPages.end()) {
+            break;
+        }
+        m_renderedPages.erase(victim);
+    }
+}
+
+qsizetype PdfViewWidget::renderedPageCacheBytes() const
+{
+    qsizetype bytes = 0;
+    for (const PdfRenderedPage& page : m_renderedPages) {
+        if (!page.image.isNull()) {
+            bytes += static_cast<qsizetype>(page.image.sizeInBytes());
+        }
+    }
+    return bytes;
 }
 
 QRect PdfViewWidget::pageRect(int pageIndex) const
@@ -363,4 +512,24 @@ void PdfViewWidget::updateCurrentPageFromScroll()
 
     m_currentPageIndex = nextPageIndex;
     emit currentPageChanged(m_currentPageIndex, m_pageSizesPoints.size());
+}
+
+bool PdfViewWidget::canPanView() const
+{
+    return horizontalScrollBar()->maximum() > 0 || verticalScrollBar()->maximum() > 0;
+}
+
+void PdfViewWidget::updatePanCursor()
+{
+    if (m_panning) {
+        viewport()->setCursor(Qt::ClosedHandCursor);
+        return;
+    }
+
+    if (canPanView() && QGuiApplication::keyboardModifiers().testFlag(Qt::ControlModifier)) {
+        viewport()->setCursor(Qt::OpenHandCursor);
+        return;
+    }
+
+    viewport()->unsetCursor();
 }

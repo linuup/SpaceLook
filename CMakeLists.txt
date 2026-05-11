@@ -15,6 +15,20 @@ set(CMAKE_AUTOUIC ON)
 
 find_package(Qt5 COMPONENTS Core Gui Network Widgets WinExtras AxContainer Qml Quick QuickWidgets Multimedia MultimediaWidgets Concurrent Xml LinguistTools REQUIRED)
 
+if(CMAKE_SIZEOF_VOID_P EQUAL 8)
+    set(SPACELOOK_TARGET_ARCH "x64")
+    set(SPACELOOK_ENABLE_HEIF_RUNTIME TRUE)
+    set(SPACELOOK_WEBVIEW2_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/webview2/x64")
+    set(SPACELOOK_PDFIUM_BIN_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/pdfium/bin")
+    set(SPACELOOK_PDFIUM_LIB_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/pdfium/lib")
+else()
+    set(SPACELOOK_TARGET_ARCH "x86")
+    set(SPACELOOK_ENABLE_HEIF_RUNTIME FALSE)
+    set(SPACELOOK_WEBVIEW2_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/webview2/x86")
+    set(SPACELOOK_PDFIUM_BIN_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/pdfium/x86/bin")
+    set(SPACELOOK_PDFIUM_LIB_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/pdfium/x86/lib")
+endif()
+
 file(GLOB_RECURSE SPACELOOK_SOURCES CONFIGURE_DEPENDS
     "*.cpp"
     "*.h"
@@ -39,7 +53,7 @@ list(APPEND SPACELOOK_SOURCES
 )
 
 list(FILTER SPACELOOK_SOURCES EXCLUDE REGEX ".*/third_party/tmp_probe/.*")
-list(FILTER SPACELOOK_SOURCES EXCLUDE REGEX ".*/build/.*")
+list(FILTER SPACELOOK_SOURCES EXCLUDE REGEX ".*/build[^/]*/.*")
 list(FILTER SPACELOOK_SOURCES EXCLUDE REGEX ".*/third_party/cmark/.*")
 list(FILTER SPACELOOK_SOURCES EXCLUDE REGEX ".*/third_party/litehtml/.*")
 list(FILTER SPACELOOK_SOURCES EXCLUDE REGEX ".*/third_party/MediaInfoLib/.*")
@@ -130,7 +144,7 @@ target_link_libraries(SpaceLook
 target_compile_definitions(SpaceLook
     PRIVATE
         SPACELOOK_PROJECT_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
-        "$<$<NOT:$<CONFIG:Debug>>:SPACELOOK_ENABLE_LIBHEIF>"
+        "$<$<AND:$<BOOL:${SPACELOOK_ENABLE_HEIF_RUNTIME}>,$<NOT:$<CONFIG:Debug>>>:SPACELOOK_ENABLE_LIBHEIF>"
 )
 
 target_include_directories(SpaceLook
@@ -175,11 +189,11 @@ endif()
 
 target_link_libraries(SpaceLook
     PRIVATE
-        "${CMAKE_CURRENT_SOURCE_DIR}/third_party/webview2/x64/WebView2Loader.dll.lib"
-        "${CMAKE_CURRENT_SOURCE_DIR}/third_party/pdfium/lib/pdfium.dll.lib"
-        "$<$<NOT:$<CONFIG:Debug>>:${CMAKE_CURRENT_SOURCE_DIR}/third_party/libheif/lib/heif.lib>"
-        "$<$<NOT:$<CONFIG:Debug>>:${CMAKE_CURRENT_SOURCE_DIR}/third_party/libde265/lib/libde265.lib>"
-        "$<$<NOT:$<CONFIG:Debug>>:${CMAKE_CURRENT_SOURCE_DIR}/third_party/x265/lib/x265-static.lib>"
+        "${SPACELOOK_WEBVIEW2_DIR}/WebView2Loader.dll.lib"
+        "${SPACELOOK_PDFIUM_LIB_DIR}/pdfium.dll.lib"
+        "$<$<AND:$<BOOL:${SPACELOOK_ENABLE_HEIF_RUNTIME}>,$<NOT:$<CONFIG:Debug>>>:${CMAKE_CURRENT_SOURCE_DIR}/third_party/libheif/lib/heif.lib>"
+        "$<$<AND:$<BOOL:${SPACELOOK_ENABLE_HEIF_RUNTIME}>,$<NOT:$<CONFIG:Debug>>>:${CMAKE_CURRENT_SOURCE_DIR}/third_party/libde265/lib/libde265.lib>"
+        "$<$<AND:$<BOOL:${SPACELOOK_ENABLE_HEIF_RUNTIME}>,$<NOT:$<CONFIG:Debug>>>:${CMAKE_CURRENT_SOURCE_DIR}/third_party/x265/lib/x265-static.lib>"
 )
 
 if(WIN32)
@@ -322,10 +336,10 @@ if(WIN32)
             "${QT_QML_ROOT}/QtQuick/Window.2"
             "$<TARGET_FILE_DIR:SpaceLook>/QtQuick/Window.2"
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "${CMAKE_CURRENT_SOURCE_DIR}/third_party/webview2/x64/WebView2Loader.dll"
+            "${SPACELOOK_WEBVIEW2_DIR}/WebView2Loader.dll"
             "$<TARGET_FILE_DIR:SpaceLook>"
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "${CMAKE_CURRENT_SOURCE_DIR}/third_party/pdfium/bin/pdfium.dll"
+            "${SPACELOOK_PDFIUM_BIN_DIR}/pdfium.dll"
             "$<TARGET_FILE_DIR:SpaceLook>"
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "${CMAKE_CURRENT_SOURCE_DIR}/third_party/libavif/bin/avifdec.exe"
@@ -357,4 +371,5 @@ if(WIN32)
     elseif(NOT SPACELOOK_DEPLOY_MPV_RUNTIME)
         message(STATUS "SpaceLook libmpv runtime deployment is disabled. mpv is treated as an optional enhanced playback runtime.")
     endif()
+
 endif()

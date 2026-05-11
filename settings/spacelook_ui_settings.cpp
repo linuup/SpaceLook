@@ -89,6 +89,7 @@ SpaceLookUiSettings::SpaceLookUiSettings()
     m_ocrEngine = normalizedOcrEngine(settings.value(QStringLiteral("ui/ocr/engine"), QStringLiteral("windows")).toString());
     m_baiduOcrApiKey = settings.value(QStringLiteral("ui/ocr/baidu_api_key")).toString();
     m_baiduOcrSecretKey = settings.value(QStringLiteral("ui/ocr/baidu_secret_key")).toString();
+    m_alwaysUnblockProtectedView = settings.value(QStringLiteral("ui/document/always_unblock_protected_view"), false).toBool();
     m_autoStart = loadAutoStart();
 }
 
@@ -465,6 +466,20 @@ void SpaceLookUiSettings::testBaiduOcrCredentials()
             ? QCoreApplication::translate("SpaceLook", "Baidu credential test failed.")
             : error);
     });
+}
+
+bool SpaceLookUiSettings::alwaysUnblockProtectedView() const
+{
+    return m_alwaysUnblockProtectedView;
+}
+
+void SpaceLookUiSettings::setAlwaysUnblockProtectedView(bool enabled)
+{
+    if (!updateBoolSetting(m_alwaysUnblockProtectedView, enabled, QStringLiteral("ui/document/always_unblock_protected_view"))) {
+        return;
+    }
+
+    emit documentPreviewSettingsChanged();
 }
 
 void SpaceLookUiSettings::writeBoolSetting(const QString& key, bool value)

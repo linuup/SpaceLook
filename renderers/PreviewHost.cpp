@@ -223,11 +223,14 @@ void PreviewHost::pushPreview(const HoveredItemInfo& info)
         }
 
         currentRenderer->load(info);
-        if (!currentRenderer->reportsLoadingState() &&
-            m_activeIndex >= 0 &&
-            m_activeIndex < static_cast<int>(m_previewStack.size()) &&
-            m_previewStack.at(m_activeIndex)->loadGuard.isCurrent(loadToken, info.filePath) &&
-            activeRenderer() == currentRenderer) {
+        if (m_activeIndex < 0 ||
+            m_activeIndex >= static_cast<int>(m_previewStack.size()) ||
+            !m_previewStack.at(m_activeIndex)->loadGuard.isCurrent(loadToken, info.filePath) ||
+            activeRenderer() != currentRenderer) {
+            return;
+        }
+
+        if (!currentRenderer->reportsLoadingState()) {
             hideLoadingOverlay();
         }
     });
@@ -321,7 +324,13 @@ void PreviewHost::configureRenderer(IPreviewRenderer* renderer)
             return;
         }
 
-        showSummaryFallback(info, reason);
+        QTimer::singleShot(0, this, [this, renderer, info, reason]() {
+            if (activeRenderer() != renderer) {
+                return;
+            }
+
+            showSummaryFallback(info, reason);
+        });
     });
 
     if (auto* folderRenderer = dynamic_cast<FolderRenderer*>(renderer)) {
@@ -503,9 +512,13 @@ void PreviewHost::showSummaryFallback(const HoveredItemInfo& info, const QString
 
     HoveredItemInfo fallbackInfo = info;
     const QString trimmedReason = reason.trimmed();
-    fallbackInfo.statusMessage = trimmedReason.isEmpty()
-        ? QCoreApplication::translate("SpaceLook", "Failed to render preview with the selected renderer. Showing file summary instead.")
-        : QCoreApplication::translate("SpaceLook", "Failed to render preview with the selected renderer. Showing file summary instead. %1").arg(trimmedReason);
+    if (trimmedReason.startsWith(QStringLiteral("Current SpaceLook process is "))) {
+        fallbackInfo.statusMessage = trimmedReason;
+    } else {
+        fallbackInfo.statusMessage = trimmedReason.isEmpty()
+            ? QCoreApplication::translate("SpaceLook", "Failed to render preview with the selected renderer. Showing file summary instead.")
+            : QCoreApplication::translate("SpaceLook", "Failed to render preview with the selected renderer. Showing file summary instead. %1").arg(trimmedReason);
+    }
 
     PreviewStackEntry* activeEntry = m_previewStack.at(m_activeIndex).get();
     if (activeEntry->renderer) {

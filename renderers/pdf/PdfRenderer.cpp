@@ -361,6 +361,8 @@ void PdfRenderer::unload()
     m_thumbnailRenderTimer->stop();
     m_pendingThumbnailPages.clear();
     m_renderedThumbnailPages.clear();
+    m_thumbnailList->clear();
+    resetSearch();
     m_pathValueLabel->clear();
     m_openWithButton->setTargetContext(QString(), QString());
     showStatusMessage(QString());
@@ -370,7 +372,6 @@ void PdfRenderer::unload()
     m_pdfView->show();
     m_pdfView->clearDocument();
     m_document.unload();
-    rebuildThumbnails();
     updatePageInfo(-1, 0);
     hideSearchRow(true);
     m_info = HoveredItemInfo();
@@ -526,8 +527,32 @@ void PdfRenderer::scheduleVisibleThumbnails()
 
     const int fromPage = qMax(0, qMin(firstPage, lastPage) - 2);
     const int toPage = qMin(m_thumbnailList->count() - 1, qMax(firstPage, lastPage) + 2);
+    pruneThumbnailCache(fromPage, toPage);
     for (int pageIndex = fromPage; pageIndex <= toPage; ++pageIndex) {
         scheduleThumbnailPage(pageIndex);
+    }
+}
+
+void PdfRenderer::pruneThumbnailCache(int keepFromPage, int keepToPage)
+{
+    if (m_thumbnailList->count() <= 0) {
+        m_renderedThumbnailPages.clear();
+        return;
+    }
+
+    const int safeFrom = qMax(0, keepFromPage);
+    const int safeTo = qMin(m_thumbnailList->count() - 1, keepToPage);
+    for (auto it = m_renderedThumbnailPages.begin(); it != m_renderedThumbnailPages.end();) {
+        const int pageIndex = *it;
+        if (pageIndex >= safeFrom && pageIndex <= safeTo) {
+            ++it;
+            continue;
+        }
+
+        if (QListWidgetItem* item = m_thumbnailList->item(pageIndex)) {
+            item->setIcon(QIcon(createThumbnailPlaceholder(pageIndex)));
+        }
+        it = m_renderedThumbnailPages.erase(it);
     }
 }
 

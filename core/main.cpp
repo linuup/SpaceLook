@@ -9,6 +9,28 @@
 #include "platform/spacelook_ipc_server.h"
 #include "settings/app_translator.h"
 
+namespace {
+
+LPCWSTR singleInstanceMutexName()
+{
+#if defined(_WIN64)
+    return L"Local\\LinDesk.SpaceLook.SingleInstance.x64";
+#else
+    return L"Local\\LinDesk.SpaceLook.SingleInstance.x86";
+#endif
+}
+
+QString processArchitectureLabel()
+{
+#if defined(_WIN64)
+    return QStringLiteral("x64");
+#else
+    return QStringLiteral("x86");
+#endif
+}
+
+}
+
 int main(int argc, char* argv[])
 {
     qputenv("QT_MULTIMEDIA_PREFERRED_PLUGINS", QByteArrayLiteral("windowsmediafoundation"));
@@ -17,8 +39,10 @@ int main(int argc, char* argv[])
     app.setApplicationName(QStringLiteral("SpaceLook"));
     app.setOrganizationName(QStringLiteral("LinDesk"));
     AppTranslator::instance().initialize();
+    qDebug().noquote() << QStringLiteral("[SpaceLook] starting arch=%1 exe=\"%2\"")
+        .arg(processArchitectureLabel(), QCoreApplication::applicationFilePath());
 
-    HANDLE singleInstanceMutex = CreateMutexW(nullptr, TRUE, L"Local\\LinDesk.SpaceLook.SingleInstance");
+    HANDLE singleInstanceMutex = CreateMutexW(nullptr, TRUE, singleInstanceMutexName());
     const DWORD mutexError = GetLastError();
     if (singleInstanceMutex && mutexError == ERROR_ALREADY_EXISTS) {
         const QStringList arguments = app.arguments();

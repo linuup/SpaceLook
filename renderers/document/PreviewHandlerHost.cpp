@@ -71,6 +71,96 @@ QString readRegistryDefaultValue(const QString& subKey)
     return QString::fromWCharArray(buffer.data()).trimmed();
 }
 
+QString readRegistryDefaultValue(HKEY rootKey, const QString& subKey, REGSAM viewAccess)
+{
+    HKEY key = nullptr;
+    const std::wstring nativeSubKey = subKey.toStdWString();
+    const LONG result = RegOpenKeyExW(rootKey, nativeSubKey.c_str(), 0, KEY_READ | viewAccess, &key);
+    if (result != ERROR_SUCCESS) {
+        return QString();
+    }
+
+    DWORD type = 0;
+    DWORD size = 0;
+    LONG queryResult = RegQueryValueExW(key, nullptr, nullptr, &type, nullptr, &size);
+    if (queryResult != ERROR_SUCCESS || (type != REG_SZ && type != REG_EXPAND_SZ) || size < sizeof(wchar_t)) {
+        RegCloseKey(key);
+        return QString();
+    }
+
+    QVector<wchar_t> buffer(static_cast<int>(size / sizeof(wchar_t)) + 1);
+    queryResult = RegQueryValueExW(key, nullptr, nullptr, &type, reinterpret_cast<LPBYTE>(buffer.data()), &size);
+    RegCloseKey(key);
+    if (queryResult != ERROR_SUCCESS) {
+        return QString();
+    }
+
+    buffer.last() = L'\0';
+    return QString::fromWCharArray(buffer.data()).trimmed();
+}
+
+bool handlerHasServerInView(const QString& handlerGuid, REGSAM viewAccess)
+{
+    const QString clsidKey = QStringLiteral("CLSID\\%1").arg(handlerGuid);
+    return !readRegistryDefaultValue(HKEY_CLASSES_ROOT, clsidKey + QStringLiteral("\\LocalServer32"), viewAccess).isEmpty() ||
+        !readRegistryDefaultValue(HKEY_CLASSES_ROOT, clsidKey + QStringLiteral("\\InprocServer32"), viewAccess).isEmpty();
+}
+
+bool handlerRegisteredIn32BitView(const QString& handlerGuid)
+{
+    return handlerHasServerInView(handlerGuid, KEY_WOW64_32KEY);
+}
+
+bool handlerRegisteredIn64BitView(const QString& handlerGuid)
+{
+    return handlerHasServerInView(handlerGuid, KEY_WOW64_64KEY);
+}
+
+DWORD previewHandlerActivationContext(const QString& handlerGuid)
+{
+    DWORD context = CLSCTX_INPROC_SERVER | CLSCTX_LOCAL_SERVER;
+    const bool has64BitRegistration = handlerRegisteredIn64BitView(handlerGuid);
+    const bool has32BitRegistration = handlerRegisteredIn32BitView(handlerGuid);
+
+#if defined(_WIN64)
+    if (!has64BitRegistration && has32BitRegistration) {
+        context = CLSCTX_LOCAL_SERVER | CLSCTX_ACTIVATE_32_BIT_SERVER;
+    }
+#else
+    if (!has32BitRegistration && has64BitRegistration) {
+        context = CLSCTX_LOCAL_SERVER | CLSCTX_ACTIVATE_64_BIT_SERVER;
+    }
+#endif
+
+    return context;
+}
+
+QString processArchitectureLabel()
+{
+#if defined(_WIN64)
+    return QStringLiteral("x64");
+#else
+    return QStringLiteral("x86");
+#endif
+}
+
+QString registeredArchitectureForHandler(const QString& handlerGuid)
+{
+    const bool has64BitRegistration = handlerRegisteredIn64BitView(handlerGuid);
+    const bool has32BitRegistration = handlerRegisteredIn32BitView(handlerGuid);
+
+    if (has64BitRegistration && has32BitRegistration) {
+        return QStringLiteral("x64 and x86");
+    }
+    if (has64BitRegistration) {
+        return QStringLiteral("x64");
+    }
+    if (has32BitRegistration) {
+        return QStringLiteral("x86");
+    }
+    return QStringLiteral("unknown");
+}
+
 QString previewHandlerGuidForExtension(const QString& extension)
 {
     QString normalizedExtension = extension.trimmed().toLower();
@@ -101,6 +191,17 @@ QString previewHandlerGuidForExtension(const QString& extension)
     return readRegistryDefaultValue(systemAssociationKey);
 }
 
+bool isLikelyRegisteredForOtherProcessBitness(const QString& handlerGuid)
+{
+    const bool has64BitRegistration = handlerRegisteredIn64BitView(handlerGuid);
+    const bool has32BitRegistration = handlerRegisteredIn32BitView(handlerGuid);
+#if defined(_WIN64)
+    return !has64BitRegistration && has32BitRegistration;
+#else
+    return has64BitRegistration && !has32BitRegistration;
+#endif
+}
+
 }
 
 PreviewHandlerHost::PreviewHandlerHost(QWidget* parent)
@@ -122,83 +223,122 @@ PreviewHandlerHost::PreviewHandlerHost(QWidget* parent)
 PreviewHandlerHost::~PreviewHandlerHost()
 {
     unload();
-    if (m_comInitialized) {
+    if (m_comInitializedHere) {
         CoUninitialize();
-        m_comInitialized = false;
+        m_comInitializedHere = false;
     }
 }
 
 bool PreviewHandlerHost::openFile(const QString& filePath, QString* errorMessage)
 {
-    unload();
+    const PreviewHandlerOpenResult result = openFileDetailed(filePath);
+    if (errorMessage) {
+        *errorMessage = result.message;
+    }
+    return result.success;
+}
 
-    if (!ensureComInitialized(errorMessage)) {
-        return false;
+PreviewHandlerOpenResult PreviewHandlerHost::openFileDetailed(const QString& filePath)
+{
+    unload();
+    PreviewHandlerOpenResult result;
+    result.processArchitecture = processArchitectureLabel();
+
+    QString comError;
+    if (!ensureComInitialized(&comError)) {
+        result.message = comError;
+        return result;
     }
 
     const QFileInfo fileInfo(filePath);
     if (!fileInfo.exists() || !fileInfo.isFile()) {
-        if (errorMessage) {
-            *errorMessage = QStringLiteral("The selected document file does not exist.");
-        }
-        return false;
+        result.message = QStringLiteral("The selected document file does not exist.");
+        return result;
     }
 
     const QString handlerGuid = previewHandlerGuidForExtension(QStringLiteral(".") + fileInfo.suffix());
+    result.handlerGuid = handlerGuid;
+    result.registeredArchitecture = handlerGuid.isEmpty()
+        ? QStringLiteral("unknown")
+        : registeredArchitectureForHandler(handlerGuid);
     if (handlerGuid.isEmpty()) {
-        if (errorMessage) {
-            *errorMessage = QStringLiteral("No Windows Preview Handler is registered for this Office format.");
-        }
-        return false;
+        result.message = QStringLiteral("No Windows Preview Handler is registered for this Office format.");
+        qDebug().noquote() << QStringLiteral("[SpaceLookRender] Windows Preview Handler lookup failed path=\"%1\" processArch=%2 registeredArch=%3")
+            .arg(fileInfo.absoluteFilePath(), result.processArchitecture, result.registeredArchitecture);
+        return result;
     }
 
     CLSID clsid = {};
     HRESULT hr = CLSIDFromString(reinterpret_cast<LPCOLESTR>(handlerGuid.utf16()), &clsid);
     if (FAILED(hr)) {
-        if (errorMessage) {
-            *errorMessage = QStringLiteral("The registered Preview Handler CLSID is invalid: %1").arg(handlerGuid);
-        }
-        return false;
+        result.message = QStringLiteral("The registered Preview Handler CLSID is invalid: %1").arg(handlerGuid);
+        qDebug().noquote() << QStringLiteral("[SpaceLookRender] Windows Preview Handler invalid clsid=%1 path=\"%2\" processArch=%3 registeredArch=%4")
+            .arg(handlerGuid, fileInfo.absoluteFilePath(), result.processArchitecture, result.registeredArchitecture);
+        return result;
     }
 
     IUnknown* unknown = nullptr;
-    hr = CoCreateInstance(clsid, nullptr, CLSCTX_INPROC_SERVER | CLSCTX_LOCAL_SERVER, IID_IUnknown, reinterpret_cast<void**>(&unknown));
+    const DWORD activationContext = previewHandlerActivationContext(handlerGuid);
+    hr = CoCreateInstance(clsid, nullptr, activationContext, IID_IUnknown, reinterpret_cast<void**>(&unknown));
     if (FAILED(hr) || !unknown) {
-        if (errorMessage) {
-            *errorMessage = QStringLiteral("Failed to activate Windows Preview Handler %1: %2")
+        result.architectureMismatch = hr == REGDB_E_CLASSNOTREG && isLikelyRegisteredForOtherProcessBitness(handlerGuid);
+        if (result.architectureMismatch) {
+            result.message = QStringLiteral("Current SpaceLook process is %1.\nInstalled Preview Handler %2 is registered as %3.")
+                .arg(result.processArchitecture, handlerGuid, result.registeredArchitecture);
+        } else {
+            result.message = QStringLiteral("Failed to activate Windows Preview Handler %1: %2")
                 .arg(handlerGuid, hresultMessage(hr));
         }
-        return false;
+        qDebug().noquote() << QStringLiteral("[SpaceLookRender] Windows Preview Handler activation failed clsid=%1 path=\"%2\" hr=0x%3 message=\"%4\" processArch=%5 registeredArch=%6 mismatch=%7 context=0x%8")
+            .arg(handlerGuid,
+                 fileInfo.absoluteFilePath(),
+                 QString::number(static_cast<qulonglong>(static_cast<unsigned long>(hr)), 16).rightJustified(8, QLatin1Char('0')),
+                 hresultMessage(hr),
+                 result.processArchitecture,
+                 result.registeredArchitecture,
+                 result.architectureMismatch ? QStringLiteral("true") : QStringLiteral("false"),
+                 QString::number(static_cast<qulonglong>(activationContext), 16));
+        return result;
     }
 
     IInitializeWithFile* fileInitializer = nullptr;
     hr = unknown->QueryInterface(IID_IInitializeWithFile, reinterpret_cast<void**>(&fileInitializer));
     if (FAILED(hr) || !fileInitializer) {
         unknown->Release();
-        if (errorMessage) {
-            *errorMessage = QStringLiteral("The registered Preview Handler does not support file initialization.");
-        }
-        return false;
+        result.message = QStringLiteral("The registered Preview Handler does not support file initialization.");
+        qDebug().noquote() << QStringLiteral("[SpaceLookRender] Windows Preview Handler missing IInitializeWithFile clsid=%1 path=\"%2\" hr=0x%3 message=\"%4\" processArch=%5 registeredArch=%6")
+            .arg(handlerGuid,
+                 fileInfo.absoluteFilePath(),
+                 QString::number(static_cast<qulonglong>(static_cast<unsigned long>(hr)), 16).rightJustified(8, QLatin1Char('0')),
+                 hresultMessage(hr),
+                 result.processArchitecture,
+                 result.registeredArchitecture);
+        return result;
     }
 
     const QString nativePath = QDir::toNativeSeparators(fileInfo.absoluteFilePath());
-    hr = fileInitializer->Initialize(reinterpret_cast<LPCWSTR>(nativePath.utf16()), STGM_READ);
+    hr = fileInitializer->Initialize(reinterpret_cast<LPCWSTR>(nativePath.utf16()), 0);
     fileInitializer->Release();
     if (FAILED(hr)) {
         unknown->Release();
-        if (errorMessage) {
-            *errorMessage = QStringLiteral("Windows Preview Handler failed to open the file: %1").arg(hresultMessage(hr));
-        }
-        return false;
+        result.message = QStringLiteral("Windows Preview Handler failed to open the file: %1").arg(hresultMessage(hr));
+        qDebug().noquote() << QStringLiteral("[SpaceLookRender] Windows Preview Handler initialize failed clsid=%1 path=\"%2\" hr=0x%3 message=\"%4\" processArch=%5 registeredArch=%6")
+            .arg(handlerGuid,
+                 fileInfo.absoluteFilePath(),
+                 QString::number(static_cast<qulonglong>(static_cast<unsigned long>(hr)), 16).rightJustified(8, QLatin1Char('0')),
+                 hresultMessage(hr),
+                 result.processArchitecture,
+                 result.registeredArchitecture);
+        return result;
     }
 
     hr = unknown->QueryInterface(IID_IPreviewHandler, reinterpret_cast<void**>(&m_previewHandler));
     unknown->Release();
     if (FAILED(hr) || !m_previewHandler) {
-        if (errorMessage) {
-            *errorMessage = QStringLiteral("The registered COM object is not a Preview Handler.");
-        }
-        return false;
+        result.message = QStringLiteral("The registered COM object is not a Preview Handler.");
+        qDebug().noquote() << QStringLiteral("[SpaceLookRender] Windows Preview Handler missing IPreviewHandler clsid=%1 path=\"%2\" processArch=%3 registeredArch=%4")
+            .arg(handlerGuid, fileInfo.absoluteFilePath(), result.processArchitecture, result.registeredArchitecture);
+        return result;
     }
 
     updateGeometry();
@@ -211,16 +351,29 @@ bool PreviewHandlerHost::openFile(const QString& filePath, QString* errorMessage
 
     if (FAILED(hr)) {
         unload();
-        if (errorMessage) {
-            *errorMessage = QStringLiteral("Windows Preview Handler failed to render the preview: %1").arg(hresultMessage(hr));
-        }
-        return false;
+        result.message = QStringLiteral("Windows Preview Handler failed to render the preview: %1").arg(hresultMessage(hr));
+        qDebug().noquote() << QStringLiteral("[SpaceLookRender] Windows Preview Handler render failed clsid=%1 path=\"%2\" hr=0x%3 message=\"%4\" processArch=%5 registeredArch=%6")
+            .arg(handlerGuid,
+                 fileInfo.absoluteFilePath(),
+                 QString::number(static_cast<qulonglong>(static_cast<unsigned long>(hr)), 16).rightJustified(8, QLatin1Char('0')),
+                 hresultMessage(hr),
+                 result.processArchitecture,
+                 result.registeredArchitecture);
+        return result;
     }
 
     m_activeHandlerGuid = handlerGuid;
-    qDebug().noquote() << QStringLiteral("[SpaceLookRender] Windows Preview Handler loaded clsid=%1 path=\"%2\"")
-        .arg(handlerGuid, fileInfo.absoluteFilePath());
-    return true;
+    result.success = true;
+    qDebug().noquote() << QStringLiteral("[SpaceLookRender] Windows Preview Handler loaded clsid=%1 path=\"%2\" processArch=%3 registeredArch=%4")
+        .arg(handlerGuid, fileInfo.absoluteFilePath(), result.processArchitecture, result.registeredArchitecture);
+    return result;
+}
+
+void PreviewHandlerHost::warmUp()
+{
+    QString ignoredError;
+    ensureComInitialized(&ignoredError);
+    winId();
 }
 
 void PreviewHandlerHost::unload()
@@ -230,9 +383,10 @@ void PreviewHandlerHost::unload()
         return;
     }
 
-    m_previewHandler->Unload();
-    m_previewHandler->Release();
+    IPreviewHandler* previewHandler = m_previewHandler;
     m_previewHandler = nullptr;
+    previewHandler->Unload();
+    previewHandler->Release();
 }
 
 QString PreviewHandlerHost::activeHandlerGuid() const
@@ -248,13 +402,13 @@ void PreviewHandlerHost::resizeEvent(QResizeEvent* event)
 
 bool PreviewHandlerHost::ensureComInitialized(QString* errorMessage)
 {
-    if (m_comInitialized) {
+    if (m_comInitializedHere) {
         return true;
     }
 
     const HRESULT hr = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
     if (SUCCEEDED(hr)) {
-        m_comInitialized = true;
+        m_comInitializedHere = true;
         return true;
     }
 

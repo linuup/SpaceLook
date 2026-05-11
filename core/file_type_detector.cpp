@@ -132,6 +132,12 @@ bool windowBelongsToLinDesk(HWND hwnd)
     return executableName.compare(QStringLiteral("LinDesk.exe"), Qt::CaseInsensitive) == 0;
 }
 
+bool windowIsNvidiaOverlay(HWND hwnd)
+{
+    const QString executableName = executableNameForWindow(hwnd);
+    return executableName.compare(QStringLiteral("NVIDIA Share.exe"), Qt::CaseInsensitive) == 0;
+}
+
 bool pointInsideWindow(HWND hwnd, const POINT& point)
 {
     if (!hwnd || !IsWindowVisible(hwnd)) {
@@ -785,6 +791,74 @@ QString explorerFolderItemPath(FolderItem* folderItem)
     return resolvedPath;
 }
 
+IShellFolderViewDual* shellFolderViewForBrowser(IWebBrowserApp* browser)
+{
+    if (!browser) {
+        return nullptr;
+    }
+
+    IDispatch* document = nullptr;
+    const HRESULT documentHr = browser->get_Document(&document);
+    if (FAILED(documentHr) || !document) {
+        return nullptr;
+    }
+
+    IShellFolderViewDual* shellView = nullptr;
+    const HRESULT shellViewHr = document->QueryInterface(IID_PPV_ARGS(&shellView));
+    document->Release();
+    if (FAILED(shellViewHr) || !shellView) {
+        return nullptr;
+    }
+
+    return shellView;
+}
+
+QString selectedPathFromShellView(IShellFolderViewDual* shellView, const QString& logPrefix)
+{
+    if (!shellView) {
+        return QString();
+    }
+
+    FolderItems* selectedItems = nullptr;
+    const HRESULT selectedHr = shellView->SelectedItems(&selectedItems);
+    if (FAILED(selectedHr) || !selectedItems) {
+        logLookupStep(QStringLiteral("%1 selected items lookup failed").arg(logPrefix));
+        return QString();
+    }
+
+    long count = 0;
+    selectedItems->get_Count(&count);
+    if (count != 1) {
+        selectedItems->Release();
+        logLookupStep(QStringLiteral("%1 ignored selected count=%2").arg(logPrefix).arg(count));
+        return QString();
+    }
+
+    VARIANT variantIndex;
+    VariantInit(&variantIndex);
+    variantIndex.vt = VT_I4;
+    variantIndex.lVal = 0;
+
+    FolderItem* selectedItem = nullptr;
+    const HRESULT itemHr = selectedItems->Item(variantIndex, &selectedItem);
+    VariantClear(&variantIndex);
+    selectedItems->Release();
+    if (FAILED(itemHr) || !selectedItem) {
+        logLookupStep(QStringLiteral("%1 selected item query failed").arg(logPrefix));
+        return QString();
+    }
+
+    const QString selectedPath = explorerFolderItemPath(selectedItem);
+    selectedItem->Release();
+    if (selectedPath.isEmpty()) {
+        logLookupStep(QStringLiteral("%1 selected path is empty").arg(logPrefix));
+        return QString();
+    }
+
+    logLookupStep(QStringLiteral("%1 success: %2").arg(logPrefix, selectedPath));
+    return selectedPath;
+}
+
 QString explorerShellPathForHoveredItem(HWND hwnd,
                                         const QString& preferredName,
                                         const QStringList& textCandidates)
@@ -795,18 +869,9 @@ QString explorerShellPathForHoveredItem(HWND hwnd,
         return QString();
     }
 
-    IDispatch* document = nullptr;
-    const HRESULT documentHr = browser->get_Document(&document);
+    IShellFolderViewDual* shellView = shellFolderViewForBrowser(browser);
     browser->Release();
-    if (FAILED(documentHr) || !document) {
-        logLookupStep(QStringLiteral("Explorer shell fallback skipped because document lookup failed"));
-        return QString();
-    }
-
-    IShellFolderViewDual* shellView = nullptr;
-    const HRESULT shellViewHr = document->QueryInterface(IID_PPV_ARGS(&shellView));
-    document->Release();
-    if (FAILED(shellViewHr) || !shellView) {
+    if (!shellView) {
         logLookupStep(QStringLiteral("Explorer shell fallback skipped because shell view query failed"));
         return QString();
     }
@@ -931,60 +996,63 @@ QString explorerSelectedShellPath(HWND hwnd)
         return QString();
     }
 
-    IDispatch* document = nullptr;
-    const HRESULT documentHr = browser->get_Document(&document);
+    IShellFolderViewDual* shellView = shellFolderViewForBrowser(browser);
     browser->Release();
-    if (FAILED(documentHr) || !document) {
-        logLookupStep(QStringLiteral("Explorer selection fallback skipped because document lookup failed"));
-        return QString();
-    }
-
-    IShellFolderViewDual* shellView = nullptr;
-    const HRESULT shellViewHr = document->QueryInterface(IID_PPV_ARGS(&shellView));
-    document->Release();
-    if (FAILED(shellViewHr) || !shellView) {
+    if (!shellView) {
         logLookupStep(QStringLiteral("Explorer selection fallback skipped because shell view query failed"));
         return QString();
     }
 
-    FolderItems* selectedItems = nullptr;
-    const HRESULT selectedHr = shellView->SelectedItems(&selectedItems);
+    const QString selectedPath = selectedPathFromShellView(shellView, QStringLiteral("Explorer selection fallback"));
     shellView->Release();
-    if (FAILED(selectedHr) || !selectedItems) {
-        logLookupStep(QStringLiteral("Explorer selection fallback skipped because selected items lookup failed"));
+    return selectedPath;
+}
+
+QString desktopSelectedShellPath()
+{
+    IShellWindows* shellWindows = nullptr;
+    const HRESULT hr = CoCreateInstance(CLSID_ShellWindows, nullptr, CLSCTX_ALL, IID_PPV_ARGS(&shellWindows));
+    if (FAILED(hr) || !shellWindows) {
+        logLookupStep(QStringLiteral("Desktop selection fallback skipped because shell windows lookup failed"));
         return QString();
     }
 
-    long count = 0;
-    selectedItems->get_Count(&count);
-    if (count != 1) {
-        selectedItems->Release();
-        logLookupStep(QStringLiteral("Explorer selection fallback ignored selected count=%1").arg(count));
+    VARIANT location;
+    VariantInit(&location);
+    location.vt = VT_I4;
+    location.lVal = CSIDL_DESKTOP;
+
+    VARIANT empty;
+    VariantInit(&empty);
+
+    long hwnd = 0;
+    IDispatch* dispatch = nullptr;
+    const HRESULT findHr = shellWindows->FindWindowSW(&location, &empty, SWC_DESKTOP, &hwnd, SWFO_NEEDDISPATCH, &dispatch);
+    VariantClear(&location);
+    VariantClear(&empty);
+    shellWindows->Release();
+    if (FAILED(findHr) || !dispatch) {
+        logLookupStep(QStringLiteral("Desktop selection fallback skipped because desktop shell window was not found"));
         return QString();
     }
 
-    VARIANT variantIndex;
-    VariantInit(&variantIndex);
-    variantIndex.vt = VT_I4;
-    variantIndex.lVal = 0;
-
-    FolderItem* selectedItem = nullptr;
-    const HRESULT itemHr = selectedItems->Item(variantIndex, &selectedItem);
-    VariantClear(&variantIndex);
-    selectedItems->Release();
-    if (FAILED(itemHr) || !selectedItem) {
-        logLookupStep(QStringLiteral("Explorer selection fallback selected item query failed"));
+    IWebBrowserApp* browser = nullptr;
+    const HRESULT browserHr = dispatch->QueryInterface(IID_PPV_ARGS(&browser));
+    dispatch->Release();
+    if (FAILED(browserHr) || !browser) {
+        logLookupStep(QStringLiteral("Desktop selection fallback skipped because desktop browser query failed"));
         return QString();
     }
 
-    const QString selectedPath = explorerFolderItemPath(selectedItem);
-    selectedItem->Release();
-    if (selectedPath.isEmpty()) {
-        logLookupStep(QStringLiteral("Explorer selection fallback selected path is empty"));
+    IShellFolderViewDual* shellView = shellFolderViewForBrowser(browser);
+    browser->Release();
+    if (!shellView) {
+        logLookupStep(QStringLiteral("Desktop selection fallback skipped because shell view query failed"));
         return QString();
     }
 
-    logLookupStep(QStringLiteral("Explorer selection fallback success: %1").arg(selectedPath));
+    const QString selectedPath = selectedPathFromShellView(shellView, QStringLiteral("Desktop selection fallback"));
+    shellView->Release();
     return selectedPath;
 }
 
@@ -1427,6 +1495,31 @@ HoveredItemInfo FileTypeDetector::inspectItemUnderCursor() const
             QStringLiteral("The hovered window belongs to LinDesk. Waiting for its preview request."),
             windowClass,
             QStringLiteral("LinDesk"));
+    }
+
+    if (windowIsNvidiaOverlay(rootWindow) ||
+        windowClass == QStringLiteral("CEF-OSC-WIDGET") ||
+        hoveredClassName == QStringLiteral("CEF-OSC-WIDGET")) {
+        const QString selectedPath = desktopSelectedShellPath();
+        element->Release();
+        automation->Release();
+        if (shouldUninitialize) {
+            CoUninitialize();
+        }
+        if (!selectedPath.isEmpty()) {
+            HoveredItemInfo info = inspectPath(
+                selectedPath,
+                QStringLiteral("DesktopSelection"),
+                QStringLiteral("WorkerW"));
+            info.statusMessage = QStringLiteral("Detected the selected desktop item while NVIDIA overlay was active.");
+            logLookupStep(QStringLiteral("end inspectItemUnderCursor via NVIDIA overlay desktop selection fallback"));
+            return info;
+        }
+
+        logLookupStep(QStringLiteral("Cursor is over NVIDIA overlay, no selected desktop item was found"));
+        return makeFailureInfo(QStringLiteral("No selected desktop item was found while NVIDIA overlay was active."),
+                               windowClass,
+                               QStringLiteral("NVIDIA Overlay"));
     }
 
     HWND effectiveRootWindow = rootWindow;

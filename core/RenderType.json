@@ -268,11 +268,18 @@
     "suffixes": [
       "doc",
       "docx",
-      "rtf",
+      "docm",
+      "odt",
       "xls",
       "xlsx",
+      "xlsm",
+      "xlsb",
+      "ods",
       "ppt",
-      "pptx"
+      "pptx",
+      "odp",
+      "vsd",
+      "vsdx"
     ]
   },
   "certificate": {

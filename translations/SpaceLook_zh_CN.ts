@@ -286,7 +286,6 @@
         <location filename="../viewers/SettingsPage.qml" line="1639"/>
         <source>SECRET_KEY</source>
         <translation type="unfinished">SECRET_KEY</translation>
-
     </message>
     <message>
         <location filename="../viewers/SettingsPage.qml" line="1650"/>
@@ -384,12 +383,12 @@
     <name>SpaceLook</name>
     <message>
         <location filename="../renderers/certificate/CertificateRenderer.cpp" line="65"/>
-        <location filename="../renderers/summary/SummaryRenderer.cpp" line="62"/>
-        <location filename="../renderers/summary/SummaryRenderer.cpp" line="70"/>
-        <location filename="../renderers/summary/SummaryRenderer.cpp" line="271"/>
-        <location filename="../renderers/summary/SummaryRenderer.cpp" line="326"/>
-        <location filename="../renderers/summary/SummaryRenderer.cpp" line="329"/>
-        <location filename="../renderers/summary/SummaryRenderer.cpp" line="332"/>
+        <location filename="../renderers/summary/SummaryRenderer.cpp" line="66"/>
+        <location filename="../renderers/summary/SummaryRenderer.cpp" line="74"/>
+        <location filename="../renderers/summary/SummaryRenderer.cpp" line="316"/>
+        <location filename="../renderers/summary/SummaryRenderer.cpp" line="371"/>
+        <location filename="../renderers/summary/SummaryRenderer.cpp" line="374"/>
+        <location filename="../renderers/summary/SummaryRenderer.cpp" line="377"/>
         <source>Unavailable</source>
         <translation>不可用</translation>
     </message>
@@ -415,15 +414,14 @@
     </message>
     <message>
         <location filename="../renderers/certificate/CertificateRenderer.cpp" line="269"/>
-        <location filename="../renderers/code/CodeRenderer.cpp" line="894"/>
-        <location filename="../renderers/document/DocumentRenderer.cpp" line="1007"/>
+        <location filename="../renderers/code/CodeRenderer.cpp" line="895"/>
         <location filename="../renderers/folder/FolderRenderer.cpp" line="496"/>
         <location filename="../renderers/image/ImageRenderer.cpp" line="563"/>
         <location filename="../renderers/media/MediaRenderer.cpp" line="1527"/>
         <location filename="../renderers/pdf/PdfRenderer.cpp" line="295"/>
         <location filename="../renderers/summary/ArchiveRenderer.cpp" line="338"/>
-        <location filename="../renderers/summary/SummaryRenderer.cpp" line="375"/>
-        <location filename="../renderers/text/TextRenderer.cpp" line="522"/>
+        <location filename="../renderers/summary/SummaryRenderer.cpp" line="424"/>
+        <location filename="../renderers/text/TextRenderer.cpp" line="523"/>
         <source>(Unavailable)</source>
         <translation>（不可用）</translation>
     </message>
@@ -441,7 +439,7 @@
     <message>
         <location filename="../renderers/certificate/CertificateRenderer.cpp" line="327"/>
         <location filename="../renderers/summary/ArchiveRenderer.cpp" line="234"/>
-        <location filename="../renderers/summary/SummaryRenderer.cpp" line="178"/>
+        <location filename="../renderers/summary/SummaryRenderer.cpp" line="223"/>
         <source>Size</source>
         <translation>大小</translation>
     </message>
@@ -657,7 +655,7 @@
     </message>
     <message>
         <location filename="../renderers/code/CodeRenderer.cpp" line="223"/>
-        <location filename="../renderers/text/TextRenderer.cpp" line="263"/>
+        <location filename="../renderers/text/TextRenderer.cpp" line="264"/>
         <source>Could not read:
 %1</source>
         <translation>无法读取：
@@ -665,13 +663,13 @@
     </message>
     <message>
         <location filename="../renderers/code/CodeRenderer.cpp" line="224"/>
-        <location filename="../renderers/text/TextRenderer.cpp" line="264"/>
+        <location filename="../renderers/text/TextRenderer.cpp" line="265"/>
         <source>Failed to open the file for preview.</source>
         <translation>无法打开文件进行预览。</translation>
     </message>
     <message>
         <location filename="../renderers/code/CodeRenderer.cpp" line="235"/>
-        <location filename="../renderers/text/TextRenderer.cpp" line="275"/>
+        <location filename="../renderers/text/TextRenderer.cpp" line="276"/>
         <source>Preview is truncated to the first 2 MB.</source>
         <translation>预览被截断为前 2 MB。</translation>
     </message>
@@ -681,231 +679,200 @@
         <translation>（不支持）</translation>
     </message>
     <message>
-        <location filename="../renderers/code/CodeRenderer.cpp" line="705"/>
-        <location filename="../renderers/text/TextRenderer.cpp" line="378"/>
+        <location filename="../renderers/code/CodeRenderer.cpp" line="706"/>
+        <location filename="../renderers/text/TextRenderer.cpp" line="379"/>
         <source>Search</source>
         <translation>搜索</translation>
     </message>
     <message>
-        <location filename="../renderers/code/CodeRenderer.cpp" line="739"/>
+        <location filename="../renderers/code/CodeRenderer.cpp" line="740"/>
         <source>Node</source>
         <translation>节点</translation>
     </message>
     <message>
-        <location filename="../renderers/code/CodeRenderer.cpp" line="739"/>
+        <location filename="../renderers/code/CodeRenderer.cpp" line="740"/>
         <source>Value</source>
         <translation>值</translation>
     </message>
     <message>
-        <location filename="../renderers/code/CodeRenderer.cpp" line="783"/>
-        <location filename="../renderers/code/CodeRenderer.cpp" line="898"/>
+        <location filename="../renderers/code/CodeRenderer.cpp" line="784"/>
+        <location filename="../renderers/code/CodeRenderer.cpp" line="899"/>
         <source>Preparing code preview</source>
         <translation>准备代码预览</translation>
     </message>
     <message>
-        <location filename="../renderers/code/CodeRenderer.cpp" line="784"/>
-        <location filename="../renderers/code/CodeRenderer.cpp" line="899"/>
+        <location filename="../renderers/code/CodeRenderer.cpp" line="785"/>
+        <location filename="../renderers/code/CodeRenderer.cpp" line="900"/>
         <source>Header details are ready. Source content is loading in the background.</source>
         <translation>头部详情已准备好。源内容正在后台加载。</translation>
     </message>
     <message>
-        <location filename="../renderers/code/CodeRenderer.cpp" line="891"/>
+        <location filename="../renderers/code/CodeRenderer.cpp" line="892"/>
         <source>Code Preview</source>
         <translation>代码预览</translation>
     </message>
     <message>
-        <location filename="../renderers/code/CodeRenderer.cpp" line="908"/>
+        <location filename="../renderers/code/CodeRenderer.cpp" line="909"/>
         <source>Loading code preview...</source>
         <translation>正在加载代码预览...</translation>
     </message>
     <message>
-        <location filename="../renderers/code/CodeRenderer.cpp" line="935"/>
-        <location filename="../renderers/text/TextRenderer.cpp" line="564"/>
+        <location filename="../renderers/code/CodeRenderer.cpp" line="936"/>
+        <location filename="../renderers/text/TextRenderer.cpp" line="565"/>
         <source>Encoding: %1</source>
         <translation>编码：%1</translation>
     </message>
     <message>
-        <location filename="../renderers/code/CodeRenderer.cpp" line="937"/>
-        <location filename="../renderers/text/TextRenderer.cpp" line="566"/>
+        <location filename="../renderers/code/CodeRenderer.cpp" line="938"/>
+        <location filename="../renderers/text/TextRenderer.cpp" line="567"/>
         <source>Encoding: %1. %2</source>
         <translation>编码：%1。%2</translation>
     </message>
     <message>
-        <location filename="../renderers/code/CodeRenderer.cpp" line="1525"/>
+        <location filename="../renderers/code/CodeRenderer.cpp" line="1526"/>
         <source>Copy Key</source>
         <translation>复制密钥</translation>
     </message>
     <message>
-        <location filename="../renderers/code/CodeRenderer.cpp" line="1526"/>
+        <location filename="../renderers/code/CodeRenderer.cpp" line="1527"/>
         <source>Copy Value</source>
         <translation>复制值</translation>
     </message>
     <message>
-        <location filename="../renderers/code/CodeRenderer.cpp" line="1527"/>
+        <location filename="../renderers/code/CodeRenderer.cpp" line="1528"/>
         <source>Copy Row</source>
         <translation>复制行</translation>
     </message>
     <message>
-        <location filename="../renderers/code/CodeRenderer.cpp" line="1528"/>
+        <location filename="../renderers/code/CodeRenderer.cpp" line="1529"/>
         <source>Copy Subtree</source>
         <translation>复制子树</translation>
     </message>
     <message>
-        <location filename="../renderers/code/CodeRenderer.cpp" line="1542"/>
+        <location filename="../renderers/code/CodeRenderer.cpp" line="1543"/>
         <source>Copied key</source>
         <translation>已复制密钥</translation>
     </message>
     <message>
-        <location filename="../renderers/code/CodeRenderer.cpp" line="1548"/>
+        <location filename="../renderers/code/CodeRenderer.cpp" line="1549"/>
         <source>Copied value</source>
         <translation>已复制值</translation>
     </message>
     <message>
-        <location filename="../renderers/code/CodeRenderer.cpp" line="1554"/>
+        <location filename="../renderers/code/CodeRenderer.cpp" line="1555"/>
         <source>Copied row</source>
         <translation>已复制行</translation>
     </message>
     <message>
-        <location filename="../renderers/code/CodeRenderer.cpp" line="1560"/>
+        <location filename="../renderers/code/CodeRenderer.cpp" line="1561"/>
         <source>Copied subtree</source>
         <translation>已复制子树</translation>
     </message>
     <message>
-        <location filename="../renderers/document/DocumentRenderer.cpp" line="204"/>
         <source>Document Preview</source>
-        <translation>文档预览</translation>
+        <translation type="vanished">文档预览</translation>
     </message>
     <message>
-        <location filename="../renderers/document/DocumentRenderer.cpp" line="249"/>
-        <location filename="../renderers/document/DocumentRenderer.cpp" line="279"/>
         <source>Legacy Office conversion was canceled.</source>
-        <translation>旧版 Office 转换已取消。</translation>
+        <translation type="vanished">旧版 Office 转换已取消。</translation>
     </message>
     <message>
-        <location filename="../renderers/document/DocumentRenderer.cpp" line="267"/>
         <source>Failed to start PowerShell for legacy Office conversion.</source>
-        <translation>无法启动 PowerShell 以进行旧版 Office 转换。</translation>
+        <translation type="vanished">无法启动 PowerShell 以进行旧版 Office 转换。</translation>
     </message>
     <message>
-        <location filename="../renderers/document/DocumentRenderer.cpp" line="291"/>
         <source>Legacy Office conversion timed out.</source>
-        <translation>旧版 Office 转换已超时。</translation>
+        <translation type="vanished">旧版 Office 转换已超时。</translation>
     </message>
     <message>
-        <location filename="../renderers/document/DocumentRenderer.cpp" line="305"/>
         <source>Unknown conversion error.</source>
-        <translation>未知转换错误。</translation>
+        <translation type="vanished">未知转换错误。</translation>
     </message>
     <message>
-        <location filename="../renderers/document/DocumentRenderer.cpp" line="428"/>
         <source>The DOCX file does not contain word/document.xml.</source>
-        <translation>DOCX 文件不包含 word/document.xml。</translation>
+        <translation type="vanished">DOCX 文件不包含 word/document.xml。</translation>
     </message>
     <message>
-        <location filename="../renderers/document/DocumentRenderer.cpp" line="442"/>
         <source>Failed to parse the DOCX XML content.</source>
-        <translation>无法解析 DOCX XML 内容。</translation>
+        <translation type="vanished">无法解析 DOCX XML 内容。</translation>
     </message>
     <message>
-        <location filename="../renderers/document/DocumentRenderer.cpp" line="647"/>
         <source>The XLSX file is missing workbook metadata.</source>
-        <translation>XLSX 文件缺少工作簿元数据。</translation>
+        <translation type="vanished">XLSX 文件缺少工作簿元数据。</translation>
     </message>
     <message>
-        <location filename="../renderers/document/DocumentRenderer.cpp" line="654"/>
         <source>No worksheet data was found in this XLSX file.</source>
-        <translation>在此 XLSX 文件中找不到工作表数据。</translation>
+        <translation type="vanished">在此 XLSX 文件中找不到工作表数据。</translation>
     </message>
     <message>
-        <location filename="../renderers/document/DocumentRenderer.cpp" line="701"/>
         <source>Spreadsheet preview is limited to the first 80 rows and 12 columns per sheet.</source>
-        <translation>电子表格预览仅限于每个工作表的前 80 行和 12 列。</translation>
+        <translation type="vanished">电子表格预览仅限于每个工作表的前 80 行和 12 列。</translation>
     </message>
     <message>
-        <location filename="../renderers/document/DocumentRenderer.cpp" line="729"/>
         <source>No slide XML files were found in this PPTX document.</source>
-        <translation>在此 PPTX 文档中找不到幻灯片 XML 文件。</translation>
+        <translation type="vanished">在此 PPTX 文档中找不到幻灯片 XML 文件。</translation>
     </message>
     <message>
-        <location filename="../renderers/document/DocumentRenderer.cpp" line="772"/>
-        <location filename="../renderers/document/DocumentRenderer.cpp" line="793"/>
-        <location filename="../renderers/document/DocumentRenderer.cpp" line="800"/>
-        <location filename="../renderers/document/DocumentRenderer.cpp" line="807"/>
         <source>Office preview was canceled.</source>
-        <translation>Office 预览已取消。</translation>
+        <translation type="vanished">Office 预览已取消。</translation>
     </message>
     <message>
-        <location filename="../renderers/document/DocumentRenderer.cpp" line="787"/>
         <source>Failed to read the Office container.</source>
-        <translation>无法读取 Office 容器。</translation>
+        <translation type="vanished">无法读取 Office 容器。</translation>
     </message>
     <message>
-        <location filename="../renderers/document/DocumentRenderer.cpp" line="813"/>
         <source>This Office format is not supported by the current Qt parser.</source>
-        <translation>当前 Qt 解析器不支持此 Office 格式。</translation>
+        <translation type="vanished">当前 Qt 解析器不支持此 Office 格式。</translation>
     </message>
     <message>
-        <location filename="../renderers/document/DocumentRenderer.cpp" line="821"/>
-        <location filename="../renderers/document/DocumentRenderer.cpp" line="863"/>
         <source>Legacy Office preview was canceled.</source>
-        <translation>旧版 Office 预览已取消。</translation>
+        <translation type="vanished">旧版 Office 预览已取消。</translation>
     </message>
     <message>
-        <location filename="../renderers/document/DocumentRenderer.cpp" line="829"/>
         <source>This legacy Office format is not supported by the conversion pipeline.</source>
-        <translation>转换管道不支持此旧版 Office 格式。</translation>
+        <translation type="vanished">转换管道不支持此旧版 Office 格式。</translation>
     </message>
     <message>
-        <location filename="../renderers/document/DocumentRenderer.cpp" line="844"/>
         <source>Legacy Office conversion is unavailable for this format.</source>
-        <translation>此格式不提供旧版 Office 转换。</translation>
+        <translation type="vanished">此格式不提供旧版 Office 转换。</translation>
     </message>
     <message>
-        <location filename="../renderers/document/DocumentRenderer.cpp" line="851"/>
         <source>Legacy Office conversion failed. Microsoft Office may be unavailable on this system.</source>
-        <translation>旧版 Office 转换失败。此系统上可能没有 Microsoft Office。</translation>
+        <translation type="vanished">旧版 Office 转换失败。此系统上可能没有 Microsoft Office。</translation>
     </message>
     <message>
-        <location filename="../renderers/document/DocumentRenderer.cpp" line="852"/>
         <source>Legacy Office conversion failed: %1</source>
-        <translation>旧版 Office 转换失败：%1</translation>
+        <translation type="vanished">旧版 Office 转换失败：%1</translation>
     </message>
     <message>
-        <location filename="../renderers/document/DocumentRenderer.cpp" line="854"/>
         <source>Legacy Office Preview Unavailable</source>
-        <translation>旧版 Office 预览不可用</translation>
+        <translation type="vanished">旧版 Office 预览不可用</translation>
     </message>
     <message>
-        <location filename="../renderers/document/DocumentRenderer.cpp" line="855"/>
         <source>The selected file uses an older Office binary format.
 SpaceLook tried to convert it through local Microsoft Office automation, and that conversion did not complete.</source>
-        <translation>选定的文件使用较旧的 Office 二进制格式。
+        <translation type="vanished">选定的文件使用较旧的 Office 二进制格式。
 SpaceLook 尝试通过本地 Microsoft Office 自动化进行转换，但该转换未完成。</translation>
     </message>
     <message>
-        <location filename="../renderers/document/DocumentRenderer.cpp" line="869"/>
         <source>Converted legacy %1 to %2 for preview.</source>
-        <translation>为预览将旧版 %1 转换为 %2。</translation>
+        <translation type="vanished">为预览将旧版 %1 转换为 %2。</translation>
     </message>
     <message>
-        <location filename="../renderers/document/DocumentRenderer.cpp" line="1042"/>
         <source>Parsing Office document...</source>
-        <translation>正在解析 Office 文档...</translation>
+        <translation type="vanished">正在解析 Office 文档...</translation>
     </message>
     <message>
-        <location filename="../renderers/document/DocumentRenderer.cpp" line="1043"/>
         <source>Windows Preview Handler unavailable. Falling back to built in parser...</source>
-        <translation>Windows 预览处理程序不可用。回退到内置解析器...</translation>
+        <translation type="vanished">Windows 预览处理程序不可用。回退到内置解析器...</translation>
     </message>
     <message>
-        <location filename="../renderers/document/DocumentRenderer.cpp" line="1081"/>
         <source>Preview Unavailable</source>
-        <translation>预览不可用</translation>
+        <translation type="vanished">预览不可用</translation>
     </message>
     <message>
-        <location filename="../renderers/document/DocumentRenderer.cpp" line="1082"/>
         <source>The Office document could not be parsed by the current Qt based preview pipeline.</source>
-        <translation>当前基于 Qt 的预览管道无法解析 Office 文档。</translation>
+        <translation type="vanished">当前基于 Qt 的预览管道无法解析 Office 文档。</translation>
     </message>
     <message>
         <location filename="../renderers/folder/FolderRenderer.cpp" line="209"/>
@@ -933,12 +900,12 @@ SpaceLook 尝试通过本地 Microsoft Office 自动化进行转换，但该转�
     <message>
         <location filename="../renderers/folder/FolderRenderer.cpp" line="367"/>
         <source>Search file name</source>
-        <translation type="unfinished"></translation>
+        <translation type="unfinished">搜索文件名</translation>
     </message>
     <message>
         <location filename="../renderers/folder/FolderRenderer.cpp" line="368"/>
         <source>Clear</source>
-        <translation type="unfinished"></translation>
+        <translation type="unfinished">清除</translation>
     </message>
     <message>
         <location filename="../renderers/folder/FolderRenderer.cpp" line="493"/>
@@ -963,12 +930,12 @@ SpaceLook 尝试通过本地 Microsoft Office 自动化进行转换，但该转�
     <message>
         <location filename="../renderers/folder/FolderRenderer.cpp" line="945"/>
         <source>Filtered %1 of %2 entries.</source>
-        <translation type="unfinished"></translation>
+        <translation type="unfinished">已筛选 %1 个中的 %2 个条目。</translation>
     </message>
     <message>
         <location filename="../renderers/folder/FolderRenderer.cpp" line="977"/>
         <source>Searching folder contents...</source>
-        <translation type="unfinished"></translation>
+        <translation type="unfinished">正在搜索文件夹内容...</translation>
     </message>
     <message>
         <location filename="../renderers/folder/FolderRenderer.cpp" line="1225"/>
@@ -1310,42 +1277,42 @@ This codec is expected to use the Windows media backend, so mpv is not required 
         <translation>正在呈现第一个 PDF 页面...</translation>
     </message>
     <message>
-        <location filename="../renderers/pdf/PdfRenderer.cpp" line="449"/>
+        <location filename="../renderers/pdf/PdfRenderer.cpp" line="450"/>
         <source>Page %1</source>
         <translation>第 %1 页</translation>
     </message>
     <message>
-        <location filename="../renderers/PreviewHost.cpp" line="371"/>
+        <location filename="../renderers/PreviewHost.cpp" line="380"/>
         <source>Preview</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../renderers/PreviewHost.cpp" line="446"/>
+        <location filename="../renderers/PreviewHost.cpp" line="455"/>
         <source>Preparing preview</source>
         <translation>准备预览</translation>
     </message>
     <message>
-        <location filename="../renderers/PreviewHost.cpp" line="447"/>
+        <location filename="../renderers/PreviewHost.cpp" line="456"/>
         <source>Preparing %1</source>
         <translation>准备 %1</translation>
     </message>
     <message>
-        <location filename="../renderers/PreviewHost.cpp" line="449"/>
+        <location filename="../renderers/PreviewHost.cpp" line="458"/>
         <source>preview</source>
         <translation>预览</translation>
     </message>
     <message>
-        <location filename="../renderers/PreviewHost.cpp" line="456"/>
+        <location filename="../renderers/PreviewHost.cpp" line="465"/>
         <source>Loading with %1...</source>
         <translation>正在用 %1 加载...</translation>
     </message>
     <message>
-        <location filename="../renderers/PreviewHost.cpp" line="507"/>
+        <location filename="../renderers/PreviewHost.cpp" line="519"/>
         <source>Failed to render preview with the selected renderer. Showing file summary instead.</source>
         <translation>无法使用选定的渲染器呈现预览。改为显示文件摘要。</translation>
     </message>
     <message>
-        <location filename="../renderers/PreviewHost.cpp" line="508"/>
+        <location filename="../renderers/PreviewHost.cpp" line="520"/>
         <source>Failed to render preview with the selected renderer. Showing file summary instead. %1</source>
         <translation>无法使用选定的渲染器呈现预览。改为显示文件摘要。%1</translation>
     </message>
@@ -1371,7 +1338,7 @@ This codec is expected to use the Windows media backend, so mpv is not required 
     </message>
     <message>
         <location filename="../renderers/summary/ArchiveRenderer.cpp" line="236"/>
-        <location filename="../renderers/summary/SummaryRenderer.cpp" line="177"/>
+        <location filename="../renderers/summary/SummaryRenderer.cpp" line="222"/>
         <source>Modified</source>
         <translation>修改时间</translation>
     </message>
@@ -1484,60 +1451,60 @@ This codec is expected to use the Windows media backend, so mpv is not required 
         <translation>此存档条目为空。</translation>
     </message>
     <message>
-        <location filename="../renderers/summary/SummaryRenderer.cpp" line="165"/>
+        <location filename="../renderers/summary/SummaryRenderer.cpp" line="210"/>
         <source>Folder</source>
         <translation>文件夹</translation>
     </message>
     <message>
-        <location filename="../renderers/summary/SummaryRenderer.cpp" line="166"/>
+        <location filename="../renderers/summary/SummaryRenderer.cpp" line="211"/>
         <source>Created</source>
         <translation>创建时间</translation>
     </message>
     <message>
-        <location filename="../renderers/summary/SummaryRenderer.cpp" line="183"/>
+        <location filename="../renderers/summary/SummaryRenderer.cpp" line="228"/>
         <source>Resolved target</source>
         <translation>解析的目标</translation>
     </message>
     <message>
-        <location filename="../renderers/summary/SummaryRenderer.cpp" line="367"/>
+        <location filename="../renderers/summary/SummaryRenderer.cpp" line="412"/>
         <source>Summary Preview</source>
         <translation>摘要预览</translation>
     </message>
     <message>
-        <location filename="../renderers/summary/SummaryRenderer.cpp" line="382"/>
+        <location filename="../renderers/summary/SummaryRenderer.cpp" line="431"/>
         <source>No object information is available.</source>
         <translation>没有可用的对象信息。</translation>
     </message>
     <message>
-        <location filename="../renderers/text/TextRenderer.cpp" line="256"/>
-        <location filename="../renderers/text/TextRenderer.cpp" line="270"/>
+        <location filename="../renderers/text/TextRenderer.cpp" line="257"/>
+        <location filename="../renderers/text/TextRenderer.cpp" line="271"/>
         <source>Text preview was canceled.</source>
         <translation>文本预览已取消。</translation>
     </message>
     <message>
-        <location filename="../renderers/text/TextRenderer.cpp" line="354"/>
+        <location filename="../renderers/text/TextRenderer.cpp" line="355"/>
         <source>Edit</source>
         <translation>编辑</translation>
     </message>
     <message>
-        <location filename="../renderers/text/TextRenderer.cpp" line="434"/>
-        <location filename="../renderers/text/TextRenderer.cpp" line="526"/>
+        <location filename="../renderers/text/TextRenderer.cpp" line="435"/>
+        <location filename="../renderers/text/TextRenderer.cpp" line="527"/>
         <source>Preparing text preview</source>
         <translation>准备文本预览</translation>
     </message>
     <message>
-        <location filename="../renderers/text/TextRenderer.cpp" line="435"/>
-        <location filename="../renderers/text/TextRenderer.cpp" line="527"/>
+        <location filename="../renderers/text/TextRenderer.cpp" line="436"/>
+        <location filename="../renderers/text/TextRenderer.cpp" line="528"/>
         <source>The preview shell is ready. Content is loading in the background.</source>
         <translation>预览外壳已准备就绪。内容正在后台加载。</translation>
     </message>
     <message>
-        <location filename="../renderers/text/TextRenderer.cpp" line="519"/>
+        <location filename="../renderers/text/TextRenderer.cpp" line="520"/>
         <source>Text Preview</source>
         <translation>文本预览</translation>
     </message>
     <message>
-        <location filename="../renderers/text/TextRenderer.cpp" line="536"/>
+        <location filename="../renderers/text/TextRenderer.cpp" line="537"/>
         <source>Loading text preview...</source>
         <translation>正在加载文本预览...</translation>
     </message>
@@ -1592,8 +1559,8 @@ This codec is expected to use the Windows media backend, so mpv is not required 
         <translation type="unfinished">文本</translation>
     </message>
     <message>
-        <location filename="../widgets/SpaceLookWindow.cpp" line="1035"/>
-        <location filename="../widgets/SpaceLookWindow.cpp" line="1040"/>
+        <location filename="../widgets/SpaceLookWindow.cpp" line="1064"/>
+        <location filename="../widgets/SpaceLookWindow.cpp" line="1069"/>
         <source>Settings</source>
         <translation>Settings</translation>
     </message>
@@ -1617,7 +1584,7 @@ This codec is expected to use the Windows media backend, so mpv is not required 
     </message>
     <message>
         <location filename="../renderers/image/BaiduOcrService.cpp" line="159"/>
-        <location filename="../settings/spacelook_ui_settings.cpp" line="452"/>
+        <location filename="../settings/spacelook_ui_settings.cpp" line="453"/>
         <source>Baidu token response is invalid.</source>
         <translation type="unfinished">百度 token 响应无效.</translation>
     </message>
@@ -1636,9 +1603,9 @@ This codec is expected to use the Windows media backend, so mpv is not required 
     <message>
         <location filename="../renderers/image/BaiduOcrService.cpp" line="298"/>
         <location filename="../renderers/image/OcrRunner.cpp" line="15"/>
-        <location filename="../settings/spacelook_ui_settings.cpp" line="404"/>
+        <location filename="../settings/spacelook_ui_settings.cpp" line="405"/>
         <source>Baidu OCR requires API_KEY and SECRET_KEY.</source>
-        <translation type="unfinished"></translation>
+        <translation type="unfinished">百度 OCR 需要 API_KEY 和 SECRET_KEY。</translation>
     </message>
     <message>
         <location filename="../renderers/image/BaiduOcrService.cpp" line="304"/>
@@ -1662,23 +1629,23 @@ This codec is expected to use the Windows media backend, so mpv is not required 
         <translation type="unfinished">没有可用的 Windows OCR 语言.</translation>
     </message>
     <message>
-        <location filename="../settings/spacelook_ui_settings.cpp" line="416"/>
+        <location filename="../settings/spacelook_ui_settings.cpp" line="417"/>
         <source>Testing Baidu OCR credentials...</source>
         <translation type="unfinished">测试百度 OCR 凭据...</translation>
     </message>
     <message>
-        <location filename="../settings/spacelook_ui_settings.cpp" line="432"/>
-        <location filename="../settings/spacelook_ui_settings.cpp" line="465"/>
+        <location filename="../settings/spacelook_ui_settings.cpp" line="433"/>
+        <location filename="../settings/spacelook_ui_settings.cpp" line="466"/>
         <source>Baidu credential test failed.</source>
         <translation type="unfinished">百度凭据测试失败.</translation>
     </message>
     <message>
-        <location filename="../settings/spacelook_ui_settings.cpp" line="444"/>
+        <location filename="../settings/spacelook_ui_settings.cpp" line="445"/>
         <source>Baidu credential test timed out.</source>
         <translation type="unfinished">百度凭据测试超时.</translation>
     </message>
     <message>
-        <location filename="../settings/spacelook_ui_settings.cpp" line="459"/>
+        <location filename="../settings/spacelook_ui_settings.cpp" line="460"/>
         <source>Baidu OCR credentials are valid.</source>
         <translation type="unfinished">百度 OCR 凭据有效.</translation>
     </message>

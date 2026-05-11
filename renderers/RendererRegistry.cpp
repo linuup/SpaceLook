@@ -189,8 +189,7 @@ void RendererRegistry::warmUpHeavyRenderers() const
     const QStringList warmupOrder = {
         QStringLiteral("pdf"),
         QStringLiteral("media"),
-        QStringLiteral("rendered_page"),
-        QStringLiteral("document")
+        QStringLiteral("rendered_page")
     };
 
     int delayMs = 0;

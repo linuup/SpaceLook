@@ -1317,6 +1317,11 @@ MediaRenderer::MediaRenderer(QWidget* parent)
     });
 
     connect(m_videoPollTimer, &QTimer::timeout, this, [this]() {
+        if (!isCurrentMediaLoad()) {
+            m_videoPollTimer->stop();
+            return;
+        }
+
         if (m_usingWindowsAudioFallback && m_windowsAudioBackend && m_windowsAudioBackend->isLoaded()) {
             double durationSeconds = 0.0;
             if (m_windowsAudioBackend->durationSeconds(&durationSeconds)) {
@@ -1505,7 +1510,9 @@ void MediaRenderer::warmUp()
 
 void MediaRenderer::load(const HoveredItemInfo& info)
 {
+    unload();
     m_info = info;
+    m_loadToken = m_loadGuard.begin(info.filePath);
     m_mpvPaused = true;
     m_videoPreviewReady = false;
     m_videoStartedPlayback = false;
@@ -1601,6 +1608,8 @@ void MediaRenderer::load(const HoveredItemInfo& info)
 
 void MediaRenderer::unload()
 {
+    m_loadGuard.cancel();
+    m_loadToken = PreviewLoadGuard::Token();
     destroyAudioBackend();
     destroyVideoBackend();
     if (m_windowsAudioBackend) {
@@ -1630,9 +1639,14 @@ void MediaRenderer::unload()
     m_videoHost->hide();
     m_qtVideoWidget->hide();
     m_centerOverlayLabel->hide();
-    updateVolumeButton();
-    updateVolumePopup();
-    updateCenterOverlay();
+    m_playPauseButton->setText(playGlyph());
+    m_volumeButton->setVisible(true);
+    m_volumeButton->setText(volumeGlyph());
+    const bool sliderWasBlocked = m_volumeSlider->blockSignals(true);
+    m_volumeSlider->setVisible(true);
+    m_volumeSlider->setValue(m_audioVolume);
+    m_volumeSlider->blockSignals(sliderWasBlocked);
+    m_volumeValueLabel->setText(QString::number(m_audioVolume));
 }
 
 void MediaRenderer::applyChrome()
@@ -1880,6 +1894,9 @@ void MediaRenderer::ensureAudioBackend()
     m_player = new QMediaPlayer(this);
 
     connect(m_player, &QMediaPlayer::positionChanged, this, [this](qint64 position) {
+        if (!isCurrentMediaLoad()) {
+            return;
+        }
         if (!m_isSeeking) {
             m_positionSlider->setValue(static_cast<int>(position));
             m_positionLabel->setText(formatTime(position));
@@ -1887,11 +1904,17 @@ void MediaRenderer::ensureAudioBackend()
     });
 
     connect(m_player, &QMediaPlayer::durationChanged, this, [this](qint64 duration) {
+        if (!isCurrentMediaLoad()) {
+            return;
+        }
         m_positionSlider->setRange(0, static_cast<int>(duration));
         m_durationLabel->setText(formatTime(duration));
     });
 
     connect(m_player, &QMediaPlayer::mediaStatusChanged, this, [this](QMediaPlayer::MediaStatus status) {
+        if (!isCurrentMediaLoad()) {
+            return;
+        }
         if (m_usingMpvPlayback) {
             return;
         }
@@ -1942,6 +1965,9 @@ void MediaRenderer::ensureAudioBackend()
     });
 
     connect(m_player, &QMediaPlayer::stateChanged, this, [this](QMediaPlayer::State state) {
+        if (!isCurrentMediaLoad()) {
+            return;
+        }
         if (state == QMediaPlayer::PlayingState) {
             m_videoStartedPlayback = true;
             updateMediaUi();
@@ -1951,17 +1977,26 @@ void MediaRenderer::ensureAudioBackend()
     });
 
     connect(m_player, &QMediaPlayer::mutedChanged, this, [this](bool) {
+        if (!isCurrentMediaLoad()) {
+            return;
+        }
         updateVolumeButton();
         updateVolumePopup();
     });
 
     connect(m_player, &QMediaPlayer::volumeChanged, this, [this](int volume) {
+        if (!isCurrentMediaLoad()) {
+            return;
+        }
         m_audioVolume = volume;
         updateVolumeButton();
         updateVolumePopup();
     });
 
     connect(m_player, QOverload<QMediaPlayer::Error>::of(&QMediaPlayer::error), this, [this](QMediaPlayer::Error) {
+        if (!isCurrentMediaLoad()) {
+            return;
+        }
         const QString errorText = m_player && !m_player->errorString().trimmed().isEmpty()
             ? m_player->errorString()
             : QCoreApplication::translate("SpaceLook", "Media preview failed to load.");
@@ -2014,9 +2049,11 @@ void MediaRenderer::destroyAudioBackend()
     m_usingMpvPlayback = false;
     m_usingWindowsAudioFallback = false;
     if (m_player) {
+        m_player->disconnect(this);
         m_player->stop();
+        m_player->setVideoOutput(static_cast<QVideoWidget*>(nullptr));
         m_player->setMedia(QUrl());
-        m_player->deleteLater();
+        delete m_player;
         m_player = nullptr;
     }
     if (m_windowsAudioBackend) {
@@ -2647,6 +2684,11 @@ QString MediaRenderer::formatTime(qint64 milliseconds) const
     return QStringLiteral("%1:%2")
         .arg(minutes, 2, 10, QLatin1Char('0'))
         .arg(seconds, 2, 10, QLatin1Char('0'));
+}
+
+bool MediaRenderer::isCurrentMediaLoad() const
+{
+    return m_loadGuard.isCurrent(m_loadToken, m_info.filePath);
 }
 
 bool MediaRenderer::isMutedState() const

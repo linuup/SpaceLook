@@ -4,6 +4,7 @@
 
 #include "core/hovered_item_info.h"
 #include "renderers/IPreviewRenderer.h"
+#include "renderers/PreviewLoadGuard.h"
 
 class QLabel;
 class OpenWithButton;
@@ -67,12 +68,15 @@ private:
     void updateStatusLabel(const QString& message);
     void updateCenterOverlay();
     QString formatTime(qint64 milliseconds) const;
+    bool isCurrentMediaLoad() const;
     bool isMutedState() const;
     bool isPlaybackPaused() const;
     bool isPlaybackRunning() const;
     bool shouldShowVideoPlaceholder() const;
 
     HoveredItemInfo m_info;
+    PreviewLoadGuard m_loadGuard;
+    PreviewLoadGuard::Token m_loadToken;
     bool m_isSeeking = false;
     bool m_usingMpvVideo = false;
     bool m_usingMpvPlayback = false;

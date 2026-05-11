@@ -48,6 +48,7 @@ private:
     QPixmap renderThumbnailPixmap(int pageIndex) const;
     void scheduleThumbnailPage(int pageIndex);
     void scheduleVisibleThumbnails();
+    void pruneThumbnailCache(int keepFromPage, int keepToPage);
     void renderNextThumbnail();
     bool isCurrentPdfLoad() const;
     void findSearchMatch(bool backwards);

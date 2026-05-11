@@ -29,18 +29,20 @@ public:
     QWidget* widget() override;
     void load(const HoveredItemInfo& info) override;
     void unload() override;
+    void warmUp() override;
     bool reportsLoadingState() const override;
     void setLoadingStateCallback(std::function<void(bool)> callback) override;
+    void setSummaryFallbackCallback(std::function<void(const HoveredItemInfo&, const QString&)> callback) override;
 
 private:
     void applyChrome();
     void showStatusMessage(const QString& message);
     void notifyLoadingState(bool loading);
-    void loadWithQtParser(const HoveredItemInfo& info, const PreviewLoadGuard::Token& loadToken, const QString& handlerError);
 
     HoveredItemInfo m_info;
     PreviewLoadGuard m_loadGuard;
     std::function<void(bool)> m_loadingStateCallback;
+    std::function<void(const HoveredItemInfo&, const QString&)> m_summaryFallbackCallback;
     QWidget* m_headerRow = nullptr;
     QLabel* m_iconLabel = nullptr;
     SelectableTitleLabel* m_titleLabel = nullptr;

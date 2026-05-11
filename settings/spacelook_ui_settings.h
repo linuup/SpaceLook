@@ -30,6 +30,7 @@ class SpaceLookUiSettings : public QObject
     Q_PROPERTY(QString baiduOcrSecretKey READ baiduOcrSecretKey WRITE setBaiduOcrSecretKey NOTIFY ocrSettingsChanged)
     Q_PROPERTY(bool baiduOcrCredentialTestBusy READ baiduOcrCredentialTestBusy NOTIFY ocrSettingsChanged)
     Q_PROPERTY(QString baiduOcrCredentialTestMessage READ baiduOcrCredentialTestMessage NOTIFY ocrSettingsChanged)
+    Q_PROPERTY(bool alwaysUnblockProtectedView READ alwaysUnblockProtectedView WRITE setAlwaysUnblockProtectedView NOTIFY documentPreviewSettingsChanged)
 
 public:
     static SpaceLookUiSettings& instance();
@@ -75,6 +76,8 @@ public:
     bool baiduOcrCredentialTestBusy() const;
     QString baiduOcrCredentialTestMessage() const;
     Q_INVOKABLE void testBaiduOcrCredentials();
+    bool alwaysUnblockProtectedView() const;
+    void setAlwaysUnblockProtectedView(bool enabled);
 
 signals:
     void menuButtonSizeChanged();
@@ -86,6 +89,7 @@ signals:
     void menuVisibilityChanged();
     void languageChanged();
     void ocrSettingsChanged();
+    void documentPreviewSettingsChanged();
 
 private:
     SpaceLookUiSettings();
@@ -120,6 +124,7 @@ private:
     QString m_baiduOcrSecretKey;
     bool m_baiduOcrCredentialTestBusy = false;
     QString m_baiduOcrCredentialTestMessage;
+    bool m_alwaysUnblockProtectedView = false;
     QNetworkAccessManager* m_networkAccessManager = nullptr;
     QNetworkReply* m_baiduOcrCredentialTestReply = nullptr;
 };

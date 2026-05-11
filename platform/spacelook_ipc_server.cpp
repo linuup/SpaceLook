@@ -8,7 +8,14 @@
 
 namespace {
 
-const char kSpaceLookServerName[] = "LinDesk.SpaceLook";
+QString spaceLookServerName()
+{
+#if defined(_WIN64)
+    return QStringLiteral("LinDesk.SpaceLook.x64");
+#else
+    return QStringLiteral("LinDesk.SpaceLook.x86");
+#endif
+}
 
 }
 
@@ -27,7 +34,8 @@ bool SpaceLookIpcServer::sendPreviewRequest(const QString& filePath, int timeout
     }
 
     QLocalSocket socket;
-    socket.connectToServer(QString::fromLatin1(kSpaceLookServerName));
+    const QString serverName = spaceLookServerName();
+    socket.connectToServer(serverName);
     if (!socket.waitForConnected(timeoutMs)) {
         qWarning().noquote() << QStringLiteral("[SpaceLook IPC] failed to connect to running instance: error=\"%1\"")
             .arg(socket.errorString());
@@ -62,7 +70,7 @@ bool SpaceLookIpcServer::startListening()
         return true;
     }
 
-    const QString serverName = QString::fromLatin1(kSpaceLookServerName);
+    const QString serverName = spaceLookServerName();
     if (m_server->listen(serverName)) {
         qDebug().noquote() << QStringLiteral("[SpaceLook IPC] listening for preview requests on \"%1\"").arg(serverName);
         return true;

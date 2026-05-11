@@ -948,6 +948,7 @@ void SpaceLookWindow::toggleExpandedPreview()
     if (m_expandedPreview) {
         applyExpandedPreviewSize(info);
     } else {
+        showNormal();
         applyPreferredSizeForPreview(info);
     }
     if (m_menuBar) {
@@ -1000,6 +1001,9 @@ void SpaceLookWindow::applySummaryPreviewSize(const HoveredItemInfo& info)
     HoveredItemInfo summaryInfo = info;
     summaryInfo.rendererName = QStringLiteral("summary");
     m_expandedPreview = false;
+    if (isMaximized()) {
+        showNormal();
+    }
     applyPreferredSizeForPreview(summaryInfo);
     if (m_menuBar) {
         m_menuBar->syncToWindowState();
@@ -1536,6 +1540,11 @@ void SpaceLookWindow::applyRoundedWindowMask()
         return;
     }
 
+    if (isMaximized()) {
+        clearMask();
+        return;
+    }
+
     const QRect maskRect = m_container
         ? m_container->geometry()
         : rect();
@@ -1739,24 +1748,7 @@ void SpaceLookWindow::applyExpandedPreviewSize(const HoveredItemInfo& info)
 {
     Q_UNUSED(info);
 
-    QScreen* targetScreen = QGuiApplication::screenAt(frameGeometry().center());
-    if (!targetScreen) {
-        targetScreen = screen();
-    }
-    if (!targetScreen) {
-        targetScreen = QGuiApplication::primaryScreen();
-    }
-    if (!targetScreen) {
-        return;
-    }
-
-    const QRect availableGeometry = targetScreen->availableGeometry();
-    const int targetWidth = qMax(960, static_cast<int>(availableGeometry.width() * 0.88));
-    const int targetHeight = qMax(700, static_cast<int>(availableGeometry.height() * 0.88));
     setMinimumSize(820, 560);
-    resize(targetWidth, targetHeight);
-
-    QRect nextGeometry(QPoint(0, 0), size());
-    nextGeometry.moveCenter(availableGeometry.center());
-    move(nextGeometry.topLeft());
+    showMaximized();
+    clearMask();
 }
