@@ -12,8 +12,7 @@
 
 # SpaceLook
 
-SpaceLook is a fast Windows preview tool。
-Hover a file, folder, shortcut, or desktop item. Press `Space`. SpaceLook opens a lightweight preview window near your workflow, then closes just as quickly when you are done.
+choose a file, folder, shortcut, or desktop item, press the Space key to open a lightweight preview window next to your workflow, and press the Space key again to quickly close it.
 
 ## Highlights
 
