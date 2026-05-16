@@ -33,6 +33,7 @@ public:
     int previewStackDepth() const;
     QWidget* activeRendererWidget() const;
     QString activeRendererId() const;
+    HoveredItemInfo activePreviewInfo() const;
 
 protected:
     void resizeEvent(QResizeEvent* event) override;

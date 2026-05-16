@@ -154,6 +154,16 @@ QString PreviewHost::activeRendererId() const
     return renderer ? renderer->rendererId() : QString();
 }
 
+HoveredItemInfo PreviewHost::activePreviewInfo() const
+{
+    if (m_activeIndex < 0 || m_activeIndex >= static_cast<int>(m_previewStack.size())) {
+        return HoveredItemInfo();
+    }
+
+    const PreviewStackEntry* entry = m_previewStack.at(m_activeIndex).get();
+    return entry ? entry->info : HoveredItemInfo();
+}
+
 void PreviewHost::resizeEvent(QResizeEvent* event)
 {
     QWidget::resizeEvent(event);

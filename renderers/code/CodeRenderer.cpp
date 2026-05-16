@@ -21,6 +21,7 @@
 #include <QMenu>
 #include <QPainter>
 #include <QPlainTextEdit>
+#include <QPointer>
 #include <QScrollBar>
 #include <QShortcut>
 #include <QStackedWidget>
@@ -845,7 +846,12 @@ CodeRenderer::CodeRenderer(PreviewState* previewState, QWidget* parent)
         }
         m_previewState->setRendererOverride(rendererId);
         if (SpaceLookWindow* previewWindow = qobject_cast<SpaceLookWindow*>(window())) {
-            previewWindow->refreshCurrentPreview();
+            QPointer<SpaceLookWindow> guardedWindow(previewWindow);
+            QTimer::singleShot(0, previewWindow, [guardedWindow]() {
+                if (guardedWindow) {
+                    guardedWindow->refreshCurrentPreview();
+                }
+            });
         }
     });
 

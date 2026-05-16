@@ -863,7 +863,10 @@ void SpaceLookWindow::refreshCurrentPreview()
         return;
     }
 
-    HoveredItemInfo info = m_previewState->hoveredItem();
+    HoveredItemInfo info = m_previewHost->activePreviewInfo();
+    if (!info.valid) {
+        info = m_previewState->hoveredItem();
+    }
     if (!info.valid) {
         return;
     }
@@ -1284,11 +1287,17 @@ bool SpaceLookWindow::nativeEvent(const QByteArray& eventType, void* message, lo
 
 QString SpaceLookWindow::currentPreviewPath() const
 {
-    if (!m_previewState) {
+    if (!m_previewState && !m_previewHost) {
         return QString();
     }
 
-    const HoveredItemInfo info = m_previewState->hoveredItem();
+    HoveredItemInfo info;
+    if (m_previewHost) {
+        info = m_previewHost->activePreviewInfo();
+    }
+    if (!info.valid && m_previewState) {
+        info = m_previewState->hoveredItem();
+    }
     if (!info.filePath.trimmed().isEmpty()) {
         return info.filePath.trimmed();
     }

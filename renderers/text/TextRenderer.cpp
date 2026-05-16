@@ -16,6 +16,7 @@
 #include <QPainter>
 #include <QPaintEvent>
 #include <QPlainTextEdit>
+#include <QPointer>
 #include <QResizeEvent>
 #include <QScrollBar>
 #include <QShortcut>
@@ -476,7 +477,12 @@ TextRenderer::TextRenderer(PreviewState* previewState, QWidget* parent)
         }
         m_previewState->setRendererOverride(rendererId);
         if (SpaceLookWindow* previewWindow = qobject_cast<SpaceLookWindow*>(window())) {
-            previewWindow->refreshCurrentPreview();
+            QPointer<SpaceLookWindow> guardedWindow(previewWindow);
+            QTimer::singleShot(0, previewWindow, [guardedWindow]() {
+                if (guardedWindow) {
+                    guardedWindow->refreshCurrentPreview();
+                }
+            });
         }
     });
 
